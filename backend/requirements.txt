@@ -1,20 +1,20 @@
 # Flask and extensions
 Flask==3.0.0
 flask-pymongo==2.3.0
-flask-cors==4.0.0
+flask-cors==6.0.0
 flask-limiter==3.5.0
 flask-socketio==5.3.6
-Werkzeug==3.0.1
+Werkzeug==3.1.4
 
 # WebSocket
-python-socketio==5.10.0
+python-socketio==5.14.0
 
 # Database
-pymongo==4.6.1
+pymongo==4.6.3
 
 # HTTP client
-requests==2.31.0
-urllib3==2.1.0
+requests==2.32.4
+urllib3==2.6.0
 
 # Scheduler
 APScheduler==3.10.4
@@ -27,7 +27,7 @@ maxminddb==2.5.2
 python-dotenv==1.0.0
 
 # Production server
-gunicorn==21.2.0
+gunicorn==22.0.0
 
 # Development
 pytest==7.4.3
