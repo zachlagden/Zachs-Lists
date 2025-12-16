@@ -1,0 +1,16 @@
+whitelist.txt:
+1. Exact match: domain.com - matches only that exact domain
+2. Subdomain match: @@domain.com - matches domain.com AND all subdomains (*.domain.com)
+3. Wildcard: *.domain.com - matches anything with that suffix
+4. Regex: /pattern/ - regex matching
+Lines starting with # are comments (skipped).
+
+blocklists.conf:
+1. Full format: url|name|category
+2. URL + name: url|name
+3. Just URL: url (name derived from domain)
+
+a blocklist:
+1. Hosts format: 0.0.0.0 domain.com or 127.0.0.1 domain.com
+2. Adblock format: ||domain.com^ or ||domain.com^$options
+3. Plain domain: domain.com

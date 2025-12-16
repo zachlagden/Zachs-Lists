@@ -1,0 +1,28 @@
+# Claude Code
+.claude/
+
+# Archives
+.archive/
+
+# Data files (large, user-specific)
+data/cache/*
+data/default/output/*
+data/users/*
+data/GeoLite2-City.mmdb
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment files (contain secrets)
+.env
+backend/.env
+frontend/.env
+
+# Frontend build artifacts
+frontend/dist/
+frontend/node_modules/
+
+# Rust build artifacts
+rust-worker/target/

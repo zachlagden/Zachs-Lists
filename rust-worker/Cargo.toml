@@ -1,0 +1,58 @@
+[package]
+name = "blocklist-worker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Zach Lagden"]
+description = "High-performance blocklist worker for lists.zachlagden.uk"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# MongoDB
+mongodb = "3"
+bson = { version = "2", features = ["chrono-0_4"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["gzip", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Domain processing
+regex = "1"
+rayon = "1"
+
+# Compression
+flate2 = "1"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Signal handling
+ctrlc = { version = "3", features = ["termination"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Environment
+dotenvy = "0.15"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
