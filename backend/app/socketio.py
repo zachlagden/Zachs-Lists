@@ -9,11 +9,11 @@ from flask import request
 logger = logging.getLogger(__name__)
 
 # Create Socket.IO instance
-# Use threading mode for compatibility with Flask dev server and Python 3.13
-# For production with gunicorn, you can switch to gevent if needed
+# async_mode="gevent" for production with gunicorn gevent workers
+# Falls back gracefully in development
 socketio = SocketIO(
     cors_allowed_origins="*",
-    async_mode="threading",
+    async_mode="gevent",
     logger=True,
     engineio_logger=True,
     ping_timeout=60,

@@ -184,11 +184,21 @@ impl JobRepository {
         Ok(())
     }
 
-    /// Skip a job
+    /// Skip a job (no changes detected)
     pub async fn skip(&self, job_id: &ObjectId, reason: String) -> Result<()> {
         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-        let result = JobResult::skipped(reason);
-        let result_doc = bson::to_document(&result)?;
+
+        // Create a minimal result with skip_reason
+        let result_doc = doc! {
+            "sources_processed": 0_i64,
+            "sources_failed": 0_i64,
+            "total_domains": 0_i64,
+            "unique_domains": 0_i64,
+            "whitelisted_removed": 0_i64,
+            "output_files": [],
+            "errors": [],
+            "skip_reason": &reason,
+        };
 
         self.collection
             .update_one(

@@ -36,9 +36,6 @@ def create_app(config_name: str = None) -> Flask:
     # Register blueprints
     register_blueprints(app)
 
-    # Create data directories
-    create_directories(app)
-
     # Initialize scheduler (not in testing)
     if not app.config.get("TESTING"):
         init_scheduler(app)
@@ -77,13 +74,14 @@ def register_blueprints(app: Flask) -> None:
     """Register Flask blueprints."""
     from app.blueprints.auth import auth_bp
     from app.blueprints.user import user_bp
-    from app.blueprints.lists import lists_bp
+    from app.blueprints.lists import lists_public_bp, lists_api_bp
     from app.blueprints.admin import admin_bp
     from app.blueprints.analytics import analytics_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(user_bp, url_prefix="/api/user")
-    app.register_blueprint(lists_bp, url_prefix="/api")  # Handles /api/lists and /api/u
+    app.register_blueprint(lists_public_bp)                    # No prefix - handles /lists/ and /u/ file serving
+    app.register_blueprint(lists_api_bp, url_prefix="/api")    # /api prefix - handles /api/lists and /api/browse
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(analytics_bp, url_prefix="/api/analytics")
 
@@ -91,20 +89,6 @@ def register_blueprints(app: Flask) -> None:
     @app.route("/health")
     def health_check():
         return {"status": "healthy"}
-
-
-def create_directories(app: Flask) -> None:
-    """Create necessary data directories."""
-    directories = [
-        app.config["DATA_DIR"],
-        app.config["CACHE_DIR"],
-        app.config["USERS_DIR"],
-        app.config["DEFAULT_DIR"],
-        os.path.join(app.config["DEFAULT_DIR"], "config"),
-        os.path.join(app.config["DEFAULT_DIR"], "output"),
-    ]
-    for directory in directories:
-        os.makedirs(directory, exist_ok=True)
 
 
 def init_scheduler(app: Flask) -> None:

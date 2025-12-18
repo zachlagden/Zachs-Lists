@@ -115,7 +115,7 @@ def get_lists(user: User):
                 ),
             },
             "limits": user.limits,
-            "remaining_manual_updates": user.get_remaining_manual_updates(),
+            "remaining_updates": user.get_remaining_manual_updates(),
         }
     )
 
@@ -144,6 +144,8 @@ def toggle_visibility(user: User, name: str):
 @login_required
 def trigger_build(user: User):
     """Trigger manual build."""
+    from bson import ObjectId
+
     # Check if user has a config
     config = user.get_config("blocklists.conf")
     if not config or not config.strip():
@@ -157,6 +159,34 @@ def trigger_build(user: User):
                     "error": "Weekly manual update limit reached",
                     "remaining": 0,
                     "resets_at": user.stats["week_reset_at"].isoformat(),
+                }
+            ),
+            429,
+        )
+
+    # Check if user already has an active job
+    if Job.has_active_job_for_user(ObjectId(user.id)):
+        return (
+            jsonify(
+                {
+                    "error": "A build is already in progress",
+                    "remaining_updates": user.get_remaining_manual_updates(),
+                }
+            ),
+            429,
+        )
+
+    # Check cooldown (5 minutes between manual builds)
+    cooldown_remaining = Job.get_cooldown_remaining(ObjectId(user.id), cooldown_minutes=5)
+    if cooldown_remaining > 0:
+        minutes = cooldown_remaining // 60
+        seconds = cooldown_remaining % 60
+        return (
+            jsonify(
+                {
+                    "error": f"Please wait {minutes}m {seconds}s before triggering another build",
+                    "cooldown_remaining": cooldown_remaining,
+                    "remaining_updates": user.get_remaining_manual_updates(),
                 }
             ),
             429,

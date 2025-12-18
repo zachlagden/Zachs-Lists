@@ -11,7 +11,7 @@ export interface User {
   stats: UserStats;
   lists: UserList[];
   notifications: Notification[];
-  remaining_manual_updates: number;
+  remaining_updates: number;
   created_at: string;
 }
 

@@ -1,0 +1,898 @@
+# Zach's Lists - Default Whitelist
+# Last Updated: 15/12/25 - 23:32 - Hi Everyone, Merry Christmas!
+
+# ============================================================================
+# GOOGLE SERVICES
+# ============================================================================
+# Core Google functionality
+clients.google.com
+clients1.google.com
+clients2.google.com
+clients3.google.com
+clients4.google.com
+clients5.google.com
+clients6.google.com
+accounts.google.com
+dl.google.com
+cse.google.com
+
+# YouTube
+s.youtube.com
+video-stats.l.google.com
+www.googleapis.com
+youtubei.googleapis.com
+oauthaccountmanager.googleapis.com
+i.ytimg.com
+i1.ytimg.com
+s.ytimg.com
+yt3.ggpht.com
+manifest.googlevideo.com
+redirector.googlevideo.com
+www.youtube-nocookie.com
+youtube-nocookie.com
+youtu.be
+
+# Google Play Store
+android.clients.google.com
+play.googleapis.com
+
+# Google Keep & Drive
+reminders-pa.googleapis.com
+firestore.googleapis.com
+
+# Google Fonts
+gstaticadssl.l.google.com
+fonts.gstatic.com
+fonts.googleapis.com
+
+# Gmail
+googleapis.l.google.com
+
+# Android connectivity check
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+
+# Android TV
+redirector.gvt1.com
+
+# Google Push Notifications (WhatsApp, etc)
+mtalk.google.com
+alt1-mtalk.google.com
+alt2-mtalk.google.com
+alt3-mtalk.google.com
+alt4-mtalk.google.com
+alt5-mtalk.google.com
+alt6-mtalk.google.com
+alt7-mtalk.google.com
+alt8-mtalk.google.com
+
+# Other Google
+gstatic.com
+googleapis.com
+appspot-preview.l.google.com
+geo3.ggpht.com
+instantmessaging-pa.googleapis.com
+
+# ============================================================================
+# GOOGLE - ULTIMATE BLOCKLIST COMPATIBILITY
+# ============================================================================
+# Device provisioning (needed for Google/Nest devices)
+device-provisioning.googleapis.com
+
+# Google Analytics (needed for some sites to function)
+# Only whitelist if specific sites break
+#OPTIONAL: www.google-analytics.com
+#OPTIONAL: ssl.google-analytics.com
+
+# ============================================================================
+# MICROSOFT / WINDOWS / XBOX
+# ============================================================================
+# Windows connectivity test
+www.msftncsi.com
+www.msftconnecttest.com
+msftncsi.com
+dns.msftncsi.com
+ipv6.msftncsi.com
+
+# Windows Update
+sls.update.microsoft.com.akadns.net
+fe3.delivery.dsp.mp.microsoft.com.nsatc.net
+tlu.dl.delivery.mp.microsoft.com
+dl.delivery.mp.microsoft.com
+geo-prod.do.dsp.mp.microsoft.com
+displaycatalog.mp.microsoft.com
+tsfe.trafficshaping.dsp.mp.microsoft.com
+
+# Microsoft Store
+storeedgefd.dsx.mp.microsoft.com
+
+# Microsoft Web Services
+outlook.office365.com
+products.office.com
+c.s-microsoft.com
+i.s-microsoft.com
+login.live.com
+login.microsoftonline.com
+officeclient.microsoft.com
+office.com
+office.net
+office365.com
+microsoftonline.com
+onedrive.live.com
+outlook.live.com
+g.live.com
+live.com
+
+# Microsoft Edge
+msedge.api.cdp.microsoft.com
+
+# Xbox Live Core
+clientconfig.passport.net
+xbox.ipv6.microsoft.com
+device.auth.xboxlive.com
+title.mgt.xboxlive.com
+xsts.auth.xboxlive.com
+title.auth.xboxlive.com
+ctldl.windowsupdate.com
+attestation.xboxlive.com
+xboxexperiencesprod.experimentation.xboxlive.com
+xflight.xboxlive.com
+cert.mgt.xboxlive.com
+xkms.xboxlive.com
+def-vef.xboxlive.com
+notify.xboxlive.com
+help.ui.xboxlive.com
+licensing.xboxlive.com
+eds.xboxlive.com
+www.xboxlive.com
+
+# Xbox Messaging
+client-s.gateway.messenger.live.com
+s.gateway.messenger.live.com
+
+# Xbox Store
+arc.msn.com
+
+# Xbox EA Play
+activity.windows.com
+
+# Windows Defender
+wdcp.microsoft.com
+wdcpalt.microsoft.com
+
+# Windows Continuum
+continuum.dds.microsoft.com
+
+# Skype
+apps.skype.com
+pricelist.skype.com
+ui.skype.com
+*.skype.com
+
+# Bing Maps
+dev.virtualearth.net
+ecn.dev.virtualearth.net
+t0.ssl.ak.dynamic.tiles.virtualearth.net
+t0.ssl.ak.tiles.virtualearth.net
+
+# ============================================================================
+# MICROSOFT - ULTIMATE BLOCKLIST COMPATIBILITY
+# ============================================================================
+# Windows Spotlight (lock screen images)
+ris.api.iris.microsoft.com
+api.msn.com
+assets.msn.com
+c.msn.com
+ntp.msn.com
+srtb.msn.com
+www.msn.com
+
+# Xbox Live Achievements & Activity History
+v10.events.data.microsoft.com
+v20.events.data.microsoft.com
+settings-win.data.microsoft.com
+
+# Windows Settings & KGL (Known Game List) updates
+settings.data.microsoft.com
+
+# Windows Insider
+insideruser.microsoft.com
+
+# Microsoft SSO (Single Sign-On) on Android
+mobile.events.data.microsoft.com
+
+# Azure Portal / Application Insights
+dc.services.visualstudio.com
+rt.services.visualstudio.com
+
+# Office Diagnostics & Feedback
+config.edge.skype.com
+
+# Microsoft Store app downloads
+assets1.xboxlive.com
+assets2.xboxlive.com
+dlassets.xboxlive.com
+dlassets2.xboxlive.com
+
+# ============================================================================
+# APPLE
+# ============================================================================
+# Apple ID
+appleid.apple.com
+
+# Apple Music & iTunes
+itunes.apple.com
+s.mzstatic.com
+
+# iOS Weather
+gsp-ssl.ls.apple.com
+gsp-ssl.ls-apple.com.akadns.net
+
+# Apple captive portal
+captive.apple.com
+gsp1.apple.com
+www.apple.com
+www.appleiphonecell.com
+
+# OCSP (certificate validation)
+ocsp.apple.com
+
+# App Store
+ax.phobos.apple.com.edgesuite.net
+
+# ============================================================================
+# META / FACEBOOK - ULTIMATE BLOCKLIST COMPATIBILITY
+# ============================================================================
+# Core Facebook functionality (not tracking)
+upload.facebook.com
+graph.facebook.com
+b-graph.facebook.com
+connect.facebook.com
+api.facebook.com
+www.facebook.com
+web.facebook.com
+rupload.facebook.com
+l.facebook.com
+fb.me
+m.facebook.com
+mobile.facebook.com
+touch.facebook.com
+mbasic.facebook.com
+
+# Facebook CDN (required for images/content)
+fbcdn.net
+*.fbcdn.net
+scontent.fbcdn.net
+static.fbcdn.net
+video.fbcdn.net
+
+# Facebook Messenger
+edge-mqtt.facebook.com
+mqtt.c10r.facebook.com
+edge-chat.facebook.com
+edge-chat.messenger.com
+l.messenger.com
+star.c10r.facebook.com
+star-mini.c10r.facebook.com
+b-api.facebook.com
+portal.fb.com
+cdn.fbsbx.com
+bigzipfiles.facebook.com
+messenger.com
+www.messenger.com
+
+# Instagram (if using)
+i.instagram.com
+instagram.com
+www.instagram.com
+graph.instagram.com
+api.instagram.com
+
+# WhatsApp
+wa.me
+www.wa.me
+whatsapp.com
+www.whatsapp.com
+web.whatsapp.com
+w1.web.whatsapp.com
+w2.web.whatsapp.com
+w3.web.whatsapp.com
+w4.web.whatsapp.com
+w5.web.whatsapp.com
+w6.web.whatsapp.com
+w7.web.whatsapp.com
+w8.web.whatsapp.com
+w9.web.whatsapp.com
+pps.whatsapp.net
+mmg.whatsapp.net
+media.whatsapp.com
+static.whatsapp.net
+
+# WhatsApp avatars, helpcenter, video effects (blocked in Ultimate)
+graph.whatsapp.com
+dit.whatsapp.net
+crashlogs.whatsapp.net
+
+# Facebook/Meta Pixel & Analytics (needed for some site functionality)
+# These are trackers but some sites break without them
+pixel.facebook.com
+an.facebook.com
+ads.facebook.com
+
+# ============================================================================
+# AMAZON / AWS
+# ============================================================================
+amazonaws.com
+s3.amazonaws.com
+cloudsync-prod.s3.amazonaws.com
+reddit-uploaded-media.s3-accelerate.amazonaws.com
+whispersystems-textsecure-attachments.s3-accelerate.amazonaws.com
+
+# Amazon browsing history (blocked in Ultimate)
+# Uncomment if you use Amazon browsing history feature
+#OPTIONAL: fls-na.amazon.com
+#OPTIONAL: unagi.amazon.com
+#OPTIONAL: unagi-na.amazon.com
+
+# ============================================================================
+# CDN & INFRASTRUCTURE
+# ============================================================================
+# Akamai
+akamaihd.net
+akamaitechnologies.com
+akamaized.net
+
+# Cloudflare
+cdn.cloudflare.net
+cdnjs.cloudflare.com
+
+# jsDelivr
+jsdelivr.net
+
+# jQuery
+jquery.com
+
+# Cloudinary
+res.cloudinary.com
+
+# Imgix
+imgix.net
+placeholdit.imgix.net
+
+# Gravatar
+gravatar.com
+
+# Fastly
+reddit.map.fastly.net
+
+# General CDNs
+aspnetcdn.com
+
+# Highwinds CDN (used by various sites)
+hwcdn.net
+*.hwcdn.net
+
+# ============================================================================
+# SOCIAL MEDIA
+# ============================================================================
+# Twitter/X
+t.co
+twitter.com
+upload.twitter.com
+api.twitter.com
+mobile.twitter.com
+twimg.com
+*.twimg.com
+x.com
+api.x.com
+
+# Reddit
+styles.redditmedia.com
+www.redditstatic.com
+www.redditmedia.com
+reddit.com
+www.reddit.com
+old.reddit.com
+new.reddit.com
+oauth.reddit.com
+
+# Signal
+ud-chat.signal.org
+chat.signal.org
+storage.signal.org
+signal.org
+www.signal.org
+updates2.signal.org
+textsecure-service-whispersystems.org
+giphy-proxy-production.whispersystems.org
+cdn.signal.org
+d83eunklitikj.cloudfront.net
+api.directory.signal.org
+contentproxy.signal.org
+turn1.whispersystems.org
+souqcdn.com
+cms.souqcdn.com
+
+# Telegram (if using)
+telegram.org
+t.me
+telegram.me
+web.telegram.org
+*.telegram.org
+
+# Discord (if using)
+discord.com
+discordapp.com
+discord.gg
+cdn.discordapp.com
+media.discordapp.net
+images-ext-1.discordapp.net
+images-ext-2.discordapp.net
+gateway.discord.gg
+
+# ============================================================================
+# STREAMING & MEDIA
+# ============================================================================
+# Plex
+plex.tv
+tvdb2.plex.tv
+pubsub.plex.bz
+proxy.plex.bz
+proxy02.pop.ord.plex.bz
+cpms.spop10.ams.plex.bz
+meta-db-worker02.pop.ric.plex.bz
+meta.plex.bz
+tvthemes.plexapp.com.cdn.cloudflare.net
+tvthemes.plexapp.com
+106c06cd218b007d-b1e8a1331f68446599e96a4b46a050f5.ams.plex.services
+meta.plex.tv
+cpms35.spop10.ams.plex.bz
+proxy.plex.tv
+metrics.plex.tv
+pubsub.plex.tv
+status.plex.tv
+www.plex.tv
+node.plexapp.com
+nine.plugins.plexapp.com
+staging.plex.tv
+app.plex.tv
+o1.email.plex.tv
+o2.sg0.plex.tv
+dashboard.plex.tv
+my.plexapp.com
+
+# Plex metadata providers
+thetvdb.com
+themoviedb.com
+chtbl.com
+
+# Spotify
+spclient.wg.spotify.com
+apresolve.spotify.com
+api-tv.spotify.com
+
+# Brightcove (video player)
+brightcove.net
+cdn.vidible.tv
+delivery.vidible.tv
+edge.api.brightcove.com
+f1.media.brightcove.com
+img.vidible.tv
+players.brightcove.net
+secure.brightcove.com
+videos.vidible.tv
+
+# TED
+app-api.ted.com
+hls.ted.com
+tedcdn.com
+
+# Libsyn (podcasts)
+traffic.libsyn.com
+
+# Last.fm
+lastfm-img2.akamaized.net
+ws.audioscrobbler.com
+
+# NPR
+npr-news.streaming.adswizz.com
+
+# CBSI / CBS
+om.cbsi.com
+vidtech.cbsinteractive.com
+
+# Giphy
+giphy.com
+media.giphy.com
+media0.giphy.com
+media1.giphy.com
+media2.giphy.com
+media3.giphy.com
+media4.giphy.com
+
+# Weather videos
+v.w-x.co
+
+# NCAA
+live-manifests-aka.warnermediacdn.com
+
+# Conviva (video analytics - needed for some players)
+zee.cws.conviva.com
+pings.conviva.com
+cws.conviva.com
+livepassdl.conviva.com
+
+# Rumble
+*.rmbl.ws
+
+# Netflix (if blocked)
+netflix.com
+*.netflix.com
+*.nflxvideo.net
+
+# ============================================================================
+# GAMING
+# ============================================================================
+# NVIDIA GeForce Experience
+gfwsl.geforce.com
+
+# Rockstar / GTA Online
+prod.telemetry.ros.rockstargames.com
+
+# Epic Games (required for purchases/2FA)
+tracking.epicgames.com
+
+# EA / Origin
+cdn.optimizely.com
+split.io
+
+# PlayStation
+telemetry-console.api.playstation.com
+
+# Steam
+steamcommunity.com
+store.steampowered.com
+api.steampowered.com
+*.steamcontent.com
+
+# ============================================================================
+# PRODUCTIVITY & CLOUD STORAGE
+# ============================================================================
+# Dropbox
+dl.dropbox.com
+dl.dropboxusercontent.com
+ns1.dropbox.com
+ns2.dropbox.com
+
+# Sonarr
+services.sonarr.tv
+skyhook.sonarr.tv
+download.sonarr.tv
+apt.sonarr.tv
+forums.sonarr.tv
+
+# GitHub
+github.com
+github.io
+raw.githubusercontent.com
+gist.github.com
+api.github.com
+*.githubusercontent.com
+
+# GitLab
+gitlab.com
+*.gitlab.com
+
+# Intercom (chat widgets)
+intercom.io
+
+# Drift (chat widgets)
+drift.com
+driftt.com
+
+# Tawk (chat widgets)
+tawk.to
+
+# SurveyMonkey
+secure.surveymonkey.com
+
+# Embedly
+cdn.embedly.com
+
+# Placeholders (web design)
+placehold.it
+
+# Notion
+notion.so
+www.notion.so
+api.notion.com
+
+# ============================================================================
+# DYNAMIC DNS
+# ============================================================================
+dynupdate.no-ip.com
+no-ip.com
+www.no-ip.com
+dataplicity.com
+www.dataplicity.com
+
+# ============================================================================
+# SECURITY & CERTIFICATES
+# ============================================================================
+# Symantec certificates
+sa.symcb.com
+*.symcb.com
+
+# Malwarebytes
+keystone.mwbsys.com
+
+# Avangate (software licensing)
+secure.avangate.com
+
+# Mozilla Tracking Protection updates
+tracking-protection.cdn.mozilla.net
+
+# ============================================================================
+# NTP (Time Sync)
+# ============================================================================
+2.android.pool.ntp.org
+time.windows.com
+time.google.com
+time.apple.com
+time.cloudflare.com
+
+# ============================================================================
+# SHOPPING & RETAIL
+# ============================================================================
+# Target
+weeklyad.target.com
+m.weeklyad.target.com
+weeklyad.target.com.edgesuite.net
+
+# General retail
+s.shopify.com
+
+# GoDaddy webmail
+imagesak.secureserver.net
+
+# Marketwatch
+s.marketwatch.com
+
+# Lowe's checkout
+assets.adobedtm.com
+
+# Home Depot checkout
+nexus.ensighten.com
+
+# ============================================================================
+# LINK SHORTENERS (Commonly in legitimate use)
+# ============================================================================
+t.ly
+bit.ly
+www.bit.ly
+ow.ly
+tinyurl.com
+goo.gl
+is.gd
+cutt.ly
+
+# ============================================================================
+# IP LOOKUP (Needed by some apps)
+# ============================================================================
+api.ipify.org
+ipinfo.io
+ip-api.com
+pro.ip-api.com
+
+# ============================================================================
+# COOKIE CONSENT / GDPR
+# ============================================================================
+# These are needed for cookie banners to work properly
+consent.cookiebot.eu
+cookiebot.com
+consent.cookiebot.com
+consentcdn.cookiebot.com
+
+# OneTrust
+cdn.cookielaw.org
+optanon.blob.core.windows.net
+geolocation.onetrust.com
+
+# ============================================================================
+# MISCELLANEOUS SERVICES
+# ============================================================================
+# XKCD
+imgs.xkcd.com
+
+# RLJE (streaming)
+api.rlje.net
+
+# BazaarVoice (reviews)
+display.ugc.bazaarvoice.com
+
+# RPX (social login)
+widget-cdn.rpxnow.com
+
+# JW Player
+ssl.p.jwpcdn.com
+
+# WordPress
+s1.wp.com
+wp.com
+
+# 1drv / OneDrive
+1drv.com
+
+# Canon printers firmware
+gdlp01.c-wss.com
+
+# DPD tracking
+tracking.dpd.de
+
+# ============================================================================
+# BANKING & FINANCE (Add your specific bank if needed)
+# ============================================================================
+# TSB Mobile
+h-sdk.online-metrix.net
+check2.tsb.co.uk
+
+# Citizen's Bank
+p11.techlab-cdn.com
+
+# OLA Money
+logs.juspay.in
+
+# ThreatMetrix (fraud prevention - many banks use this)
+*.online-metrix.net
+
+# ============================================================================
+# REGIONAL - NETHERLANDS
+# ============================================================================
+cds.s5x3j6q5.hwcdn.net
+
+# ============================================================================
+# REGIONAL - SWEDEN
+# ============================================================================
+# SVT Play
+analytics.svt.se
+
+# ============================================================================
+# REGIONAL - GERMANY
+# ============================================================================
+# O2 online (blocked in Ultimate)
+static2.o9.de
+*.o9.de
+
+# ============================================================================
+# FOOD & RESTAURANTS
+# ============================================================================
+# Burger King
+appboy-images.com
+rest.iad-03.braze.com
+
+# Punchh (loyalty apps)
+mobileandroidapi.punchh.com
+
+# ============================================================================
+# TV SERVICES
+# ============================================================================
+# DirectTV
+directvnow.com
+directvapplications.hb.omtrdc.net
+s.zkcdn.net
+js.maxmind.com
+
+# WatchESPN
+fpdownload.adobe.com
+entitlement.auth.adobe.com
+
+# Hulu streaming
+ads-a-darwin.hulustream.com
+ads-fa-darwin.hulustream.com
+
+# ============================================================================
+# CAPTIVE PORTAL DETECTION
+# ============================================================================
+# Android/Chrome
+connectivitycheck.android.com
+connectivitycheck.gstatic.com
+
+# Windows/Microsoft
+msftncsi.com
+www.msftncsi.com
+www.msftconnecttest.com
+ipv6.msftncsi.com
+
+# Apple
+captive.apple.com
+
+# Firefox
+detectportal.firefox.com
+
+# ============================================================================
+# LOCATION / GEO SERVICES (blocked in Ultimate)
+# ============================================================================
+# MaxMind GeoIP (used by many sites for regional content)
+js.maxmind.com
+geoip.maxmind.com
+www.maxmind.com
+
+# IP geolocation services
+ip-api.com
+pro.ip-api.com
+ipinfo.io
+ipapi.co
+freegeoip.app
+api.ipgeolocation.io
+
+# ============================================================================
+# ANALYTICS THAT BREAK SITES (use sparingly)
+# ============================================================================
+# These are trackers, but some sites completely break without them
+# Only uncomment if specific sites don't work
+
+# Google Analytics (Jackbox.tv, some e-commerce checkouts)
+#OPTIONAL: www.google-analytics.com
+#OPTIONAL: ssl.google-analytics.com
+#OPTIONAL: analytics.google.com
+
+# Segment (many SaaS apps use this)
+#OPTIONAL: api.segment.io
+#OPTIONAL: cdn.segment.com
+
+# Mixpanel
+#OPTIONAL: api.mixpanel.com
+#OPTIONAL: cdn.mxpnl.com
+
+# Amplitude
+#OPTIONAL: api.amplitude.com
+#OPTIONAL: cdn.amplitude.com
+
+# ============================================================================
+# REGEX PATTERNS
+# ============================================================================
+# Google Push Notifications (all alternates)
+/^((alt)[0-9](-))?mtalk\.google\.com$/
+
+# Reddit thumbnails
+/[a-z]\.thumbs\.redditmedia\.com/
+
+# Reddit domains
+/(\.|^)redd\.it$/
+/(\.|^)reddit\.com$/
+
+# Twitter images
+/(\.|^)twimg\.com$/
+
+# WhatsApp CDN
+/^whatsapp-cdn-shv-[0-9]{2}-[a-z]{3}[0-9]\.fbcdn\.net$/
+/^((www|(w[0-9]\.)?web|media((-[a-z]{3}|\.[a-z]{4})[0-9]{1,2}-[0-9](\.|-)(cdn|fna))?)\.)?whatsapp\.(com|net)$/
+
+# Facebook external content
+/^external-[a-z]{3}[0-9]+-[0-9]+\.xx\.fbcdn\.net$/
+/^scontent(-[a-z]{3}[0-9]+-[0-9]+)?\.xx\.fbcdn\.net$/
+/^video(-[a-z]{3}[0-9]+-[0-9]+)?\.xx\.fbcdn\.net$/
+
+# Instagram CDN
+/^scontent(-[a-z]{3}[0-9]+-[0-9]+)?\.cdninstagram\.com$/
+
+# Microsoft telemetry subdomains (specific ones needed for functionality)
+/^v[0-9]+\.events\.data\.microsoft\.com$/
+
+# ============================================================================
+# WILDCARD PATTERNS
+# ============================================================================
+*.twimg.com
+*.symcb.com
+*.fbcdn.net
+*.rmbl.ws
+*.online-metrix.net
+*.skype.com
+*.hwcdn.net
+*.o9.de
+*.githubusercontent.com
+*.steamcontent.com
+*.nflxvideo.net
+*.netflix.com
+*.telegram.org
+*.gitlab.com

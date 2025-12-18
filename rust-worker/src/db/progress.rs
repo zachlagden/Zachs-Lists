@@ -319,19 +319,4 @@ impl JobResult {
             skip_reason: None,
         }
     }
-
-    /// Create a skip result
-    pub fn skipped(reason: String) -> Self {
-        Self {
-            sources_processed: 0,
-            sources_failed: 0,
-            total_domains: 0,
-            unique_domains: 0,
-            whitelisted_removed: 0,
-            output_files: Vec::new(),
-            categories: std::collections::HashMap::new(),
-            errors: Vec::new(),
-            skip_reason: Some(reason),
-        }
-    }
 }

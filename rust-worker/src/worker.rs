@@ -61,6 +61,7 @@ impl Worker {
                     let processor = match JobProcessor::new(
                         self.config.clone(),
                         JobRepository::new(&self.db, self.config.worker_id.clone()),
+                        &self.db,
                     ) {
                         Ok(p) => p,
                         Err(e) => {

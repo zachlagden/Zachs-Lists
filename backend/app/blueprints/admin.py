@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.job import Job
 from app.models.cache import CacheMetadata
 from app.models.analytics import Analytics
+from app.models.system_config import SystemConfig
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -388,44 +389,26 @@ def get_user_growth(admin: User):
 @admin_bp.route("/default/config", methods=["GET"])
 @admin_required
 def get_default_config(admin: User):
-    """Get default lists configuration."""
-    default_dir = current_app.config["DEFAULT_DIR"]
-    config_path = os.path.join(default_dir, "config", "blocklists.conf")
-    whitelist_path = os.path.join(default_dir, "config", "whitelist.txt")
-
-    config = ""
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = f.read()
-
-    whitelist = ""
-    if os.path.exists(whitelist_path):
-        with open(whitelist_path, "r", encoding="utf-8") as f:
-            whitelist = f.read()
-
-    return jsonify({"config": config, "whitelist": whitelist})
+    """Get default lists configuration from MongoDB."""
+    config_data = SystemConfig.get_default_config()
+    return jsonify({
+        "config": config_data["blocklists"],
+        "whitelist": config_data["whitelist"],
+    })
 
 
 @admin_bp.route("/default/config", methods=["PUT"])
 @admin_required
 def update_default_config(admin: User):
-    """Update default lists configuration."""
+    """Update default lists configuration in MongoDB."""
     data = request.get_json()
 
-    default_dir = current_app.config["DEFAULT_DIR"]
-    config_dir = os.path.join(default_dir, "config")
-    os.makedirs(config_dir, exist_ok=True)
-
     if "config" in data:
-        config_path = os.path.join(config_dir, "blocklists.conf")
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(data["config"])
+        SystemConfig.update_default_blocklists(data["config"], admin.username)
         current_app.logger.info(f"Admin {admin.username} updated default blocklist config")
 
     if "whitelist" in data:
-        whitelist_path = os.path.join(config_dir, "whitelist.txt")
-        with open(whitelist_path, "w", encoding="utf-8") as f:
-            f.write(data["whitelist"])
+        SystemConfig.update_default_whitelist(data["whitelist"], admin.username)
         current_app.logger.info(f"Admin {admin.username} updated default whitelist")
 
     return jsonify({"success": True})

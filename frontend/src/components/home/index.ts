@@ -1,9 +1,11 @@
-export { default as HeroSection } from './HeroSection';
-export { default as TerminalPreview } from './TerminalPreview';
-export { default as ValuePropsSection } from './ValuePropsSection';
-export { default as BentoCard } from './BentoCard';
-export { default as StatsSection } from './StatsSection';
+// Neo-Industrial Design Components
+export { default as CinematicHero } from './CinematicHero';
+export { default as ProblemSection } from './ProblemSection';
+export { default as SolutionJourney } from './SolutionJourney';
+export { default as TechCredibility } from './TechCredibility';
+export { default as SupportSection } from './SupportSection';
+export { default as RustBadge } from './RustBadge';
+export { RustInline } from './RustBadge';
 export { default as ListsShowcase } from './ListsShowcase';
 export { default as CTASection } from './CTASection';
 export { default as Footer } from './Footer';
-export { default as RotatingText } from './RotatingText';

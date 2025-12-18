@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
     // Clean up stale cache on startup
     info!("Cleaning up stale cache entries...");
-    let downloader = downloader::Downloader::new(config.clone())?;
+    let downloader = downloader::Downloader::new(config.clone(), &db)?;
     match downloader.cleanup_cache().await {
         Ok(cleaned) => {
             if cleaned > 0 {

@@ -131,49 +131,73 @@ class User:
     def updated_at(self) -> datetime:
         return self._data.get("updated_at", datetime.utcnow())
 
-    # Path methods
+    # Path methods (for output files still on filesystem)
     def get_user_dir(self) -> str:
         """Get user's data directory."""
         return os.path.join(current_app.config["USERS_DIR"], self.username)
-
-    def get_config_dir(self) -> str:
-        """Get user's config directory."""
-        return os.path.join(self.get_user_dir(), "config")
 
     def get_output_dir(self) -> str:
         """Get user's output directory."""
         return os.path.join(self.get_user_dir(), "output")
 
-    def get_config_path(self, filename: str) -> str:
-        """Get path to a config file."""
-        return os.path.join(self.get_config_dir(), filename)
-
-    def get_output_path(self, name: str, format_type: str = "hosts") -> str:
-        """Get path to an output file."""
-        filename = f"{name}_{format_type}.txt"
+    def get_output_path(self, list_name: str, format_type: str) -> str:
+        """Get path to output file for a specific list and format."""
+        filename = f"{list_name}_{format_type}.txt"
         return os.path.join(self.get_output_dir(), filename)
 
-    def ensure_directories(self) -> None:
-        """Create user directories if they don't exist."""
-        os.makedirs(self.get_config_dir(), mode=0o700, exist_ok=True)
-        os.makedirs(self.get_output_dir(), mode=0o755, exist_ok=True)
+    def get_config_hash(self) -> str:
+        """Compute SHA256 hash of blocklists.conf + whitelist.txt for change detection."""
+        import hashlib
+
+        blocklists = self.get_config("blocklists.conf") or ""
+        whitelist = self.get_config("whitelist.txt") or ""
+        combined = f"{blocklists}\n---SEPARATOR---\n{whitelist}"
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
     # Config methods
+    CONFIG_SCHEMA_VERSION = 1
+    _CONFIG_FIELD_MAP = {
+        "blocklists.conf": "blocklists",
+        "whitelist.txt": "whitelist",
+    }
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """Get user config object from MongoDB."""
+        return self._data.get("config", {})
+
     def save_config(self, filename: str, content: str) -> None:
-        """Save a config file."""
-        self.ensure_directories()
-        filepath = self.get_config_path(filename)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(filepath, 0o600)
+        """Save config to MongoDB."""
+        field = self._CONFIG_FIELD_MAP.get(filename)
+        if not field:
+            raise ValueError(f"Unknown config file: {filename}")
+
+        mongo.db[self.COLLECTION].update_one(
+            {"_id": self._id},
+            {
+                "$set": {
+                    f"config.{field}": content,
+                    "config.version": self.CONFIG_SCHEMA_VERSION,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        # Update local cache
+        if "config" not in self._data:
+            self._data["config"] = {}
+        self._data["config"][field] = content
+
+        # Ensure output directory still exists for generated files
+        os.makedirs(self.get_output_dir(), mode=0o755, exist_ok=True)
 
     def get_config(self, filename: str) -> Optional[str]:
-        """Get config file content."""
-        filepath = self.get_config_path(filename)
-        if os.path.exists(filepath):
-            with open(filepath, "r", encoding="utf-8") as f:
-                return f.read()
-        return None
+        """Get config from MongoDB."""
+        field = self._CONFIG_FIELD_MAP.get(filename)
+        if not field:
+            return None
+
+        config = self._data.get("config", {})
+        return config.get(field)
 
     # List methods
     def get_list(self, name: str) -> Optional[Dict[str, Any]]:
@@ -429,7 +453,7 @@ class User:
                 ),
             },
             "lists": self.lists,
-            "remaining_manual_updates": self.get_remaining_manual_updates(),
+            "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
             "created_at": self.created_at.isoformat(),
         }
@@ -540,10 +564,7 @@ class User:
         result = mongo.db[cls.COLLECTION].insert_one(user_data)
         user_data["_id"] = result.inserted_id
 
-        user = cls(user_data)
-        user.ensure_directories()
-
-        return user
+        return cls(user_data)
 
     @classmethod
     def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:

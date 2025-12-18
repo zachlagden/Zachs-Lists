@@ -12,7 +12,9 @@ from flask import Blueprint, send_file, request, abort, jsonify, current_app
 from app.models.user import User
 from app.models.analytics import Analytics
 
-lists_bp = Blueprint("lists", __name__)
+# Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
+lists_public_bp = Blueprint("lists_public", __name__)  # Handles /lists/ and /u/ file serving
+lists_api_bp = Blueprint("lists_api", __name__)         # Handles /api/lists and /api/browse metadata
 
 
 def get_client_ip() -> str:
@@ -158,7 +160,7 @@ def list_file_exists(output_path: str) -> bool:
     return os.path.exists(output_path + ".gz") or os.path.exists(output_path)
 
 
-@lists_bp.route("/lists/<name>.txt")
+@lists_public_bp.route("/lists/<name>.txt")
 def serve_default_list(name: str):
     """Serve default/official blocklist files."""
     # Validate name
@@ -207,7 +209,7 @@ def serve_default_list(name: str):
     return response
 
 
-@lists_bp.route("/u/<username>/<name>.txt")
+@lists_public_bp.route("/u/<username>/<name>.txt")
 def serve_user_list(username: str, name: str):
     """Serve user blocklist files."""
     # Validate inputs
@@ -267,7 +269,7 @@ def serve_user_list(username: str, name: str):
     return response
 
 
-@lists_bp.route("/lists")
+@lists_api_bp.route("/lists")
 def list_default_lists():
     """Get information about all default lists."""
     default_dir = current_app.config["DEFAULT_DIR"]
@@ -348,7 +350,7 @@ def list_default_lists():
     return jsonify(list(lists.values()))
 
 
-@lists_bp.route("/api/browse/featured")
+@lists_api_bp.route("/browse/featured")
 def get_featured_lists():
     """Get featured community lists."""
     from app.extensions import mongo
@@ -381,7 +383,7 @@ def get_featured_lists():
     return jsonify(result)
 
 
-@lists_bp.route("/api/browse/community")
+@lists_api_bp.route("/browse/community")
 def get_community_lists():
     """Get all public community lists."""
     from app.extensions import mongo

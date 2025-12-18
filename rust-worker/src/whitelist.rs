@@ -1,9 +1,6 @@
-use anyhow::Result;
 use rayon::prelude::*;
 use regex::RegexSet;
 use std::collections::HashSet;
-use std::path::Path;
-use tokio::fs;
 use tracing::{debug, info, warn};
 
 use crate::db::progress::{WhitelistPatternMatch, WhitelistProgress};
@@ -45,8 +42,6 @@ pub struct WhitelistManager {
     regex_set: Option<RegexSet>,
     /// Original patterns for progress reporting
     all_patterns: Vec<PatternInfo>,
-    /// Regex pattern strings (for identifying which regex matched)
-    regex_pattern_strings: Vec<String>,
 }
 
 impl WhitelistManager {
@@ -57,18 +52,7 @@ impl WhitelistManager {
             subdomain_patterns: Vec::new(),
             regex_set: None,
             all_patterns: Vec::new(),
-            regex_pattern_strings: Vec::new(),
         }
-    }
-
-    /// Load whitelist from file
-    pub async fn from_file(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        let content = fs::read_to_string(path).await?;
-        Ok(Self::from_content(&content))
     }
 
     /// Load whitelist from content string (optimized structure)
@@ -77,7 +61,6 @@ impl WhitelistManager {
         let mut subdomain_patterns = Vec::new();
         let mut regex_strings = Vec::new();
         let mut all_patterns = Vec::new();
-        let mut regex_pattern_strings = Vec::new();
 
         for line in content.lines() {
             let line = line.trim();
@@ -94,7 +77,6 @@ impl WhitelistManager {
             if pattern.starts_with('/') && pattern.ends_with('/') && pattern.len() > 2 {
                 let regex_str = &pattern[1..pattern.len() - 1];
                 regex_strings.push(regex_str.to_string());
-                regex_pattern_strings.push(pattern.to_string());
                 all_patterns.push(PatternInfo {
                     original: pattern.to_string(),
                     pattern_type: PatternType::Regex,
@@ -117,7 +99,6 @@ impl WhitelistManager {
                     regex::escape(pattern).replace(r"\*", ".*")
                 );
                 regex_strings.push(regex_str);
-                regex_pattern_strings.push(pattern.to_string());
                 all_patterns.push(PatternInfo {
                     original: pattern.to_string(),
                     pattern_type: PatternType::Wildcard,
@@ -151,7 +132,7 @@ impl WhitelistManager {
             all_patterns.len(),
             exact_patterns.len(),
             subdomain_patterns.len(),
-            regex_pattern_strings.len()
+            regex_strings.len()
         );
 
         Self {
@@ -159,7 +140,6 @@ impl WhitelistManager {
             subdomain_patterns,
             regex_set,
             all_patterns,
-            regex_pattern_strings,
         }
     }
 

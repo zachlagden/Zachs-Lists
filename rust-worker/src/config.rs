@@ -12,8 +12,6 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Worker UUID (generated on startup)
     pub worker_id: String,
-    /// Progress update interval in milliseconds
-    pub progress_update_interval_ms: u64,
     /// Heartbeat interval in seconds
     pub heartbeat_interval_secs: u64,
     /// Maximum concurrent downloads
@@ -22,8 +20,6 @@ pub struct Config {
     pub http_timeout_secs: u64,
     /// Cache TTL in days
     pub cache_ttl_days: u64,
-    /// Maximum cache size in bytes
-    pub max_cache_size_bytes: u64,
 }
 
 impl Config {
@@ -41,10 +37,6 @@ impl Config {
                     .unwrap_or_else(|_| "./data".to_string())
             ),
             worker_id,
-            progress_update_interval_ms: env::var("PROGRESS_UPDATE_INTERVAL_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(500),
             heartbeat_interval_secs: env::var("HEARTBEAT_INTERVAL_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -61,10 +53,6 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7),
-            max_cache_size_bytes: env::var("MAX_CACHE_SIZE_BYTES")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(10 * 1024 * 1024 * 1024), // 10 GB
         }
     }
 
@@ -78,45 +66,12 @@ impl Config {
         self.data_dir.join("users").join(username)
     }
 
-    /// Get cache directory
-    pub fn cache_dir(&self) -> PathBuf {
-        self.data_dir.join("cache")
-    }
-
-    /// Get config file path for a user
-    pub fn config_path(&self, username: &str) -> PathBuf {
-        if username == "__default__" {
-            self.default_dir().join("config").join("blocklists.conf")
-        } else {
-            self.user_dir(username).join("config").join("blocklists.conf")
-        }
-    }
-
-    /// Get whitelist file path for a user
-    pub fn whitelist_path(&self, username: &str) -> PathBuf {
-        if username == "__default__" {
-            self.default_dir().join("config").join("whitelist.txt")
-        } else {
-            self.user_dir(username).join("config").join("whitelist.txt")
-        }
-    }
-
-    /// Get output directory for a user
+    /// Get output directory for a user (output files still on filesystem for nginx)
     pub fn output_dir(&self, username: &str) -> PathBuf {
         if username == "__default__" {
             self.default_dir().join("output")
         } else {
             self.user_dir(username).join("output")
         }
-    }
-
-    /// Get output file path for a specific format
-    pub fn output_path(&self, username: &str, format: &str) -> PathBuf {
-        self.output_dir(username).join(format!("all_domains_{}.txt.gz", format))
-    }
-
-    /// Get cache path for a URL (using SHA256 hash)
-    pub fn cache_path(&self, url_hash: &str) -> PathBuf {
-        self.cache_dir().join(url_hash)
     }
 }

@@ -32,9 +32,8 @@ class Config:
     # Admin
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "zachlagden")
 
-    # Data paths
+    # Data paths (output files still on filesystem for nginx serving)
     DATA_DIR = os.environ.get("DATA_DIR", "/opt/webapps/zml/lists.zachlagden.uk/data")
-    CACHE_DIR = os.path.join(DATA_DIR, "cache")
     USERS_DIR = os.path.join(DATA_DIR, "users")
     DEFAULT_DIR = os.path.join(DATA_DIR, "default")
 
@@ -42,12 +41,12 @@ class Config:
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
     # User limits
-    DEFAULT_MAX_SOURCE_LISTS = 20
-    DEFAULT_MAX_DOMAINS = 2_000_000  # 2 million domains
-    MAX_DOMAINS_LIMIT = 10_000_000  # Maximum requestable: 10 million
-    DOMAIN_TIERS = [2_000_000, 5_000_000, 10_000_000]  # Available tiers
-    DEFAULT_MAX_CONFIG_SIZE_MB = 5
-    DEFAULT_MANUAL_UPDATES_PER_WEEK = 3
+    DEFAULT_MAX_SOURCE_LISTS = 40
+    DEFAULT_MAX_DOMAINS = 4_000_000  # 4 million domains
+    MAX_DOMAINS_LIMIT = 20_000_000  # Maximum requestable: 20 million
+    DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers
+    DEFAULT_MAX_CONFIG_SIZE_MB = 10
+    DEFAULT_MANUAL_UPDATES_PER_WEEK = 6
 
     # Processing
     MAX_CONCURRENT_JOBS = 5

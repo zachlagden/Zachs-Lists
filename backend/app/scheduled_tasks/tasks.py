@@ -53,6 +53,7 @@ def register_scheduled_tasks(app, scheduler):
         """Rebuild all user lists every Sunday at 2 AM UTC."""
         with app.app_context():
             try:
+                from bson import ObjectId
                 from app.models.user import User
                 from app.services.job_queue import JobQueue
                 from app.models.job import Job
@@ -62,20 +63,37 @@ def register_scheduled_tasks(app, scheduler):
                 # Get all enabled users with configs
                 users = User.get_all_enabled()
                 queued = 0
+                skipped = 0
 
                 for user in users:
                     # Check if user has a config
                     config = user.get_config("blocklists.conf")
-                    if config and config.strip():
-                        try:
-                            JobQueue.queue_job(user, job_type=Job.TYPE_SCHEDULED)
-                            queued += 1
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to queue rebuild for {user.username}: {e}"
-                            )
+                    if not config or not config.strip():
+                        continue
 
-                logger.info(f"Queued weekly rebuild for {queued} users")
+                    user_id = ObjectId(user.id)
+
+                    # Skip if user has an active job (queued or processing)
+                    if Job.has_active_job_for_user(user_id):
+                        logger.info(f"Skipping {user.username}: active job in progress")
+                        skipped += 1
+                        continue
+
+                    # Skip if user completed a manual build in last 30 minutes
+                    if Job.user_completed_recently(user_id, minutes=30, job_type=Job.TYPE_MANUAL):
+                        logger.info(f"Skipping {user.username}: recent manual build")
+                        skipped += 1
+                        continue
+
+                    try:
+                        JobQueue.queue_job(user, job_type=Job.TYPE_SCHEDULED)
+                        queued += 1
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to queue rebuild for {user.username}: {e}"
+                        )
+
+                logger.info(f"Queued weekly rebuild for {queued} users, skipped {skipped}")
 
             except Exception as e:
                 logger.exception(f"Failed to queue user rebuilds: {e}")

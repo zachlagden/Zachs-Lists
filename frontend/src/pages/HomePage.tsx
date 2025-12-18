@@ -1,72 +1,69 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store';
-import { analyticsApi, listsApi } from '../api/client';
+import { analyticsApi } from '../api/client';
 import {
-  HeroSection,
-  ValuePropsSection,
-  StatsSection,
-  ListsShowcase,
+  CinematicHero,
+  ProblemSection,
+  SolutionJourney,
+  TechCredibility,
+  SupportSection,
   CTASection,
   Footer,
 } from '../components/home';
 
 interface PublicStats {
   total_domains: number;
-  total_requests_today: number;
-  total_requests_week: number;
-  total_users: number;
-  last_updated: string;
-  requests_over_time: { date: string; count: number }[];
-  geo_distribution: Record<string, number>;
-}
-
-interface DefaultList {
-  name: string;
-  domain_count: number;
-  last_updated: string;
-  description?: string;
+  total_requests: number;
+  total_requests_today?: number;
+  total_requests_week?: number;
+  total_bandwidth_bytes?: number;
+  total_users?: number;
+  user_count?: number;
+  last_updated?: string;
+  requests_over_time?: { date: string; count: number }[];
+  geo_distribution?: Record<string, number>;
 }
 
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore();
   const [stats, setStats] = useState<PublicStats | null>(null);
-  const [lists, setLists] = useState<DefaultList[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsData, listsData] = await Promise.all([
-          analyticsApi.getPublicStats().catch(() => null),
-          listsApi.getDefaultLists().catch(() => []),
-        ]);
+        const statsData = await analyticsApi.getPublicStats().catch(() => null);
         setStats(statsData);
-        setLists(listsData);
       } catch (error) {
         console.error('Failed to fetch data:', error);
-      } finally {
-        setLoading(false);
       }
     };
     fetchData();
   }, []);
 
   return (
-    <div className="min-h-screen bg-pihole-darkest">
-      <HeroSection isAuthenticated={isAuthenticated} />
-
-      <ValuePropsSection />
-
-      <StatsSection
+    <div className="min-h-screen bg-void">
+      {/* 1. Cinematic Hero - Full viewport with threat visualization */}
+      <CinematicHero
+        isAuthenticated={isAuthenticated}
         totalDomains={stats?.total_domains || 0}
-        totalUsers={stats?.total_users || 0}
-        totalRequests={stats?.total_requests_week || 0}
       />
 
-      <ListsShowcase lists={lists} loading={loading} />
+      {/* 2. Problem Section - The chaos of the unprotected internet */}
+      <ProblemSection />
 
+      {/* 3. Solution Journey - Three steps to protection */}
+      <SolutionJourney />
+
+      {/* 4. Tech Credibility - Rust branding and stack */}
+      <TechCredibility />
+
+      {/* 5. Final CTA - Convert visitors */}
       <CTASection isAuthenticated={isAuthenticated} />
 
+      {/* 6. Support Section - Help keep this free */}
+      <SupportSection />
+
+      {/* 7. Footer */}
       <Footer />
     </div>
   );

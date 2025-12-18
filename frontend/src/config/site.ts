@@ -9,12 +9,12 @@ export const SITE_DOMAIN = new URL(SITE_URL).host;
  * Get the URL for a default blocklist.
  */
 export const getDefaultListUrl = (name: string): string => {
-  return `${SITE_URL}/api/lists/${name}.txt`;
+  return `${SITE_URL}/lists/${name}.txt`;
 };
 
 /**
  * Get the URL for a user's custom blocklist.
  */
 export const getUserListUrl = (username: string, name: string): string => {
-  return `${SITE_URL}/api/u/${username}/${name}.txt`;
+  return `${SITE_URL}/u/${username}/${name}.txt`;
 };

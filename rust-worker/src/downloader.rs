@@ -1,15 +1,13 @@
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
+use mongodb::Database;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
+use crate::db::cache::CacheRepository;
 use crate::db::progress::{SourceProgress, SourceStatus};
 
 /// Source definition from config file
@@ -20,27 +18,13 @@ pub struct Source {
     pub category: Option<String>,
 }
 
-/// Cache metadata stored alongside cached content
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheMetadata {
-    pub url: String,
-    pub etag: Option<String>,
-    pub last_modified: Option<String>,
-    pub content_length: Option<u64>,
-    pub cached_at: String,
-    pub last_accessed_at: String,
-    pub access_count: u64,
-    /// Domain count from last extraction (for calculating domain_change)
-    #[serde(default)]
-    pub domain_count: Option<u64>,
-}
-
 /// Result of downloading a source
 #[derive(Debug)]
 pub struct DownloadResult {
     pub source: Source,
     pub url_hash: String,
-    pub content_path: PathBuf,
+    /// Content bytes (loaded in memory)
+    pub content: Option<Vec<u8>>,
     pub cache_hit: bool,
     pub bytes_downloaded: u64,
     pub download_time_ms: u64,
@@ -54,18 +38,21 @@ pub struct DownloadResult {
 pub struct Downloader {
     client: Client,
     config: Config,
+    cache_repo: CacheRepository,
 }
 
 impl Downloader {
     /// Create a new downloader
-    pub fn new(config: Config) -> Result<Self> {
+    pub fn new(config: Config, db: &Database) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(config.http_timeout_secs))
             .gzip(true)
             .user_agent("BlocklistWorker/1.0 (lists.zachlagden.uk)")
             .build()?;
 
-        Ok(Self { client, config })
+        let cache_repo = CacheRepository::new(db);
+
+        Ok(Self { client, config, cache_repo })
     }
 
     /// Hash a URL to get cache key
@@ -75,98 +62,33 @@ impl Downloader {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Get cache directory for a URL
-    fn cache_dir(&self, url_hash: &str) -> PathBuf {
-        self.config.cache_dir().join(url_hash)
-    }
-
-    /// Get content file path for a URL
-    fn content_path(&self, url_hash: &str) -> PathBuf {
-        self.cache_dir(url_hash).join("content.txt")
-    }
-
-    /// Get metadata file path for a URL
-    fn metadata_path(&self, url_hash: &str) -> PathBuf {
-        self.cache_dir(url_hash).join("metadata.json")
-    }
-
-    /// Load cache metadata if it exists
-    async fn load_metadata(&self, url_hash: &str) -> Option<CacheMetadata> {
-        let path = self.metadata_path(url_hash);
-        match fs::read_to_string(&path).await {
-            Ok(content) => serde_json::from_str(&content).ok(),
-            Err(_) => None,
-        }
-    }
-
-    /// Save cache metadata
-    async fn save_metadata(&self, url_hash: &str, metadata: &CacheMetadata) -> Result<()> {
-        let path = self.metadata_path(url_hash);
-        let content = serde_json::to_string_pretty(metadata)?;
-        fs::write(&path, content).await?;
-        Ok(())
-    }
-
-    /// Update last accessed time in metadata
-    async fn touch_cache(&self, url_hash: &str) -> Result<()> {
-        if let Some(mut metadata) = self.load_metadata(url_hash).await {
-            metadata.last_accessed_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
-            metadata.access_count += 1;
-            self.save_metadata(url_hash, &metadata).await?;
-        }
-        Ok(())
-    }
-
-    /// Update domain count in cache metadata (called after extraction)
-    pub async fn update_domain_count(&self, url_hash: &str, domain_count: u64) -> Result<()> {
-        if let Some(mut metadata) = self.load_metadata(url_hash).await {
-            metadata.domain_count = Some(domain_count);
-            self.save_metadata(url_hash, &metadata).await?;
-        }
-        Ok(())
-    }
-
-    /// Check if cache is valid (not expired)
-    fn is_cache_valid(&self, metadata: &CacheMetadata) -> bool {
-        if let Ok(cached_at) = chrono::DateTime::parse_from_str(
-            &metadata.cached_at,
-            "%Y-%m-%dT%H:%M:%S%.6f",
-        ) {
-            let age = chrono::Utc::now().signed_duration_since(cached_at.with_timezone(&chrono::Utc));
-            let max_age = chrono::Duration::days(self.config.cache_ttl_days as i64);
-            return age < max_age;
-        }
-        false
-    }
-
     /// Download a single source
     pub async fn download_source(&self, source: &Source) -> DownloadResult {
         let url_hash = Self::hash_url(&source.url);
-        let content_path = self.content_path(&url_hash);
         let start = Instant::now();
         let mut warnings = Vec::new();
 
-        // Load existing metadata to get previous domain count
-        let existing_metadata = self.load_metadata(&url_hash).await;
-        let previous_domain_count = existing_metadata.as_ref().and_then(|m| m.domain_count);
-
         // Check cache first
-        if let Some(ref metadata) = existing_metadata {
-            if self.is_cache_valid(metadata) && content_path.exists() {
-                // Update access time
-                let _ = self.touch_cache(&url_hash).await;
-                debug!("Cache hit for {}", source.name);
+        match self.cache_repo.get_content(&url_hash).await {
+            Ok(Some(content)) => {
+                debug!("Cache hit for {} ({} bytes)", source.name, content.len());
                 return DownloadResult {
                     source: source.clone(),
                     url_hash,
-                    content_path,
+                    content: Some(content),
                     cache_hit: true,
                     bytes_downloaded: 0,
                     download_time_ms: start.elapsed().as_millis() as u64,
                     error: None,
                     warnings,
-                    previous_domain_count,
+                    previous_domain_count: None, // TODO: Get from cache stats
                 };
+            }
+            Ok(None) => {
+                debug!("Cache miss for {}", source.name);
+            }
+            Err(e) => {
+                warn!("Cache read error for {}: {}", source.name, e);
             }
         }
 
@@ -176,18 +98,19 @@ impl Downloader {
         let result = self.fetch_and_cache(source, &url_hash).await;
 
         match result {
-            Ok((bytes_downloaded, new_warnings)) => {
+            Ok((content, new_warnings)) => {
                 warnings.extend(new_warnings);
+                let bytes_downloaded = content.len() as u64;
                 DownloadResult {
                     source: source.clone(),
                     url_hash,
-                    content_path,
+                    content: Some(content),
                     cache_hit: false,
                     bytes_downloaded,
                     download_time_ms: start.elapsed().as_millis() as u64,
                     error: None,
                     warnings,
-                    previous_domain_count,
+                    previous_domain_count: None,
                 }
             }
             Err(e) => {
@@ -195,20 +118,20 @@ impl Downloader {
                 DownloadResult {
                     source: source.clone(),
                     url_hash,
-                    content_path,
+                    content: None,
                     cache_hit: false,
                     bytes_downloaded: 0,
                     download_time_ms: start.elapsed().as_millis() as u64,
                     error: Some(e.to_string()),
                     warnings,
-                    previous_domain_count,
+                    previous_domain_count: None,
                 }
             }
         }
     }
 
-    /// Fetch URL and cache the result
-    async fn fetch_and_cache(&self, source: &Source, url_hash: &str) -> Result<(u64, Vec<String>)> {
+    /// Fetch URL and cache the result in MongoDB
+    async fn fetch_and_cache(&self, source: &Source, url_hash: &str) -> Result<(Vec<u8>, Vec<String>)> {
         let mut warnings = Vec::new();
 
         // Make request
@@ -236,50 +159,40 @@ impl Downloader {
             .get("last-modified")
             .and_then(|v| v.to_str().ok())
             .map(String::from);
-        let content_length = response.content_length();
 
-        // Create cache directory
-        let cache_dir = self.cache_dir(url_hash);
-        fs::create_dir_all(&cache_dir).await?;
-
-        // Stream content to file
-        let content_path = self.content_path(url_hash);
-        let mut file = fs::File::create(&content_path).await?;
-        let mut bytes_downloaded: u64 = 0;
-
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.with_context(|| "Error reading response body")?;
-            bytes_downloaded += chunk.len() as u64;
-            file.write_all(&chunk).await?;
-        }
-        file.flush().await?;
+        // Download content to memory
+        let content = response
+            .bytes()
+            .await
+            .with_context(|| "Error reading response body")?
+            .to_vec();
 
         // Validate content
-        if bytes_downloaded == 0 {
+        if content.is_empty() {
             warnings.push("Downloaded empty file".to_string());
         }
 
-        // Save metadata
-        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
-        let metadata = CacheMetadata {
-            url: source.url.clone(),
-            etag,
-            last_modified,
-            content_length,
-            cached_at: now.clone(),
-            last_accessed_at: now,
-            access_count: 1,
-            domain_count: None, // Set later during extraction
-        };
-        self.save_metadata(url_hash, &metadata).await?;
+        // Estimate domain count from newlines
+        let domain_count = content.iter().filter(|&&b| b == b'\n').count() as i64;
+
+        // Store in MongoDB cache
+        self.cache_repo
+            .store(
+                url_hash,
+                &source.url,
+                &content,
+                etag.as_deref(),
+                last_modified.as_deref(),
+                domain_count,
+            )
+            .await?;
 
         info!(
-            "Downloaded {} ({} bytes) in cache",
-            source.name, bytes_downloaded
+            "Downloaded {} ({} bytes) and cached in MongoDB",
+            source.name, content.len()
         );
 
-        Ok((bytes_downloaded, warnings))
+        Ok((content, warnings))
     }
 
     /// Download multiple sources in parallel
@@ -400,43 +313,36 @@ impl Downloader {
         sources
     }
 
+    /// Update domain count in cache after extraction
+    pub async fn update_domain_count(&self, url_hash: &str, domain_count: u64) -> Result<()> {
+        self.cache_repo
+            .update_domain_count(url_hash, domain_count as i64)
+            .await
+    }
+
     /// Clean up old cache entries
     pub async fn cleanup_cache(&self) -> Result<u64> {
-        let cache_dir = self.config.cache_dir();
-        if !cache_dir.exists() {
-            return Ok(0);
-        }
+        self.cache_repo
+            .cleanup_stale(self.config.cache_ttl_days as i64)
+            .await
+    }
 
-        let mut entries = fs::read_dir(&cache_dir).await?;
-        let mut cleaned = 0u64;
-        let now = chrono::Utc::now();
-        let max_age = chrono::Duration::days(self.config.cache_ttl_days as i64);
-
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let url_hash = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-
-            if let Some(metadata) = self.load_metadata(url_hash).await {
-                if let Ok(accessed) = chrono::DateTime::parse_from_str(
-                    &metadata.last_accessed_at,
-                    "%Y-%m-%dT%H:%M:%S%.6f",
-                ) {
-                    let age = now.signed_duration_since(accessed.with_timezone(&chrono::Utc));
-                    if age > max_age {
-                        info!("Removing stale cache entry: {}", url_hash);
-                        fs::remove_dir_all(&path).await?;
-                        cleaned += 1;
-                    }
+    /// Check if all sources would be cache hits (for "no changes" detection)
+    pub async fn check_all_cached(&self, sources: &[Source]) -> bool {
+        for source in sources {
+            let url_hash = Self::hash_url(&source.url);
+            match self.cache_repo.has_valid_cache(&url_hash).await {
+                Ok(true) => continue,
+                Ok(false) => {
+                    debug!("Source {} not cached or cache expired", source.name);
+                    return false;
+                }
+                Err(e) => {
+                    warn!("Cache check error for {}: {}", source.name, e);
+                    return false;
                 }
             }
         }
-
-        Ok(cleaned)
+        true
     }
 }

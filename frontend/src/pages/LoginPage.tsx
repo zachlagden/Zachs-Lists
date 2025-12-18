@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store';
 import { authApi } from '../api/client';
-import { SITE_DOMAIN } from '../config/site';
+import PublicNav from '../components/PublicNav';
+import { Footer } from '../components/home';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -23,31 +24,28 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-pihole-darkest flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-pihole-border border-t-pihole-accent" />
+      <div className="min-h-screen bg-void flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-steel-light border-t-rust" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-pihole-darkest flex flex-col">
-      {/* Header */}
-      <header className="p-6">
-        <Link to="/" className="flex items-center gap-3 w-fit">
-          <div className="w-10 h-10 bg-pihole-accent rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">ZL</span>
-          </div>
-          <span className="font-bold text-xl text-pihole-text">Zach's Lists</span>
-        </Link>
-      </header>
+    <div className="min-h-screen bg-void flex flex-col">
+      {/* Background */}
+      <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial-rust opacity-20 pointer-events-none" />
+
+      {/* Navigation */}
+      <PublicNav />
 
       {/* Main */}
-      <main className="flex-1 flex items-center justify-center p-6">
+      <main className="flex-1 flex items-center justify-center p-6 relative z-10">
         <div className="w-full max-w-md">
-          <div className="card">
+          <div className="glass-card p-8">
             <div className="text-center mb-8">
-              <h1 className="text-2xl font-bold text-pihole-text mb-2">Welcome Back</h1>
-              <p className="text-pihole-text-muted">
+              <h1 className="font-display text-3xl text-chrome-light mb-2">WELCOME BACK</h1>
+              <p className="text-chrome">
                 Sign in to manage your blocklists
               </p>
             </div>
@@ -69,19 +67,19 @@ export default function LoginPage() {
               Continue with GitHub
             </button>
 
-            <p className="text-pihole-text-muted text-sm text-center mt-6">
+            <p className="text-chrome text-sm text-center mt-6">
               By signing in, you agree to our terms of service.
             </p>
           </div>
 
           <div className="mt-6 text-center">
-            <p className="text-pihole-text-muted text-sm">
+            <p className="text-chrome text-sm">
               Don't have a GitHub account?{' '}
               <a
                 href="https://github.com/join"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-pihole-accent hover:underline"
+                className="text-rust hover:text-rust-light"
               >
                 Create one
               </a>
@@ -91,11 +89,7 @@ export default function LoginPage() {
       </main>
 
       {/* Footer */}
-      <footer className="p-6 text-center">
-        <p className="text-pihole-text-muted text-sm">
-          © {new Date().getFullYear()} {SITE_DOMAIN}
-        </p>
-      </footer>
+      <Footer />
     </div>
   );
 }

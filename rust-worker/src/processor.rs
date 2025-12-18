@@ -1,10 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use bson::DateTime as BsonDateTime;
+use chrono::Utc;
+use mongodb::Database;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::fs;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::Config;
 use crate::db::job::{Job, JobRepository};
@@ -12,6 +15,8 @@ use crate::db::progress::{
     JobProgress, JobResult, OutputFile, SourceProgress,
     SourceStatus,
 };
+use crate::db::user::{ListMetadata, UserRepository};
+use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::generator::OutputGenerator;
@@ -54,22 +59,36 @@ impl CategoryDomains {
 pub struct JobProcessor {
     config: Config,
     job_repo: JobRepository,
+    user_config_repo: UserConfigRepository,
+    user_repo: UserRepository,
     downloader: Downloader,
     extractor: DomainExtractor,
 }
 
 impl JobProcessor {
     /// Create a new job processor
-    pub fn new(config: Config, job_repo: JobRepository) -> Result<Self> {
-        let downloader = Downloader::new(config.clone())?;
+    pub fn new(config: Config, job_repo: JobRepository, db: &Database) -> Result<Self> {
+        let downloader = Downloader::new(config.clone(), db)?;
         let extractor = DomainExtractor::new();
+        let user_config_repo = UserConfigRepository::new(db);
+        let user_repo = UserRepository::new(db);
 
         Ok(Self {
             config,
             job_repo,
+            user_config_repo,
+            user_repo,
             downloader,
             extractor,
         })
+    }
+
+    /// Compute config hash (SHA256 of blocklists + whitelist)
+    fn compute_config_hash(blocklists: &str, whitelist: &str) -> String {
+        let combined = format!("{}\n---SEPARATOR---\n{}", blocklists, whitelist);
+        let mut hasher = Sha256::new();
+        hasher.update(combined.as_bytes());
+        format!("{:x}", hasher.finalize())
     }
 
     /// Process a single job
@@ -80,18 +99,23 @@ impl JobProcessor {
             job.job_id, job.username
         );
 
-        // Load config file
-        let config_path = self.config.config_path(&job.username);
-        if !config_path.exists() {
-            self.job_repo
-                .fail(&job.id, vec!["Config file not found".to_string()])
-                .await?;
-            return Ok(());
-        }
+        // Load config from MongoDB
+        let config_content = match self.user_config_repo.get_blocklists(&job.username).await {
+            Ok(content) => content,
+            Err(e) => {
+                self.job_repo
+                    .fail(&job.id, vec![format!("Failed to load config: {}", e)])
+                    .await?;
+                return Ok(());
+            }
+        };
 
-        let config_content = fs::read_to_string(&config_path)
-            .await
-            .context("Failed to read config file")?;
+        // Load whitelist content early for config hash calculation
+        let whitelist_content = self.user_config_repo.get_whitelist(&job.username).await
+            .unwrap_or_default();
+
+        // Compute current config hash
+        let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
 
         // Parse sources
         let sources = Downloader::parse_config(&config_content);
@@ -103,6 +127,28 @@ impl JobProcessor {
         }
 
         info!("Found {} sources to process", sources.len());
+
+        // Check for "no changes" optimization
+        // Skip if: config hash unchanged AND all sources would be cache hits
+        if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
+            if stored_hash == current_config_hash {
+                // Config unchanged, check if all sources are cached
+                let all_cached = self.downloader.check_all_cached(&sources).await;
+                if all_cached {
+                    info!(
+                        "Skipping job {} - no changes detected (config hash matches, all sources cached)",
+                        job.job_id
+                    );
+                    self.job_repo
+                        .skip(
+                            &job.id,
+                            "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
+                        )
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
 
         // Initialize progress tracking
         let progress = Arc::new(Mutex::new(JobProgress::downloading(sources.len() as u64)));
@@ -204,6 +250,9 @@ impl JobProcessor {
             .map(|f| f.domain_count)
             .unwrap_or(0);
 
+        // Calculate total output size
+        let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
+
         // Build result
         let result = JobResult::success(
             sources_processed,
@@ -211,11 +260,42 @@ impl JobProcessor {
             total_domains,
             unique_domains,
             whitelist_removed,
-            output_files,
+            output_files.clone(),
         );
 
         // Mark job as completed
         self.job_repo.complete(&job.id, result).await?;
+
+        // Update user document with lists and stats
+        // Get existing lists to preserve is_public settings
+        let existing_lists = self.user_repo.get_existing_lists(&job.username).await
+            .unwrap_or_default();
+
+        // Build list metadata for "all_domains" (combined list)
+        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
+        let all_domains_list = ListMetadata {
+            name: "all_domains".to_string(),
+            // Preserve is_public from existing list, default to false
+            is_public: existing_lists.iter()
+                .find(|l| l.name == "all_domains")
+                .map(|l| l.is_public)
+                .unwrap_or(false),
+            formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
+            domain_count: unique_domains,
+            last_updated: now,
+        };
+
+        // Update user document
+        if let Err(e) = self.user_repo.update_after_build(
+            &job.username,
+            vec![all_domains_list],
+            unique_domains,
+            total_output_size,
+            current_config_hash,
+        ).await {
+            warn!("Failed to update user document for {}: {}", job.username, e);
+            // Don't fail the job for this - it's not critical
+        }
 
         let duration = start_time.elapsed();
         info!(
@@ -283,61 +363,62 @@ impl JobProcessor {
                 continue;
             }
 
-            let content_path = &result.content_path;
-            if !content_path.exists() {
-                warn!("Content file missing for {}", result.source.name);
-                continue;
+            let content = match &result.content {
+                Some(bytes) => bytes,
+                None => {
+                    warn!("No content for {}", result.source.name);
+                    continue;
+                }
+            };
+
+            // Convert bytes to string for extraction
+            let content_str = match String::from_utf8_lossy(content) {
+                std::borrow::Cow::Borrowed(s) => s.to_string(),
+                std::borrow::Cow::Owned(s) => s,
+            };
+
+            // Extract domains from content
+            let domains = self.extractor.extract_from_content(&content_str);
+
+            // domain_count = total domains from this source
+            let source_domain_count = domains.len() as u64;
+
+            // Calculate domain_change = current - previous
+            let domain_change = result.previous_domain_count
+                .map(|prev| source_domain_count as i64 - prev as i64);
+
+            // Get category from source
+            let category = result.source.category.clone();
+
+            // Add domains to category bucket
+            let category_set = category_domains.by_category
+                .entry(category.clone())
+                .or_insert_with(HashSet::new);
+            let count_before = category_set.len();
+            category_set.extend(domains);
+            let new_in_category = category_set.len() - count_before;
+
+            debug!(
+                "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?})",
+                source_domain_count,
+                result.source.name,
+                category,
+                new_in_category,
+                domain_change
+            );
+
+            // Update source progress with correct domain_count and domain_change
+            {
+                let mut p = progress.lock().await;
+                if let Some(source) = p.sources.iter_mut().find(|s| s.id == result.url_hash) {
+                    source.domain_count = Some(source_domain_count);
+                    source.domain_change = domain_change;
+                }
             }
 
-            match self.extractor.extract_from_file(content_path).await {
-                Ok(domains) => {
-                    // domain_count = total domains from this source
-                    let source_domain_count = domains.len() as u64;
-
-                    // Calculate domain_change = current - previous
-                    let domain_change = result.previous_domain_count
-                        .map(|prev| source_domain_count as i64 - prev as i64);
-
-                    // Get category from source
-                    let category = result.source.category.clone();
-
-                    // Add domains to category bucket
-                    let category_set = category_domains.by_category
-                        .entry(category.clone())
-                        .or_insert_with(HashSet::new);
-                    let count_before = category_set.len();
-                    category_set.extend(domains);
-                    let new_in_category = category_set.len() - count_before;
-
-                    debug!(
-                        "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?})",
-                        source_domain_count,
-                        result.source.name,
-                        category,
-                        new_in_category,
-                        domain_change
-                    );
-
-                    // Update source progress with correct domain_count and domain_change
-                    {
-                        let mut p = progress.lock().await;
-                        if let Some(source) = p.sources.iter_mut().find(|s| s.id == result.url_hash) {
-                            source.domain_count = Some(source_domain_count);
-                            source.domain_change = domain_change;
-                        }
-                    }
-
-                    // Save domain_count to cache for next run
-                    if let Err(e) = self.downloader.update_domain_count(&result.url_hash, source_domain_count).await {
-                        warn!("Failed to update domain count in cache for {}: {}", result.source.name, e);
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to extract domains from {}: {}",
-                        result.source.name, e
-                    );
-                }
+            // Save domain_count to cache for next run
+            if let Err(e) = self.downloader.update_domain_count(&result.url_hash, source_domain_count).await {
+                warn!("Failed to update domain count in cache for {}: {}", result.source.name, e);
             }
         }
 
@@ -363,9 +444,9 @@ impl JobProcessor {
         }
         self.update_progress(job_id, &progress).await?;
 
-        // Load whitelist
-        let whitelist_path = self.config.whitelist_path(username);
-        let whitelist = WhitelistManager::from_file(&whitelist_path).await?;
+        // Load whitelist from MongoDB
+        let whitelist_content = self.user_config_repo.get_whitelist(username).await?;
+        let whitelist = WhitelistManager::from_content(&whitelist_content);
 
         // Filter ALL domains to get whitelist stats (pattern matches, etc.)
         let (_, total_removed, pattern_matches) = whitelist.filter_domains(all_domains);

@@ -578,3 +578,80 @@ class Job:
             "active_workers": cls.get_active_worker_count(),
             "processing_count": cls.count_processing(),
         }
+
+    # Cooldown and scheduling methods
+
+    @classmethod
+    def has_active_job_for_user(cls, user_id: ObjectId) -> bool:
+        """
+        Check if user has any active job (queued or processing).
+        Used to prevent duplicate builds.
+        """
+        return (
+            mongo.db[cls.COLLECTION].count_documents(
+                {
+                    "user_id": user_id,
+                    "status": {"$in": [cls.STATUS_QUEUED, cls.STATUS_PROCESSING]},
+                }
+            )
+            > 0
+        )
+
+    @classmethod
+    def get_last_completed_for_user(
+        cls, user_id: ObjectId, job_type: str = None
+    ) -> Optional["Job"]:
+        """
+        Get the most recently completed job for a user.
+        Optionally filter by job type (manual, scheduled, admin).
+        """
+        query = {
+            "user_id": user_id,
+            "status": cls.STATUS_COMPLETED,
+        }
+        if job_type:
+            query["type"] = job_type
+
+        doc = (
+            mongo.db[cls.COLLECTION]
+            .find(query)
+            .sort("completed_at", -1)
+            .limit(1)
+        )
+        docs = list(doc)
+        return cls(docs[0]) if docs else None
+
+    @classmethod
+    def user_completed_recently(
+        cls, user_id: ObjectId, minutes: int = 5, job_type: str = None
+    ) -> bool:
+        """
+        Check if user completed a job within the last N minutes.
+        Used for cooldown enforcement.
+        """
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        query = {
+            "user_id": user_id,
+            "status": cls.STATUS_COMPLETED,
+            "completed_at": {"$gte": cutoff},
+        }
+        if job_type:
+            query["type"] = job_type
+
+        return mongo.db[cls.COLLECTION].count_documents(query) > 0
+
+    @classmethod
+    def get_cooldown_remaining(cls, user_id: ObjectId, cooldown_minutes: int = 5) -> int:
+        """
+        Get remaining cooldown time in seconds for a user.
+        Returns 0 if no cooldown active.
+        """
+        last_job = cls.get_last_completed_for_user(user_id, job_type=cls.TYPE_MANUAL)
+        if not last_job or not last_job.completed_at:
+            return 0
+
+        elapsed = (datetime.utcnow() - last_job.completed_at).total_seconds()
+        cooldown_seconds = cooldown_minutes * 60
+        remaining = cooldown_seconds - elapsed
+
+        return max(0, int(remaining))
