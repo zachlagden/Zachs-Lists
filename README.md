@@ -39,16 +39,16 @@ Powered by a Rust backend that processes millions of domains in seconds.
 
 ## Features
 
-| | Feature | Description |
-|---|---------|-------------|
-| 🎯 | **Custom Curation** | Pick and choose from dozens of blocklist sources to build your perfect list |
-| ⚡ | **Rust-Powered** | Parallel downloads and processing means lists built in seconds, not minutes |
-| 🔄 | **Auto Updates** | Set it and forget it — weekly automatic rebuilds keep everything fresh |
-| 📋 | **Multi-Format** | Export as hosts file, plain text, or Adblock syntax for any blocker |
-| 🛡️ | **Smart Whitelisting** | Powerful pattern matching: exact, wildcard, subdomain, and full regex |
-| 📊 | **Real-time Progress** | Watch your list build live with WebSocket-powered progress tracking |
-| 🌍 | **Public Lists** | Browse and use community-curated blocklists, or share your own |
-| 🔐 | **GitHub Login** | One-click authentication — no passwords to remember |
+| Feature | Description |
+|---------|-------------|
+| **Custom Curation** | Pick and choose from dozens of blocklist sources to build your perfect list |
+| **Rust-Powered** | Parallel downloads and processing means lists built in seconds, not minutes |
+| **Auto Updates** | Set it and forget it — weekly automatic rebuilds keep everything fresh |
+| **Multi-Format** | Export as hosts file, plain text, or Adblock syntax for any blocker |
+| **Smart Whitelisting** | Powerful pattern matching: exact, wildcard, subdomain, and full regex |
+| **Real-time Progress** | Watch your list build live with WebSocket-powered progress tracking |
+| **Public Lists** | Browse and use community-curated blocklists, or share your own |
+| **GitHub Login** | One-click authentication — no passwords to remember |
 
 ---
 
@@ -83,10 +83,10 @@ That's it. Your blocklist will auto-update weekly.
 ## How It Works
 
 ```
- +-----------+      +-----------+      +-----------+      +-------------+
- |  Sources  |  ->  |  Download |  ->  | Whitelist |  ->  |  Generate   |
- | (40+ URLs)|      | (Parallel)|      |  (Filter) |      | (3 formats) |
- +-----------+      +-----------+      +-----------+      +-------------+
+ +------------+      +------------+      +-----------+      +-------------+
+ |  Sources   |  ->  |  Download  |  ->  | Whitelist |  ->  |  Generate   |
+ | (40+ URLs) |      | (Parallel) |      |  (Filter) |      | (3 formats) |
+ +------------+      +------------+      +-----------+      +-------------+
 ```
 
 **1. Sources** — You define which blocklists to combine. Popular choices, niche lists, whatever you need.
@@ -103,13 +103,13 @@ That's it. Your blocklist will auto-update weekly.
 
 | Feature | Zach's Lists | Traditional Lists | DIY Scripts |
 |---------|:------------:|:-----------------:|:-----------:|
-| Custom sources | ✅ You choose | ❌ Fixed | ✅ Manual work |
-| Whitelist filtering | ✅ Built-in UI | ❌ None | ⚠️ Roll your own |
-| Auto updates | ✅ Weekly | ✅ Varies | ⚠️ Cron setup |
-| Real-time progress | ✅ WebSocket | ❌ | ❌ |
-| Multiple formats | ✅ 3 formats | ⚠️ Usually 1 | ⚠️ Extra code |
-| Performance | ✅ Rust + parallel | N/A | ⚠️ Depends |
-| Web UI | ✅ Full dashboard | ❌ | ❌ |
+| Custom sources | ✅ | ❌ | ✅ |
+| Whitelist filtering | ✅ | ❌ | ⚠️ |
+| Auto updates | ✅ | ✅ | ⚠️ |
+| Real-time progress | ✅ | ❌ | ❌ |
+| Multiple formats | ✅ | ⚠️ | ⚠️ |
+| Performance | ✅ | N/A | ⚠️ |
+| Web UI | ✅ | ❌ | ❌ |
 
 **The bottom line:** Traditional blocklists give you no control. DIY scripts require maintenance. Zach's Lists gives you the flexibility of custom lists with the convenience of a managed service.
 
