@@ -10,6 +10,9 @@ use crate::config::Config;
 use crate::db::cache::CacheRepository;
 use crate::db::progress::{SourceProgress, SourceStatus};
 
+/// Maximum allowed size for a single source file (100MB)
+const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+
 /// Source definition from config file
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -160,12 +163,40 @@ impl Downloader {
             .and_then(|v| v.to_str().ok())
             .map(String::from);
 
-        // Download content to memory
-        let content = response
-            .bytes()
-            .await
-            .with_context(|| "Error reading response body")?
-            .to_vec();
+        // Check Content-Length if available
+        let content_length = response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        if let Some(len) = content_length {
+            if len > MAX_SOURCE_SIZE_BYTES {
+                anyhow::bail!(
+                    "Source file too large: {} bytes (max {} bytes)",
+                    len,
+                    MAX_SOURCE_SIZE_BYTES
+                );
+            }
+        }
+
+        // Download content to memory with size limit enforcement
+        let mut content = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        use futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.with_context(|| "Error reading response chunk")?;
+            content.extend_from_slice(&chunk);
+
+            // Check size limit during streaming
+            if content.len() as u64 > MAX_SOURCE_SIZE_BYTES {
+                anyhow::bail!(
+                    "Source file exceeds size limit during download (max {} bytes)",
+                    MAX_SOURCE_SIZE_BYTES
+                );
+            }
+        }
 
         // Validate content
         if content.is_empty() {

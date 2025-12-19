@@ -12,6 +12,7 @@ from app.models.job import Job
 from app.models.cache import CacheMetadata
 from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
+from app.models.blocklist_library import BlocklistLibrary
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -19,12 +20,32 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.route("/users", methods=["GET"])
 @admin_required
 def list_users(user: User):
-    """List all users with stats."""
+    """List users with server-side pagination, search, and filtering."""
+    # Pagination
     page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 20, type=int)
+    per_page = request.args.get("per_page", 25, type=int)
+    per_page = min(per_page, 100)  # Cap at 100
 
-    users = User.get_all(page=page, per_page=per_page)
-    total = User.count()
+    # Search
+    search = request.args.get("search", "", type=str).strip() or None
+
+    # Filters (default all True)
+    show_admins = request.args.get("show_admins", "true").lower() == "true"
+    show_regular = request.args.get("show_regular", "true").lower() == "true"
+    show_enabled = request.args.get("show_enabled", "true").lower() == "true"
+    show_disabled = request.args.get("show_disabled", "true").lower() == "true"
+
+    # Get filtered users (exclude current user)
+    users, total = User.get_all_filtered(
+        page=page,
+        per_page=per_page,
+        search=search,
+        show_admins=show_admins,
+        show_regular=show_regular,
+        show_enabled=show_enabled,
+        show_disabled=show_disabled,
+        exclude_user_id=ObjectId(user.id),
+    )
 
     return jsonify(
         {
@@ -32,7 +53,7 @@ def list_users(user: User):
             "page": page,
             "per_page": per_page,
             "total": total,
-            "pages": (total + per_page - 1) // per_page,
+            "pages": (total + per_page - 1) // per_page if total > 0 else 1,
         }
     )
 
@@ -55,6 +76,14 @@ def update_user(admin: User, user_id: str):
     target_user = User.get_by_id(user_id)
     if not target_user:
         return jsonify({"error": "User not found"}), 404
+
+    # Protect root user from all modifications
+    if target_user.is_root:
+        return jsonify({"error": "Cannot modify root user"}), 403
+
+    # Non-root admins cannot modify other admins or themselves
+    if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
+        return jsonify({"error": "Only root can manage admins"}), 403
 
     data = request.get_json()
 
@@ -85,9 +114,13 @@ def delete_user(admin: User, user_id: str):
     if not target_user:
         return jsonify({"error": "User not found"}), 404
 
-    # Prevent self-deletion
-    if target_user.id == admin.id:
-        return jsonify({"error": "Cannot delete your own account"}), 400
+    # Protect root user from deletion
+    if target_user.is_root:
+        return jsonify({"error": "Cannot delete root user"}), 403
+
+    # Non-root admins cannot delete other admins or themselves
+    if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
+        return jsonify({"error": "Only root can manage admins"}), 403
 
     username = target_user.username
     target_user.delete_with_data()
@@ -107,13 +140,13 @@ def ban_user(admin: User, user_id: str):
     if not target_user:
         return jsonify({"error": "User not found"}), 404
 
-    # Prevent self-ban
-    if target_user.id == admin.id:
-        return jsonify({"error": "Cannot ban your own account"}), 400
+    # Protect root user from ban
+    if target_user.is_root:
+        return jsonify({"error": "Cannot ban root user"}), 403
 
-    # Prevent banning admins
-    if target_user.is_admin:
-        return jsonify({"error": "Cannot ban admin users"}), 400
+    # Non-root admins cannot ban other admins or themselves
+    if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
+        return jsonify({"error": "Only root can manage admins"}), 403
 
     data = request.get_json()
     duration = data.get("duration")  # "1d", "7d", "30d", "permanent"
@@ -162,6 +195,36 @@ def unban_user(admin: User, user_id: str):
     return jsonify({"success": True, "message": f"User {target_user.username} unbanned"})
 
 
+@admin_bp.route("/users/<user_id>/admin", methods=["PUT"])
+@admin_required
+def toggle_user_admin(admin: User, user_id: str):
+    """Toggle admin status for a user. Only root can do this."""
+    # Only root can change admin status
+    if not admin.is_root:
+        return jsonify({"error": "Only root can modify admin status"}), 403
+
+    target_user = User.get_by_id(user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Cannot modify root user's admin status
+    if target_user.is_root:
+        return jsonify({"error": "Cannot modify root user"}), 403
+
+    data = request.get_json()
+    is_admin = data.get("is_admin", False)
+
+    target_user.set_admin(is_admin)
+
+    current_app.logger.info(
+        f"Root {admin.username} set admin status for {target_user.username} to {is_admin}"
+    )
+
+    # Refresh and return updated user
+    target_user = User.get_by_id(user_id)
+    return jsonify(target_user.to_admin_dict())
+
+
 @admin_bp.route("/users/<user_id>/ips", methods=["GET"])
 @admin_required
 def get_user_ips(admin: User, user_id: str):
@@ -203,6 +266,14 @@ def trigger_rebuild(admin: User, user_id: str):
     target_user = User.get_by_id(user_id)
     if not target_user:
         return jsonify({"error": "User not found"}), 404
+
+    # Protect root user from forced rebuild
+    if target_user.is_root:
+        return jsonify({"error": "Cannot force rebuild for root user"}), 403
+
+    # Non-root admins cannot rebuild other admins or themselves
+    if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
+        return jsonify({"error": "Only root can manage admins"}), 403
 
     # Check if user has config
     config = target_user.get_config("blocklists.conf")
@@ -624,3 +695,158 @@ def deny_limit_request(admin: User, request_id: str):
         "success": True,
         "request": limit_request.to_dict(),
     })
+
+
+# Blocklist Library Management
+
+@admin_bp.route("/library", methods=["GET"])
+@admin_required
+def get_library(admin: User):
+    """Get all blocklist library entries."""
+    category = request.args.get("category")
+
+    if category:
+        entries = BlocklistLibrary.get_all(category=category)
+    else:
+        entries = BlocklistLibrary.get_all()
+
+    return jsonify({
+        "library": [e.to_dict() for e in entries],
+        "categories": sorted(BlocklistLibrary.VALID_CATEGORIES),
+    })
+
+
+@admin_bp.route("/library", methods=["POST"])
+@admin_required
+def add_library_entry(admin: User):
+    """Add a new entry to the blocklist library."""
+    data = request.get_json()
+
+    url = data.get("url", "").strip()
+    name = data.get("name", "").strip()
+    category = data.get("category", "").strip()
+    description = data.get("description", "").strip()
+    recommended = data.get("recommended", False)
+    aggressiveness = data.get("aggressiveness", 3)
+    domain_count = data.get("domain_count", 0)
+
+    # Validate required fields
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    if not category:
+        return jsonify({"error": "Category is required"}), 400
+
+    # Validate category
+    if category not in BlocklistLibrary.VALID_CATEGORIES:
+        return jsonify({
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
+        }), 400
+
+    # Validate URL format
+    from app.utils.validators import validate_url
+    if not validate_url(url):
+        return jsonify({"error": "Invalid or unsafe URL"}), 400
+
+    # Check for duplicate URL
+    if BlocklistLibrary.url_exists(url):
+        return jsonify({"error": "URL already exists in library"}), 409
+
+    # Create entry
+    entry = BlocklistLibrary.create(
+        url=url,
+        name=name,
+        category=category,
+        description=description,
+        recommended=recommended,
+        aggressiveness=aggressiveness,
+        domain_count=domain_count,
+        added_by=admin.username,
+    )
+
+    current_app.logger.info(
+        f"Admin {admin.username} added library entry: {name} ({category})"
+    )
+
+    return jsonify({
+        "success": True,
+        "entry": entry.to_dict(),
+    }), 201
+
+
+@admin_bp.route("/library/<entry_id>", methods=["GET"])
+@admin_required
+def get_library_entry(admin: User, entry_id: str):
+    """Get a specific library entry."""
+    entry = BlocklistLibrary.get_by_id(entry_id)
+    if not entry:
+        return jsonify({"error": "Entry not found"}), 404
+
+    return jsonify(entry.to_dict())
+
+
+@admin_bp.route("/library/<entry_id>", methods=["PUT"])
+@admin_required
+def update_library_entry(admin: User, entry_id: str):
+    """Update a library entry."""
+    entry = BlocklistLibrary.get_by_id(entry_id)
+    if not entry:
+        return jsonify({"error": "Entry not found"}), 404
+
+    data = request.get_json()
+
+    # Validate category if provided
+    if "category" in data and data["category"] not in BlocklistLibrary.VALID_CATEGORIES:
+        return jsonify({
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
+        }), 400
+
+    # Validate URL if provided
+    if "url" in data:
+        from app.utils.validators import validate_url
+        if not validate_url(data["url"]):
+            return jsonify({"error": "Invalid or unsafe URL"}), 400
+        # Check for duplicate URL (excluding current entry)
+        if BlocklistLibrary.url_exists(data["url"], exclude_id=entry_id):
+            return jsonify({"error": "URL already exists in library"}), 409
+
+    # Update entry
+    entry.update(
+        url=data.get("url"),
+        name=data.get("name"),
+        category=data.get("category"),
+        description=data.get("description"),
+        recommended=data.get("recommended"),
+        aggressiveness=data.get("aggressiveness"),
+        domain_count=data.get("domain_count"),
+    )
+
+    current_app.logger.info(
+        f"Admin {admin.username} updated library entry: {entry_id}"
+    )
+
+    # Return updated entry
+    entry = BlocklistLibrary.get_by_id(entry_id)
+    return jsonify({
+        "success": True,
+        "entry": entry.to_dict(),
+    })
+
+
+@admin_bp.route("/library/<entry_id>", methods=["DELETE"])
+@admin_required
+def delete_library_entry(admin: User, entry_id: str):
+    """Delete a library entry."""
+    entry = BlocklistLibrary.get_by_id(entry_id)
+    if not entry:
+        return jsonify({"error": "Entry not found"}), 404
+
+    name = entry.name
+    entry.delete()
+
+    current_app.logger.info(
+        f"Admin {admin.username} deleted library entry: {name} ({entry_id})"
+    )
+
+    return jsonify({"success": True})

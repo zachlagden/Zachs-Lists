@@ -3,14 +3,31 @@ User blueprint - config, whitelist, lists, jobs, build.
 """
 
 import os
+import hashlib
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
+import gevent
 
 from app.blueprints.auth import login_required
+from app.extensions import mongo
 from app.models.user import User
 from app.models.job import Job
-from app.utils.validators import validate_blocklist_config, validate_whitelist
+from app.utils.validators import (
+    validate_blocklist_config,
+    validate_blocklist_config_strict,
+    validate_whitelist,
+    validate_config_urls,
+    VALID_CATEGORIES,
+)
+from app.socketio import emit_validation_progress, emit_validation_complete
+from app.models.blocklist_library import BlocklistLibrary
 
 user_bp = Blueprint("user", __name__)
+
+
+def _generate_config_hash(config: str) -> str:
+    """Generate SHA256 hash of config content for validation token."""
+    return hashlib.sha256(config.encode("utf-8")).hexdigest()
 
 
 @user_bp.route("/config", methods=["GET"])
@@ -24,11 +41,45 @@ def get_config(user: User):
 @user_bp.route("/config", methods=["PUT"])
 @login_required
 def update_config(user: User):
-    """Update blocklist configuration."""
+    """
+    Update blocklist configuration.
+
+    Requires a validation_token from a prior validation to ensure
+    the config being saved is exactly what was validated.
+    """
+    from bson import ObjectId
+
     data = request.get_json()
     config = data.get("config", "")
+    validation_token = data.get("validation_token")
 
-    # Validate size
+    # Require validation token
+    if not validation_token:
+        return jsonify({"error": "Validation required before saving"}), 400
+
+    # Look up the validation token
+    token_doc = mongo.db.validation_tokens.find_one({
+        "user_id": ObjectId(user.id),
+        "expires_at": {"$gt": datetime.utcnow()}
+    })
+
+    if not token_doc:
+        return jsonify({"error": "Validation expired, please re-validate"}), 400
+
+    # Verify the config hasn't been modified since validation
+    config_hash = _generate_config_hash(config)
+    if token_doc["config_hash"] != config_hash:
+        return jsonify({
+            "error": "Config was modified after validation, please re-validate"
+        }), 400
+
+    # Check if validation had errors (shouldn't allow save with errors)
+    if token_doc.get("has_errors"):
+        return jsonify({
+            "error": "Cannot save config with validation errors"
+        }), 400
+
+    # Validate size (double-check)
     max_size = user.limits["max_config_size_mb"] * 1024 * 1024
     if len(config.encode("utf-8")) > max_size:
         return (
@@ -40,17 +91,111 @@ def update_config(user: User):
             400,
         )
 
-    # Validate format and count
-    errors = validate_blocklist_config(config, user.limits["max_source_lists"])
-    if errors:
-        current_app.logger.warning(f"User {user.username} config validation failed: {errors}")
-        return jsonify({"error": "Invalid configuration", "details": errors}), 400
-
     # Save config
     user.save_config("blocklists.conf", config)
-    current_app.logger.info(f"User {user.username} updated blocklist config")
+
+    # Delete the used validation token (one-time use)
+    mongo.db.validation_tokens.delete_one({"user_id": ObjectId(user.id)})
+
+    current_app.logger.info(f"User {user.username} updated blocklist config (validated)")
 
     return jsonify({"success": True})
+
+
+@user_bp.route("/config/validate", methods=["POST"])
+@login_required
+def validate_config(user: User):
+    """
+    Validate config with HEAD requests to check URLs.
+
+    Emits progress via Socket.IO to validation:{user_id} room.
+    Client should subscribe to this room before calling this endpoint.
+
+    On successful validation (no errors), generates a validation token
+    that must be provided when saving the config. This ensures the exact
+    validated config is what gets saved.
+    """
+    from bson import ObjectId
+
+    data = request.get_json()
+    config = data.get("config", "")
+
+    # Validate size first
+    max_size = user.limits["max_config_size_mb"] * 1024 * 1024
+    if len(config.encode("utf-8")) > max_size:
+        return (
+            jsonify(
+                {
+                    "error": f"Config file too large. Maximum size: {user.limits['max_config_size_mb']}MB"
+                }
+            ),
+            400,
+        )
+
+    # Progress callback that emits Socket.IO events
+    def emit_progress(progress):
+        emit_validation_progress(user.id, progress)
+
+    # Run validation with HEAD requests
+    result = validate_config_urls(
+        config,
+        user.limits["max_source_lists"],
+        emit_progress=emit_progress,
+    )
+
+    # Generate and store validation token
+    # Token ties the exact config content to this validation result
+    config_hash = _generate_config_hash(config)
+    now = datetime.utcnow()
+
+    token_doc = {
+        "user_id": ObjectId(user.id),
+        "config_hash": config_hash,
+        "has_errors": result.has_errors,
+        "created_at": now,
+        "expires_at": now + timedelta(minutes=10),
+    }
+
+    # Upsert - one token per user (replace any existing)
+    mongo.db.validation_tokens.update_one(
+        {"user_id": ObjectId(user.id)},
+        {"$set": token_doc},
+        upsert=True
+    )
+
+    # Build response with validation token
+    response_data = result.to_dict()
+    response_data["validation_token"] = config_hash  # Use hash as token for simplicity
+
+    # Emit completion event (without token for socket listeners)
+    emit_validation_complete(user.id, result.to_dict())
+
+    return jsonify(response_data)
+
+
+@user_bp.route("/config/categories", methods=["GET"])
+@login_required
+def get_categories(user: User):
+    """Get the list of valid categories."""
+    return jsonify({
+        "categories": sorted(VALID_CATEGORIES),
+        "nsfw_excluded_from_all_domains": True,
+    })
+
+
+@user_bp.route("/library", methods=["GET"])
+@login_required
+def get_library(user: User):
+    """Get blocklist library grouped by category for visual editor."""
+    grouped = BlocklistLibrary.get_grouped_by_category()
+
+    return jsonify({
+        "library": {
+            category: [entry.to_dict() for entry in entries]
+            for category, entries in grouped.items()
+        },
+        "categories": sorted(VALID_CATEGORIES),
+    })
 
 
 @user_bp.route("/whitelist", methods=["GET"])

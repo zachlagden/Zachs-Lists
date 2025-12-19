@@ -1,21 +1,25 @@
 """
 Cache model for MongoDB.
 
-Stores blocklist cache content and metadata directly in MongoDB.
+Stores blocklist cache content in GridFS and metadata in a separate collection.
+GridFS allows storing files larger than MongoDB's 16MB document limit.
 """
 
 import hashlib
 from datetime import datetime
 from typing import Optional, Dict, Any
-from bson import ObjectId, Binary
+
+from gridfs import GridFS
+from gridfs.errors import NoFile
 
 from app.extensions import mongo
 
 
 class CacheMetadata:
-    """Cache model for storing blocklist content and metadata."""
+    """Cache model for storing blocklist content (GridFS) and metadata."""
 
     COLLECTION = "cache"
+    GRIDFS_COLLECTION = "cache_files"
 
     def __init__(self, data: Dict[str, Any]):
         self._data = data
@@ -58,12 +62,21 @@ class CacheMetadata:
         return self._data.get("created_at", datetime.utcnow())
 
     @property
+    def gridfs_id(self):
+        """Get GridFS file ID."""
+        return self._data.get("gridfs_id")
+
+    @property
     def content(self) -> Optional[bytes]:
-        """Get binary content."""
-        content_data = self._data.get("content")
-        if content_data is not None:
-            return bytes(content_data)
-        return None
+        """Get binary content from GridFS."""
+        gridfs_id = self.gridfs_id
+        if gridfs_id is None:
+            return None
+        try:
+            fs = GridFS(mongo.db, collection=self.GRIDFS_COLLECTION)
+            return fs.get(gridfs_id).read()
+        except NoFile:
+            return None
 
     # Serialization
     def to_dict(self) -> Dict[str, Any]:
@@ -81,6 +94,11 @@ class CacheMetadata:
 
     # Class methods
     @classmethod
+    def _get_gridfs(cls) -> GridFS:
+        """Get GridFS instance for cache files."""
+        return GridFS(mongo.db, collection=cls.GRIDFS_COLLECTION)
+
+    @classmethod
     def get_by_url_hash(cls, url_hash: str) -> Optional["CacheMetadata"]:
         """Get cache metadata by URL hash."""
         data = mongo.db[cls.COLLECTION].find_one({"url_hash": url_hash})
@@ -96,16 +114,36 @@ class CacheMetadata:
         last_modified: str = None,
         domain_count: int = 0,
     ) -> "CacheMetadata":
-        """Create or update cache entry with content."""
+        """Create or update cache entry with content stored in GridFS."""
         now = datetime.utcnow()
         content_hash = hashlib.sha256(content).hexdigest()
+        fs = cls._get_gridfs()
 
+        # Delete old GridFS file if exists
+        existing = mongo.db[cls.COLLECTION].find_one(
+            {"url_hash": url_hash}, {"gridfs_id": 1}
+        )
+        if existing and existing.get("gridfs_id"):
+            try:
+                fs.delete(existing["gridfs_id"])
+            except Exception:
+                pass  # Ignore if file already deleted
+
+        # Store content in GridFS
+        gridfs_id = fs.put(
+            content,
+            filename=url_hash,
+            content_type="text/plain",
+            url=url,
+        )
+
+        # Update metadata document (no content field, just gridfs_id reference)
         mongo.db[cls.COLLECTION].update_one(
             {"url_hash": url_hash},
             {
                 "$set": {
                     "url": url,
-                    "content": Binary(content),
+                    "gridfs_id": gridfs_id,
                     "etag": etag,
                     "last_modified": last_modified,
                     "content_hash": content_hash,
@@ -124,14 +162,18 @@ class CacheMetadata:
 
     @classmethod
     def get_content(cls, url_hash: str) -> Optional[bytes]:
-        """Get cached content by URL hash."""
+        """Get cached content from GridFS by URL hash."""
         data = mongo.db[cls.COLLECTION].find_one(
-            {"url_hash": url_hash},
-            {"content": 1}
+            {"url_hash": url_hash}, {"gridfs_id": 1}
         )
-        if data and data.get("content"):
-            return bytes(data["content"])
-        return None
+        if not data or not data.get("gridfs_id"):
+            return None
+
+        try:
+            fs = cls._get_gridfs()
+            return fs.get(data["gridfs_id"]).read()
+        except NoFile:
+            return None
 
     @classmethod
     def touch(cls, url_hash: str) -> None:
@@ -164,7 +206,21 @@ class CacheMetadata:
 
     @classmethod
     def delete_by_url_hash(cls, url_hash: str) -> bool:
-        """Delete cache metadata entry."""
+        """Delete cache metadata entry and associated GridFS file."""
+        # Get gridfs_id before deleting metadata
+        data = mongo.db[cls.COLLECTION].find_one(
+            {"url_hash": url_hash}, {"gridfs_id": 1}
+        )
+
+        # Delete GridFS file if exists
+        if data and data.get("gridfs_id"):
+            try:
+                fs = cls._get_gridfs()
+                fs.delete(data["gridfs_id"])
+            except Exception:
+                pass  # Ignore if file already deleted
+
+        # Delete metadata document
         result = mongo.db[cls.COLLECTION].delete_one({"url_hash": url_hash})
         return result.deleted_count > 0
 

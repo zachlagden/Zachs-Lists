@@ -6,6 +6,7 @@ export interface User {
   email?: string;
   avatar_url?: string;
   is_admin: boolean;
+  is_root: boolean;
   is_enabled: boolean;
   limits: UserLimits;
   stats: UserStats;

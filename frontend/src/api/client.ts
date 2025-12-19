@@ -51,8 +51,26 @@ export const userApi = {
     return response.data;
   },
 
-  updateConfig: async (config: string) => {
-    const response = await api.put('/api/user/config', { config });
+  updateConfig: async (config: string, validationToken: string) => {
+    const response = await api.put('/api/user/config', {
+      config,
+      validation_token: validationToken,
+    });
+    return response.data;
+  },
+
+  validateConfig: async (config: string) => {
+    const response = await api.post('/api/user/config/validate', { config });
+    return response.data;
+  },
+
+  getCategories: async () => {
+    const response = await api.get('/api/user/config/categories');
+    return response.data;
+  },
+
+  getLibrary: async () => {
+    const response = await api.get('/api/user/library');
     return response.data;
   },
 
@@ -168,10 +186,28 @@ export const listsApi = {
 };
 
 // Admin API
+interface GetUsersParams {
+  page?: number;
+  perPage?: number;
+  search?: string;
+  showAdmins?: boolean;
+  showRegular?: boolean;
+  showEnabled?: boolean;
+  showDisabled?: boolean;
+}
+
 export const adminApi = {
-  getUsers: async (page = 1, perPage = 20) => {
+  getUsers: async (params: GetUsersParams = {}) => {
     const response = await api.get('/api/admin/users', {
-      params: { page, per_page: perPage },
+      params: {
+        page: params.page ?? 1,
+        per_page: params.perPage ?? 25,
+        search: params.search || undefined,
+        show_admins: params.showAdmins ?? true,
+        show_regular: params.showRegular ?? true,
+        show_enabled: params.showEnabled ?? true,
+        show_disabled: params.showDisabled ?? true,
+      },
     });
     return response.data;
   },
@@ -314,6 +350,53 @@ export const adminApi = {
     const response = await api.post(`/api/admin/limit-requests/${requestId}/deny`, {
       response: responseMsg,
     });
+    return response.data;
+  },
+
+  setUserAdmin: async (userId: string, isAdmin: boolean) => {
+    const response = await api.put(`/api/admin/users/${userId}/admin`, {
+      is_admin: isAdmin,
+    });
+    return response.data;
+  },
+
+  // Blocklist Library Management
+  getLibraryEntries: async () => {
+    const response = await api.get('/api/admin/library');
+    return response.data;
+  },
+
+  addLibraryEntry: async (data: {
+    url: string;
+    name: string;
+    category: string;
+    description?: string;
+    recommended?: boolean;
+    aggressiveness?: number;
+    domain_count?: number;
+  }) => {
+    const response = await api.post('/api/admin/library', data);
+    return response.data;
+  },
+
+  updateLibraryEntry: async (
+    entryId: string,
+    data: {
+      url?: string;
+      name?: string;
+      category?: string;
+      description?: string;
+      recommended?: boolean;
+      aggressiveness?: number;
+      domain_count?: number;
+    }
+  ) => {
+    const response = await api.put(`/api/admin/library/${entryId}`, data);
+    return response.data;
+  },
+
+  deleteLibraryEntry: async (entryId: string) => {
+    const response = await api.delete(`/api/admin/library/${entryId}`);
     return response.data;
   },
 };

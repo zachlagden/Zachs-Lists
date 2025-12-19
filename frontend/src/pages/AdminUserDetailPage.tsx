@@ -11,6 +11,7 @@ interface UserDetail {
   avatar_url?: string;
   github_id: number;
   is_admin: boolean;
+  is_root: boolean;
   is_enabled: boolean;
   is_banned: boolean;
   banned_until?: string;
@@ -193,7 +194,7 @@ export default function AdminUserDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/admin" className="text-pihole-text-muted hover:text-pihole-text">
+          <Link to="/admin?tab=users" className="text-pihole-text-muted hover:text-pihole-text">
             &larr; Back
           </Link>
           {user.avatar_url && (
@@ -202,7 +203,9 @@ export default function AdminUserDetailPage() {
           <div>
             <h1 className="text-2xl font-bold text-pihole-text flex items-center gap-2">
               {user.name || user.username}
-              {user.is_admin && (
+              {user.is_root ? (
+                <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded">Root</span>
+              ) : user.is_admin && (
                 <span className="text-xs bg-pihole-accent/20 text-pihole-accent px-2 py-1 rounded">Admin</span>
               )}
               {user.is_banned && (
@@ -216,9 +219,11 @@ export default function AdminUserDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleTriggerRebuild} className="btn btn-secondary">
-            Trigger Rebuild
-          </button>
+          {!user.is_root && (
+            <button onClick={handleTriggerRebuild} className="btn btn-secondary">
+              Trigger Rebuild
+            </button>
+          )}
         </div>
       </div>
 

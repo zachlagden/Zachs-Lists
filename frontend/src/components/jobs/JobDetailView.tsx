@@ -11,6 +11,7 @@ interface JobDetailViewProps {
   sources: SourceProgress[];
   whitelist: WhitelistProgress | null;
   formats: Record<string, FormatProgress>;
+  showUsername?: boolean;  // Show username for admin view
 }
 
 const statusColors: Record<JobStatus, string> = {
@@ -21,7 +22,7 @@ const statusColors: Record<JobStatus, string> = {
   skipped: 'bg-gray-500/20 text-gray-400',
 };
 
-export default function JobDetailView({ job, sources, whitelist, formats }: JobDetailViewProps) {
+export default function JobDetailView({ job, sources, whitelist, formats, showUsername = false }: JobDetailViewProps) {
   const stage = job.progress?.stage || 'queue';
   const isFinished = job.status === 'completed' || job.status === 'failed' || job.status === 'skipped';
 
@@ -32,6 +33,11 @@ export default function JobDetailView({ job, sources, whitelist, formats }: JobD
         <div>
           <h2 className="text-lg font-semibold text-pihole-text capitalize">
             {job.type} Build
+            {showUsername && (
+              <span className="text-pihole-text-muted font-normal ml-2">
+                by {job.username || 'default'}
+              </span>
+            )}
           </h2>
           <p className="text-sm text-pihole-text-muted font-mono">
             {job.job_id}

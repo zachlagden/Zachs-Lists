@@ -78,6 +78,25 @@ def register_handlers():
         """Unsubscribe from stats updates."""
         leave_room("stats:admin")
 
+    @socketio.on("subscribe:validation")
+    def handle_subscribe_validation(data):
+        """
+        Subscribe to config validation progress updates.
+
+        Args:
+            data: {"user_id": str}
+        """
+        if data.get("user_id"):
+            room = f"validation:{data['user_id']}"
+            join_room(room)
+            logger.debug(f"Client {request.sid} subscribed to {room}")
+
+    @socketio.on("unsubscribe:validation")
+    def handle_unsubscribe_validation(data):
+        """Unsubscribe from config validation updates."""
+        if data.get("user_id"):
+            leave_room(f"validation:{data['user_id']}")
+
 
 # Event emitters
 
@@ -279,3 +298,29 @@ def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
         socketio.emit("job:skipped", data, room=f"jobs:{user_id}")
     # Also emit stats update for admin dashboard
     emit_stats_updated()
+
+
+# Config validation events
+
+def emit_validation_progress(user_id: str, progress: dict):
+    """
+    Emit config:validation_progress event during config URL validation.
+
+    Args:
+        user_id: User ID for user-specific room
+        progress: Progress dictionary with current, total, url, status
+    """
+    room = f"validation:{user_id}"
+    socketio.emit("config:validation_progress", progress, room=room)
+
+
+def emit_validation_complete(user_id: str, result: dict):
+    """
+    Emit config:validation_complete event when validation finishes.
+
+    Args:
+        user_id: User ID for user-specific room
+        result: Validation result dictionary
+    """
+    room = f"validation:{user_id}"
+    socketio.emit("config:validation_complete", result, room=room)

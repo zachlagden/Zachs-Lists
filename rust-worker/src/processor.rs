@@ -510,9 +510,14 @@ impl JobProcessor {
         let mut output_files = generator.generate_all_categories(&sorted_by_category)?;
 
         // Create combined "all domains" list (deduplicated across categories)
+        // Note: nsfw category is excluded from the combined list
         let all_domains: HashSet<String> = sorted_by_category
-            .values()
-            .flat_map(|d| d.iter().cloned())
+            .iter()
+            .filter(|(cat, _)| {
+                // Exclude nsfw category from all_domains
+                !matches!(cat, Some(c) if c == "nsfw")
+            })
+            .flat_map(|(_, domains)| domains.iter().cloned())
             .collect();
         let all_sorted = DomainExtractor::sort_domains(all_domains);
 

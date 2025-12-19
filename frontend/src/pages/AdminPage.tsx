@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminApi } from '../api/client';
+import { useAuthStore } from '../store';
 import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { JobList, JobDetailView } from '../components/jobs';
+import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../types';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -32,7 +35,7 @@ ChartJS.register(
 import type { LimitRequest } from '../types';
 import { INTENDED_USE_LABELS } from '../types';
 
-type TabType = 'overview' | 'users' | 'limits' | 'default' | 'featured' | 'jobs';
+type TabType = 'overview' | 'users' | 'limits' | 'default' | 'featured' | 'jobs' | 'library';
 
 interface AdminStats {
   total_users: number;
@@ -43,12 +46,13 @@ interface AdminStats {
 }
 
 interface AdminUser {
-  _id: string;
+  id: string;
   username: string;
   email: string;
   avatar_url?: string;
   is_enabled: boolean;
   is_admin: boolean;
+  is_root: boolean;
   created_at: string;
   stats?: {
     total_domains: number;
@@ -65,22 +69,48 @@ interface FeaturedList {
   created_at: string;
 }
 
-interface AdminJob {
-  job_id: string;
-  username: string;
-  type: string;
-  status: string;
+interface LibraryEntry {
+  id: string;
+  url: string;
+  name: string;
+  category: string;
+  description: string;
+  recommended: boolean;
+  aggressiveness: number;
+  domain_count: number;
+  added_by: string;
   created_at: string;
-  completed_at?: string;
+  updated_at: string;
 }
+
+const VALID_TABS: TabType[] = ['overview', 'users', 'limits', 'default', 'featured', 'jobs', 'library'];
+
+const LIBRARY_CATEGORIES = [
+  'comprehensive',
+  'malicious',
+  'advertising',
+  'tracking',
+  'suspicious',
+  'nsfw',
+];
 
 export default function AdminPage() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { user: currentUser } = useAuthStore();
+
+  // Read tab from URL, validate it, default to 'overview'
+  const tabParam = searchParams.get('tab') as TabType;
+  const activeTab = VALID_TABS.includes(tabParam) ? tabParam : 'overview';
+
+  const setActiveTab = (tab: TabType) => {
+    setSearchParams({ tab });
+  };
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [jobs, setJobs] = useState<AdminJob[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
   const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
   const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
@@ -105,28 +135,62 @@ export default function AdminPage() {
   const [limitRequests, setLimitRequests] = useState<LimitRequest[]>([]);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
 
+  // Library state
+  const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
+  const [newLibraryEntry, setNewLibraryEntry] = useState({
+    url: '',
+    name: '',
+    category: 'comprehensive',
+    description: '',
+    recommended: false,
+    aggressiveness: 3,
+    domain_count: 0,
+  });
+  const [editingEntry, setEditingEntry] = useState<LibraryEntry | null>(null);
+
+  // Users table pagination, search, and filters (server-side)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [userFilters, setUserFilters] = useState({
+    showAdmins: true,
+    showRegular: true,
+    showEnabled: true,
+    showDisabled: true,
+  });
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
   // Handle real-time job updates (admin sees all jobs)
   const handleJobCreated = useCallback(
-    (job: AdminJob) => {
+    (job: Job) => {
       setJobs((prev) => [job, ...prev.slice(0, 49)]); // Keep 50 most recent
+      // Auto-select newly created jobs
+      setSelectedJob(job);
     },
     []
   );
 
   const handleJobProgress = useCallback(
-    (job: AdminJob) => {
+    (job: Job) => {
       setJobs((prev) =>
         prev.map((j) => (j.job_id === job.job_id ? job : j))
       );
+      // Update selected job if it matches
+      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
     },
     []
   );
 
   const handleJobCompleted = useCallback(
-    (job: AdminJob) => {
+    (job: Job) => {
       setJobs((prev) =>
         prev.map((j) => (j.job_id === job.job_id ? job : j))
       );
+      // Update selected job if it matches
+      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
     },
     []
   );
@@ -151,12 +215,59 @@ export default function AdminPage() {
 
   useStatsSocket({ onStatsUpdated: handleStatsUpdated });
 
+  // Debounce search input (1.5 second delay)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setCurrentPage(1);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset to page 1 when filters/items per page change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [userFilters, itemsPerPage]);
+
+  // Fetch users from server with current filters
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const data = await adminApi.getUsers({
+        page: currentPage,
+        perPage: itemsPerPage,
+        search: debouncedSearch || undefined,
+        showAdmins: userFilters.showAdmins,
+        showRegular: userFilters.showRegular,
+        showEnabled: userFilters.showEnabled,
+        showDisabled: userFilters.showDisabled,
+      });
+      setUsers(data.users || []);
+      setTotalUsers(data.total || 0);
+      setTotalPages(data.pages || 1);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [currentPage, itemsPerPage, debouncedSearch, userFilters]);
+
+  // Fetch users when params change
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  // Toggle filter helper
+  const toggleUserFilter = (key: keyof typeof userFilters) => {
+    setUserFilters((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [
           statsData,
-          usersData,
           jobsData,
           featuredData,
           configData,
@@ -164,9 +275,9 @@ export default function AdminPage() {
           jobsPerDayData,
           userGrowthData,
           limitRequestsData,
+          libraryData,
         ] = await Promise.all([
           adminApi.getStats().catch(() => null),
-          adminApi.getUsers().catch(() => ({ users: [] })),
           adminApi.getAllJobs().catch(() => ({ jobs: [] })),
           adminApi.getFeaturedLists().catch(() => ({ featured: [] })),
           adminApi.getDefaultConfig().catch(() => ({ config: '', whitelist: '' })),
@@ -174,10 +285,10 @@ export default function AdminPage() {
           adminApi.getJobsPerDay(30).catch(() => ({ jobs_per_day: [] })),
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
           adminApi.getLimitRequests().catch(() => ({ requests: [], pending_count: 0 })),
+          adminApi.getLibraryEntries().catch(() => ({ entries: [] })),
         ]);
 
         setStats(statsData);
-        setUsers(usersData.users || []);
         setJobs(jobsData.jobs || []);
         setFeatured(featuredData?.featured || []);
         setDefaultConfig(configData);
@@ -187,6 +298,7 @@ export default function AdminPage() {
         setUserGrowth(userGrowthData?.user_growth || []);
         setLimitRequests(limitRequestsData?.requests || []);
         setPendingRequestCount(limitRequestsData?.pending_count || 0);
+        setLibraryEntries(libraryData?.entries || []);
       } catch (error) {
         console.error('Failed to fetch admin data:', error);
       } finally {
@@ -199,8 +311,8 @@ export default function AdminPage() {
   const handleToggleUser = async (userId: string, enabled: boolean) => {
     try {
       await adminApi.updateUser(userId, { is_enabled: enabled });
-      setUsers(users.map((u) => (u._id === userId ? { ...u, is_enabled: enabled } : u)));
       setMessage({ type: 'success', text: `User ${enabled ? 'enabled' : 'disabled'}` });
+      fetchUsers(); // Refetch to update list based on filters
     } catch (error) {
       console.error('Failed to update user:', error);
       setMessage({ type: 'error', text: 'Failed to update user' });
@@ -212,11 +324,22 @@ export default function AdminPage() {
 
     try {
       await adminApi.deleteUser(userId);
-      setUsers(users.filter((u) => u._id !== userId));
       setMessage({ type: 'success', text: 'User deleted' });
+      fetchUsers(); // Refetch to update list
     } catch (error) {
       console.error('Failed to delete user:', error);
       setMessage({ type: 'error', text: 'Failed to delete user' });
+    }
+  };
+
+  const handleToggleAdmin = async (userId: string, isAdmin: boolean) => {
+    try {
+      await adminApi.setUserAdmin(userId, isAdmin);
+      setMessage({ type: 'success', text: `User ${isAdmin ? 'promoted to' : 'demoted from'} admin` });
+      fetchUsers(); // Refetch to update list based on filters
+    } catch (error) {
+      console.error('Failed to toggle admin status:', error);
+      setMessage({ type: 'error', text: 'Failed to toggle admin status' });
     }
   };
 
@@ -308,6 +431,72 @@ export default function AdminPage() {
       console.error('Failed to deny limit request:', error);
       setMessage({ type: 'error', text: 'Failed to deny limit request' });
     }
+  };
+
+  // Library handlers
+  const handleAddLibraryEntry = async () => {
+    if (!newLibraryEntry.url || !newLibraryEntry.name) return;
+
+    try {
+      const result = await adminApi.addLibraryEntry(newLibraryEntry);
+      setLibraryEntries([...libraryEntries, result.entry]);
+      setNewLibraryEntry({
+        url: '',
+        name: '',
+        category: 'comprehensive',
+        description: '',
+        recommended: false,
+        aggressiveness: 3,
+        domain_count: 0,
+      });
+      setMessage({ type: 'success', text: 'Library entry added' });
+    } catch (error: any) {
+      console.error('Failed to add library entry:', error);
+      const errorMsg = error.response?.data?.error || 'Failed to add library entry';
+      setMessage({ type: 'error', text: errorMsg });
+    }
+  };
+
+  const handleUpdateLibraryEntry = async () => {
+    if (!editingEntry) return;
+
+    try {
+      const result = await adminApi.updateLibraryEntry(editingEntry.id, {
+        url: editingEntry.url,
+        name: editingEntry.name,
+        category: editingEntry.category,
+        description: editingEntry.description,
+        recommended: editingEntry.recommended,
+        aggressiveness: editingEntry.aggressiveness,
+        domain_count: editingEntry.domain_count,
+      });
+      setLibraryEntries(libraryEntries.map((e) => (e.id === editingEntry.id ? result.entry : e)));
+      setEditingEntry(null);
+      setMessage({ type: 'success', text: 'Library entry updated' });
+    } catch (error: any) {
+      console.error('Failed to update library entry:', error);
+      const errorMsg = error.response?.data?.error || 'Failed to update library entry';
+      setMessage({ type: 'error', text: errorMsg });
+    }
+  };
+
+  const handleDeleteLibraryEntry = async (entryId: string) => {
+    if (!confirm('Are you sure you want to delete this library entry?')) return;
+
+    try {
+      await adminApi.deleteLibraryEntry(entryId);
+      setLibraryEntries(libraryEntries.filter((e) => e.id !== entryId));
+      setMessage({ type: 'success', text: 'Library entry deleted' });
+    } catch (error) {
+      console.error('Failed to delete library entry:', error);
+      setMessage({ type: 'error', text: 'Failed to delete library entry' });
+    }
+  };
+
+  const formatDomainCount = (count: number) => {
+    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
+    return count.toString();
   };
 
   const chartOptions = {
@@ -607,24 +796,126 @@ export default function AdminPage() {
 
       {/* Users Tab */}
       {activeTab === 'users' && (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-pihole-border">
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">User</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Status</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Domains</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Joined</th>
-                  <th className="text-right p-4 text-sm font-medium text-pihole-text-muted">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
+        <div className="space-y-4">
+          {/* Search and Filters */}
+          <div className="card">
+            <div className="flex flex-col md:flex-row md:items-center gap-4">
+              {/* Search */}
+              <div className="flex-1">
+                <input
+                  type="text"
+                  placeholder="Search by username or email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                />
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-pihole-text-muted">Filters:</span>
+                <button
+                  onClick={() => toggleUserFilter('showAdmins')}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    userFilters.showAdmins
+                      ? 'bg-pihole-accent/20 border-pihole-accent text-pihole-accent'
+                      : 'bg-pihole-darkest border-pihole-border text-pihole-text-muted hover:border-pihole-text-muted'
+                  }`}
+                >
+                  Admins
+                </button>
+                <button
+                  onClick={() => toggleUserFilter('showRegular')}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    userFilters.showRegular
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-pihole-darkest border-pihole-border text-pihole-text-muted hover:border-pihole-text-muted'
+                  }`}
+                >
+                  Regular
+                </button>
+                <button
+                  onClick={() => toggleUserFilter('showEnabled')}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    userFilters.showEnabled
+                      ? 'bg-green-500/20 border-green-500 text-green-400'
+                      : 'bg-pihole-darkest border-pihole-border text-pihole-text-muted hover:border-pihole-text-muted'
+                  }`}
+                >
+                  Enabled
+                </button>
+                <button
+                  onClick={() => toggleUserFilter('showDisabled')}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    userFilters.showDisabled
+                      ? 'bg-red-500/20 border-red-500 text-red-400'
+                      : 'bg-pihole-darkest border-pihole-border text-pihole-text-muted hover:border-pihole-text-muted'
+                  }`}
+                >
+                  Disabled
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Results info and items per page */}
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-pihole-text-muted">
+              {usersLoading ? (
+                'Loading...'
+              ) : (
+                <>
+                  Showing {users.length} of {totalUsers} users
+                  {debouncedSearch && ` matching "${debouncedSearch}"`}
+                </>
+              )}
+            </div>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="bg-pihole-darkest border border-pihole-border rounded-lg px-3 py-1.5 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+            >
+              <option value={10}>10 per page</option>
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+            </select>
+          </div>
+
+          {/* Users Table */}
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-pihole-border">
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">User</th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Status</th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Domains</th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Joined</th>
+                    <th className="text-right p-4 text-sm font-medium text-pihole-text-muted">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usersLoading ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-pihole-text-muted">
+                        <LoadingSpinner size="sm" />
+                      </td>
+                    </tr>
+                  ) : users.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-pihole-text-muted">
+                        {debouncedSearch || !Object.values(userFilters).every(Boolean)
+                          ? 'No users match your filters'
+                          : 'No users found'}
+                      </td>
+                    </tr>
+                  ) : (
+                    users.map((user) => (
                   <tr
-                    key={user._id}
+                    key={user.id}
                     className="border-b border-pihole-border last:border-0 hover:bg-pihole-darkest cursor-pointer"
-                    onClick={() => navigate(`/admin/users/${user._id}`)}
+                    onClick={() => navigate(`/admin/users/${user.id}`)}
                   >
                     <td className="p-4">
                       <div className="flex items-center gap-3">
@@ -640,7 +931,11 @@ export default function AdminPage() {
                         <div>
                           <div className="text-sm font-medium text-pihole-text">
                             {user.username}
-                            {user.is_admin && (
+                            {user.is_root ? (
+                              <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
+                                Root
+                              </span>
+                            ) : user.is_admin && (
                               <span className="ml-2 px-1.5 py-0.5 bg-pihole-accent/20 text-pihole-accent text-xs rounded">
                                 Admin
                               </span>
@@ -669,33 +964,88 @@ export default function AdminPage() {
                     </td>
                     <td className="p-4">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRebuildUser(user._id); }}
-                          className="btn btn-ghost text-xs"
-                        >
-                          Rebuild
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleToggleUser(user._id, !user.is_enabled); }}
-                          className="btn btn-ghost text-xs"
-                        >
-                          {user.is_enabled ? 'Disable' : 'Enable'}
-                        </button>
-                        {!user.is_admin && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteUser(user._id); }}
-                            className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                          >
-                            Delete
-                          </button>
+                        {/* Root users cannot have any actions performed on them */}
+                        {user.is_root ? (
+                          <span className="text-xs text-pihole-text-muted">Protected</span>
+                        ) : (
+                          <>
+                            {/* Admin toggle - only root can do this */}
+                            {currentUser?.is_root && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleToggleAdmin(user.id, !user.is_admin); }}
+                                className={`btn btn-ghost text-xs ${user.is_admin ? 'text-amber-400' : 'text-green-400'}`}
+                              >
+                                {user.is_admin ? 'Revoke Admin' : 'Make Admin'}
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleRebuildUser(user.id); }}
+                              className="btn btn-ghost text-xs"
+                            >
+                              Rebuild
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleToggleUser(user.id, !user.is_enabled); }}
+                              className="btn btn-ghost text-xs"
+                            >
+                              {user.is_enabled ? 'Disable' : 'Enable'}
+                            </button>
+                            {!user.is_admin && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id); }}
+                                className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm rounded-lg border border-pihole-border bg-pihole-darkest text-pihole-text disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pihole-dark transition-colors"
+              >
+                First
+              </button>
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm rounded-lg border border-pihole-border bg-pihole-darkest text-pihole-text disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pihole-dark transition-colors"
+              >
+                Previous
+              </button>
+              <span className="px-4 py-1.5 text-sm text-pihole-text">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 text-sm rounded-lg border border-pihole-border bg-pihole-darkest text-pihole-text disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pihole-dark transition-colors"
+              >
+                Next
+              </button>
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 text-sm rounded-lg border border-pihole-border bg-pihole-darkest text-pihole-text disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pihole-dark transition-colors"
+              >
+                Last
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -874,53 +1224,298 @@ export default function AdminPage() {
       )}
 
       {/* Jobs Tab */}
-      {activeTab === 'jobs' && (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-pihole-border">
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">User</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Type</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Status</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Created</th>
-                  <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Completed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((job) => (
-                  <tr
-                    key={job.job_id}
-                    className="border-b border-pihole-border last:border-0 hover:bg-pihole-darkest cursor-pointer"
-                    onClick={() => navigate(`/admin/jobs/${job.job_id}`)}
+      {activeTab === 'jobs' && (() => {
+        // Get progress data from the selected job
+        const progressData = selectedJob?.progress;
+        const selectedJobSources: SourceProgress[] = progressData?.sources || [];
+        const selectedJobWhitelist: WhitelistProgress | null = progressData?.whitelist || null;
+        const selectedJobFormats: Record<string, FormatProgress> = {};
+
+        // Convert formats array to record
+        if (progressData?.generation?.formats) {
+          for (const fmt of progressData.generation.formats) {
+            selectedJobFormats[fmt.format] = fmt;
+          }
+        }
+
+        return (
+          <div className="grid md:grid-cols-3 gap-6">
+            {/* Job List Sidebar */}
+            <div className="md:col-span-1">
+              <div className="card max-h-[calc(100vh-200px)] overflow-hidden flex flex-col">
+                <h2 className="font-semibold text-pihole-text mb-4 flex-shrink-0">
+                  All Jobs
+                  {jobs.some((j) => j.status === 'processing' || j.status === 'queued') && (
+                    <span className="ml-2 inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                  )}
+                </h2>
+                <div className="overflow-y-auto flex-1 -mr-2 pr-2">
+                  <JobList
+                    jobs={jobs}
+                    selectedJobId={selectedJob?.job_id || null}
+                    onSelectJob={setSelectedJob}
+                    showUsername={true}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Job Details */}
+            <div className="md:col-span-2">
+              {selectedJob ? (
+                <JobDetailView
+                  job={selectedJob}
+                  sources={selectedJobSources}
+                  whitelist={selectedJobWhitelist}
+                  formats={selectedJobFormats}
+                  showUsername={true}
+                />
+              ) : (
+                <div className="card text-center py-12">
+                  <svg
+                    className="w-16 h-16 mx-auto mb-4 text-pihole-border"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
                   >
-                    <td className="p-4 text-sm text-pihole-text">{job.username || 'default'}</td>
-                    <td className="p-4 text-sm text-pihole-text capitalize">{job.type}</td>
-                    <td className="p-4">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          {
-                            queued: 'bg-yellow-500/20 text-yellow-400',
-                            processing: 'bg-blue-500/20 text-blue-400',
-                            completed: 'bg-green-500/20 text-green-400',
-                            failed: 'bg-red-500/20 text-red-400',
-                          }[job.status] || 'bg-gray-500/20 text-gray-400'
-                        }`}
-                      >
-                        {job.status}
-                      </span>
-                    </td>
-                    <td className="p-4 text-sm text-pihole-text-muted">
-                      {new Date(job.created_at).toLocaleString()}
-                    </td>
-                    <td className="p-4 text-sm text-pihole-text-muted">
-                      {job.completed_at ? new Date(job.completed_at).toLocaleString() : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                    />
+                  </svg>
+                  <div className="text-pihole-text-muted">
+                    Select a job to view details
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+        );
+      })()}
+
+      {/* Library Tab */}
+      {activeTab === 'library' && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold text-pihole-text">Blocklist Library</h2>
+            <p className="text-sm text-pihole-text-muted">
+              Curated blocklist sources available in the visual config editor
+            </p>
+          </div>
+
+          {/* Add Entry Form */}
+          <div className="card">
+            <h3 className="font-semibold text-pihole-text mb-4">Add Library Entry</h3>
+            <div className="grid md:grid-cols-2 gap-4">
+              <input
+                type="url"
+                placeholder="URL"
+                value={newLibraryEntry.url}
+                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, url: e.target.value })}
+                className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+              />
+              <input
+                type="text"
+                placeholder="Name"
+                value={newLibraryEntry.name}
+                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, name: e.target.value })}
+                className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+              />
+              <select
+                value={newLibraryEntry.category}
+                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, category: e.target.value })}
+                className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+              >
+                {LIBRARY_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                placeholder="Domain count"
+                value={newLibraryEntry.domain_count || ''}
+                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, domain_count: parseInt(e.target.value) || 0 })}
+                className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+              />
+              <input
+                type="text"
+                placeholder="Description"
+                value={newLibraryEntry.description}
+                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, description: e.target.value })}
+                className="md:col-span-2 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+              />
+              <div className="flex items-center gap-6">
+                <label className="flex items-center gap-2 text-sm text-pihole-text cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newLibraryEntry.recommended}
+                    onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, recommended: e.target.checked })}
+                    className="rounded border-pihole-border bg-pihole-dark"
+                  />
+                  Recommended
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-pihole-text-muted">Aggressiveness:</span>
+                  <select
+                    value={newLibraryEntry.aggressiveness}
+                    onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, aggressiveness: parseInt(e.target.value) })}
+                    className="bg-pihole-darkest border border-pihole-border rounded px-2 py-1 text-sm text-pihole-text"
+                  >
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button onClick={handleAddLibraryEntry} className="btn btn-primary">
+                  Add Entry
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Entries by Category */}
+          {LIBRARY_CATEGORIES.map((category) => {
+            const entries = libraryEntries.filter((e) => e.category === category);
+            if (entries.length === 0) return null;
+
+            return (
+              <div key={category} className="card">
+                <h3 className="font-semibold text-pihole-text mb-4 capitalize">
+                  {category}
+                  <span className="ml-2 text-pihole-text-muted font-normal text-sm">
+                    ({entries.length} {entries.length === 1 ? 'entry' : 'entries'})
+                  </span>
+                </h3>
+                <div className="space-y-3">
+                  {entries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="p-4 bg-pihole-darkest rounded-lg flex items-start justify-between gap-4"
+                    >
+                      {editingEntry?.id === entry.id ? (
+                        <div className="flex-1 grid md:grid-cols-2 gap-3">
+                          <input
+                            type="url"
+                            value={editingEntry.url}
+                            onChange={(e) => setEditingEntry({ ...editingEntry, url: e.target.value })}
+                            className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
+                            placeholder="URL"
+                          />
+                          <input
+                            type="text"
+                            value={editingEntry.name}
+                            onChange={(e) => setEditingEntry({ ...editingEntry, name: e.target.value })}
+                            className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
+                            placeholder="Name"
+                          />
+                          <select
+                            value={editingEntry.category}
+                            onChange={(e) => setEditingEntry({ ...editingEntry, category: e.target.value })}
+                            className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
+                          >
+                            {LIBRARY_CATEGORIES.map((cat) => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            value={editingEntry.domain_count || ''}
+                            onChange={(e) => setEditingEntry({ ...editingEntry, domain_count: parseInt(e.target.value) || 0 })}
+                            className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
+                            placeholder="Domain count"
+                          />
+                          <input
+                            type="text"
+                            value={editingEntry.description}
+                            onChange={(e) => setEditingEntry({ ...editingEntry, description: e.target.value })}
+                            className="md:col-span-2 bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
+                            placeholder="Description"
+                          />
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 text-sm text-pihole-text cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editingEntry.recommended}
+                                onChange={(e) => setEditingEntry({ ...editingEntry, recommended: e.target.checked })}
+                                className="rounded"
+                              />
+                              Recommended
+                            </label>
+                            <select
+                              value={editingEntry.aggressiveness}
+                              onChange={(e) => setEditingEntry({ ...editingEntry, aggressiveness: parseInt(e.target.value) })}
+                              className="bg-pihole-dark border border-pihole-border rounded px-2 py-1 text-sm text-pihole-text"
+                            >
+                              {[1, 2, 3, 4, 5].map((n) => (
+                                <option key={n} value={n}>Aggr: {n}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => setEditingEntry(null)} className="btn btn-ghost text-sm">
+                              Cancel
+                            </button>
+                            <button onClick={handleUpdateLibraryEntry} className="btn btn-primary text-sm">
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-pihole-text">{entry.name}</span>
+                              {entry.recommended && (
+                                <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+                                  Recommended
+                                </span>
+                              )}
+                              <span className="text-xs text-pihole-text-muted">
+                                {formatDomainCount(entry.domain_count)} domains
+                              </span>
+                              <span className="text-xs text-pihole-text-muted">
+                                Aggr: {entry.aggressiveness}/5
+                              </span>
+                            </div>
+                            <p className="text-sm text-pihole-text-muted truncate">{entry.url}</p>
+                            {entry.description && (
+                              <p className="text-sm text-pihole-text-muted mt-1">{entry.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setEditingEntry(entry)}
+                              className="btn btn-ghost text-sm"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLibraryEntry(entry.id)}
+                              className="btn btn-ghost text-sm text-red-400"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {libraryEntries.length === 0 && (
+            <div className="card text-center py-8">
+              <p className="text-pihole-text-muted">No library entries yet. Add one above.</p>
+            </div>
+          )}
         </div>
       )}
     </div>

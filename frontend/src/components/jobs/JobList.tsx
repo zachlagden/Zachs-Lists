@@ -4,6 +4,7 @@ interface JobListProps {
   jobs: Job[];
   selectedJobId: string | null;
   onSelectJob: (job: Job) => void;
+  showUsername?: boolean;  // Show username for admin view
 }
 
 const statusColors: Record<JobStatus, string> = {
@@ -41,7 +42,7 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-export default function JobList({ jobs, selectedJobId, onSelectJob }: JobListProps) {
+export default function JobList({ jobs, selectedJobId, onSelectJob, showUsername = false }: JobListProps) {
   if (jobs.length === 0) {
     return (
       <div className="text-center text-pihole-text-muted py-8">
@@ -81,9 +82,16 @@ export default function JobList({ jobs, selectedJobId, onSelectJob }: JobListPro
             } ${isActive && !isSelected ? 'ring-1 ring-blue-500/30' : ''}`}
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-pihole-text capitalize">
-                {job.type} Build
-              </span>
+              <div className="min-w-0">
+                <span className="text-sm font-medium text-pihole-text capitalize">
+                  {job.type} Build
+                </span>
+                {showUsername && (
+                  <span className="text-xs text-pihole-text-muted ml-2">
+                    {job.username || 'default'}
+                  </span>
+                )}
+              </div>
               <JobStatusBadge status={job.status} />
             </div>
 

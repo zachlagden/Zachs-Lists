@@ -45,6 +45,7 @@ export default {
           dark: '#1a1a2e',
           darker: '#16213e',
           darkest: '#0f0f1e',
+          card: '#1a1a2e',
           accent: '#e94560',
           'accent-hover': '#ff6b6b',
           'accent-glow': 'rgba(233, 69, 96, 0.3)',

@@ -4,7 +4,7 @@ User model for MongoDB.
 
 import os
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 from flask import current_app
 
@@ -72,13 +72,27 @@ class User:
         return True
 
     @property
+    def is_root(self) -> bool:
+        """Check if user is the root admin (from env)."""
+        return self.username == current_app.config.get("ROOT_USERNAME")
+
+    @property
     def is_admin(self) -> bool:
-        return self.username == current_app.config.get("ADMIN_USERNAME")
+        """Check if user has admin privileges (root or granted admin)."""
+        return self.is_root or self._data.get("is_admin", False)
+
+    def set_admin(self, value: bool) -> None:
+        """Set admin status in database."""
+        mongo.db[self.COLLECTION].update_one(
+            {"_id": self._id},
+            {"$set": {"is_admin": value}}
+        )
+        self._data["is_admin"] = value
 
     @property
     def limits(self) -> Dict[str, int]:
-        # Admins have no limits
-        if self.is_admin:
+        # Root has no limits
+        if self.is_root:
             return {
                 "max_source_lists": 999999,
                 "max_domains": 999999999,
@@ -436,6 +450,7 @@ class User:
             "name": self.name,
             "email": self.email,
             "avatar_url": self.avatar_url,
+            "is_root": self.is_root,
             "is_admin": self.is_admin,
             "is_enabled": self.is_enabled,
             "limits": self.limits,
@@ -578,6 +593,92 @@ class User:
             .limit(per_page)
         )
         return [cls(data) for data in cursor]
+
+    @classmethod
+    def get_all_filtered(
+        cls,
+        page: int = 1,
+        per_page: int = 25,
+        search: str = None,
+        show_admins: bool = True,
+        show_regular: bool = True,
+        show_enabled: bool = True,
+        show_disabled: bool = True,
+        exclude_user_id: ObjectId = None,
+    ) -> Tuple[List["User"], int]:
+        """Get users with filtering, sorting, and pagination."""
+        conditions = []
+
+        # Exclude current user
+        if exclude_user_id:
+            conditions.append({"_id": {"$ne": exclude_user_id}})
+
+        # Search filter (username or email, case-insensitive)
+        if search:
+            conditions.append(
+                {
+                    "$or": [
+                        {"username": {"$regex": search, "$options": "i"}},
+                        {"email": {"$regex": search, "$options": "i"}},
+                    ]
+                }
+            )
+
+        # Build role/status filter
+        role_conditions = []
+
+        # Admins (including root users)
+        if show_admins:
+            if show_enabled and show_disabled:
+                role_conditions.append({"$or": [{"is_admin": True}, {"is_root": True}]})
+            elif show_enabled:
+                role_conditions.append(
+                    {"$and": [{"$or": [{"is_admin": True}, {"is_root": True}]}, {"is_enabled": True}]}
+                )
+            elif show_disabled:
+                role_conditions.append(
+                    {"$and": [{"$or": [{"is_admin": True}, {"is_root": True}]}, {"is_enabled": False}]}
+                )
+
+        # Regular users (not admin, not root)
+        if show_regular:
+            regular_base = {"is_admin": {"$ne": True}, "is_root": {"$ne": True}}
+            if show_enabled and show_disabled:
+                role_conditions.append(regular_base)
+            elif show_enabled:
+                role_conditions.append({**regular_base, "is_enabled": True})
+            elif show_disabled:
+                role_conditions.append({**regular_base, "is_enabled": False})
+
+        # If no role conditions, return empty (all filters off)
+        if not role_conditions:
+            return [], 0
+
+        conditions.append({"$or": role_conditions})
+
+        # Build final query
+        query = {"$and": conditions} if conditions else {}
+
+        # Get total count
+        total = mongo.db[cls.COLLECTION].count_documents(query)
+
+        # Sort: is_root DESC, is_admin DESC, username ASC
+        sort_order = [
+            ("is_root", -1),
+            ("is_admin", -1),
+            ("username", 1),
+        ]
+
+        skip = (page - 1) * per_page
+        cursor = (
+            mongo.db[cls.COLLECTION]
+            .find(query)
+            .sort(sort_order)
+            .skip(skip)
+            .limit(per_page)
+        )
+
+        return [cls(data) for data in cursor], total
 
     @classmethod
     def get_all_enabled(cls) -> List["User"]:

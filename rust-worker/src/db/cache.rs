@@ -1,7 +1,8 @@
 use anyhow::Result;
-use bson::{doc, Binary, DateTime as BsonDateTime};
+use bson::{doc, oid::ObjectId, Bson, DateTime as BsonDateTime};
 use chrono::Utc;
-use mongodb::{Collection, Database};
+use futures::io::AsyncReadExt;
+use mongodb::{gridfs::GridFsBucket, options::GridFsBucketOptions, Collection, Database};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -20,14 +21,14 @@ pub struct CacheStats {
     pub last_accessed_at: Option<BsonDateTime>,
 }
 
-/// Cache document in MongoDB
+/// Cache document in MongoDB (metadata only, content stored in GridFS)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheEntry {
     pub url_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Binary>,
+    pub gridfs_id: Option<ObjectId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,8 +41,9 @@ pub struct CacheEntry {
     pub updated_at: Option<BsonDateTime>,
 }
 
-/// Repository for cache operations in MongoDB
+/// Repository for cache operations in MongoDB using GridFS for content storage
 pub struct CacheRepository {
+    db: Database,
     collection: Collection<CacheEntry>,
 }
 
@@ -49,28 +51,49 @@ impl CacheRepository {
     /// Create a new cache repository
     pub fn new(db: &Database) -> Self {
         Self {
+            db: db.clone(),
             collection: db.collection("cache"),
         }
     }
 
-    /// Get cached content
+    /// Get GridFS bucket for cache files
+    fn get_bucket(&self) -> GridFsBucket {
+        self.db.gridfs_bucket(
+            GridFsBucketOptions::builder()
+                .bucket_name("cache_files".to_string())
+                .build(),
+        )
+    }
+
+    /// Get cached content from GridFS
     pub async fn get_content(&self, url_hash: &str) -> Result<Option<Vec<u8>>> {
         let filter = doc! { "url_hash": url_hash };
 
         let entry = self.collection.find_one(filter).await?;
 
         if let Some(entry) = entry {
-            if let Some(binary) = entry.content {
-                // Update access stats
-                self.touch(url_hash).await?;
-                return Ok(Some(binary.bytes));
+            if let Some(gridfs_id) = entry.gridfs_id {
+                let bucket = self.get_bucket();
+                match bucket.open_download_stream(Bson::ObjectId(gridfs_id)).await {
+                    Ok(mut stream) => {
+                        let mut content = Vec::new();
+                        stream.read_to_end(&mut content).await?;
+                        // Update access stats
+                        self.touch(url_hash).await?;
+                        return Ok(Some(content));
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to download from GridFS: {}", e);
+                        return Ok(None);
+                    }
+                }
             }
         }
 
         Ok(None)
     }
 
-    /// Store content in cache
+    /// Store content in GridFS cache
     pub async fn store(
         &self,
         url_hash: &str,
@@ -80,18 +103,35 @@ impl CacheRepository {
         last_modified: Option<&str>,
         domain_count: i64,
     ) -> Result<()> {
+        use futures::io::AsyncWriteExt;
+
         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
+        let bucket = self.get_bucket();
 
         // Calculate content hash
         let mut hasher = Sha256::new();
         hasher.update(content);
         let content_hash = format!("{:x}", hasher.finalize());
 
+        // Delete old GridFS file if exists
         let filter = doc! { "url_hash": url_hash };
+        if let Ok(Some(existing)) = self.collection.find_one(filter.clone()).await {
+            if let Some(old_gridfs_id) = existing.gridfs_id {
+                let _ = bucket.delete(Bson::ObjectId(old_gridfs_id)).await;
+            }
+        }
+
+        // Upload content to GridFS
+        let mut upload_stream = bucket.open_upload_stream(url_hash).await?;
+        upload_stream.write_all(content).await?;
+        upload_stream.close().await?;
+        let gridfs_id = upload_stream.id();
+
+        // Update metadata document
         let update = doc! {
             "$set": {
                 "url": url,
-                "content": Binary { subtype: bson::spec::BinarySubtype::Generic, bytes: content.to_vec() },
+                "gridfs_id": gridfs_id,
                 "etag": etag,
                 "last_modified": last_modified,
                 "content_hash": content_hash,
@@ -144,14 +184,33 @@ impl CacheRepository {
         Ok(())
     }
 
-    /// Cleanup stale cache entries
+    /// Cleanup stale cache entries and their GridFS files
     pub async fn cleanup_stale(&self, days: i64) -> Result<u64> {
         use chrono::Duration;
+        use futures::TryStreamExt;
 
         let cutoff = Utc::now() - Duration::days(days);
         let cutoff_bson = BsonDateTime::from_millis(cutoff.timestamp_millis());
 
         let filter = doc! { "updated_at": { "$lt": cutoff_bson } };
+        let bucket = self.get_bucket();
+
+        // First, collect all gridfs_ids to delete
+        let mut cursor = self.collection.find(filter.clone()).await?;
+        let mut gridfs_ids_to_delete = Vec::new();
+
+        while let Some(entry) = cursor.try_next().await? {
+            if let Some(gridfs_id) = entry.gridfs_id {
+                gridfs_ids_to_delete.push(gridfs_id);
+            }
+        }
+
+        // Delete GridFS files
+        for gridfs_id in &gridfs_ids_to_delete {
+            let _ = bucket.delete(Bson::ObjectId(*gridfs_id)).await;
+        }
+
+        // Delete metadata documents
         let result = self.collection.delete_many(filter).await?;
 
         Ok(result.deleted_count)
@@ -165,10 +224,10 @@ impl CacheRepository {
         let cutoff = Utc::now() - Duration::days(7);
         let cutoff_bson = BsonDateTime::from_millis(cutoff.timestamp_millis());
 
-        // Check if cache entry exists with content and is recent
+        // Check if cache entry exists with gridfs_id and is recent
         let filter = doc! {
             "url_hash": url_hash,
-            "content": { "$exists": true, "$ne": null },
+            "gridfs_id": { "$exists": true, "$ne": null },
             "updated_at": { "$gte": cutoff_bson }
         };
 

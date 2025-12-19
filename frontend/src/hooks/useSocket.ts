@@ -167,6 +167,108 @@ export function useJobSocket({
   };
 }
 
+// Validation progress types
+interface ValidationProgress {
+  current: number;
+  total: number;
+  url: string;
+  status: string;
+}
+
+interface ValidationResult {
+  issues: Array<{
+    severity: 'error' | 'warning';
+    message: string;
+    line?: number;
+    url?: string;
+  }>;
+  validated_count: number;
+  error_count: number;
+  warning_count: number;
+  has_errors: boolean;
+  has_warnings: boolean;
+}
+
+interface UseValidationSocketOptions {
+  userId?: string;
+  onProgress?: (progress: ValidationProgress) => void;
+  onComplete?: (result: ValidationResult) => void;
+}
+
+/**
+ * Hook for subscribing to config validation progress.
+ */
+export function useValidationSocket({
+  userId,
+  onProgress,
+  onComplete,
+}: UseValidationSocketOptions) {
+  const socketRef = useRef<Socket | null>(null);
+  const subscribedRef = useRef(false);
+
+  // Store callbacks in ref
+  const callbacksRef = useRef({ onProgress, onComplete });
+
+  useEffect(() => {
+    callbacksRef.current = { onProgress, onComplete };
+  });
+
+  const subscribe = useCallback(() => {
+    if (!userId) return;
+
+    const s = getSocket();
+    socketRef.current = s;
+
+    if (subscribedRef.current) return;
+
+    s.emit('subscribe:validation', { user_id: userId });
+    subscribedRef.current = true;
+  }, [userId]);
+
+  const unsubscribe = useCallback(() => {
+    if (!userId) return;
+
+    const s = socketRef.current;
+    if (!s || !subscribedRef.current) return;
+
+    s.emit('unsubscribe:validation', { user_id: userId });
+    subscribedRef.current = false;
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const s = getSocket();
+    socketRef.current = s;
+
+    const handleProgress = (progress: ValidationProgress) => {
+      callbacksRef.current.onProgress?.(progress);
+    };
+
+    const handleComplete = (result: ValidationResult) => {
+      callbacksRef.current.onComplete?.(result);
+    };
+
+    s.on('config:validation_progress', handleProgress);
+    s.on('config:validation_complete', handleComplete);
+
+    // Subscribe on mount
+    subscribe();
+
+    return () => {
+      s.off('config:validation_progress', handleProgress);
+      s.off('config:validation_complete', handleComplete);
+      unsubscribe();
+    };
+  }, [userId, subscribe, unsubscribe]);
+
+  return {
+    isConnected: socket?.connected ?? false,
+    subscribe,
+    unsubscribe,
+  };
+}
+
 interface UseStatsSocketOptions {
   onStatsUpdated?: () => void;
 }

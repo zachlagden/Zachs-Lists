@@ -29,8 +29,8 @@ class Config:
     GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
     GITHUB_API_URL = "https://api.github.com"
 
-    # Admin
-    ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "zachlagden")
+    # Root user (super admin) - REQUIRED
+    ROOT_USERNAME = os.environ.get("ROOT_USERNAME")
 
     # Data paths (output files still on filesystem for nginx serving)
     DATA_DIR = os.environ.get("DATA_DIR", "/opt/webapps/zml/lists.zachlagden.uk/data")
