@@ -163,11 +163,16 @@ def github_callback():
             name=user_data.get("name"),  # GitHub display name
         )
 
+        # Check if user is admin - reject non-admins during development
+        if not user.is_admin:
+            current_app.logger.warning(f"Non-admin user {user.username} attempted login - rejected")
+            return redirect(f"{current_app.config['FRONTEND_URL']}/login?error=admin_only")
+
         # Set session
         session.permanent = True
         session["user_id"] = str(user.id)
 
-        current_app.logger.info(f"User {user.username} logged in")
+        current_app.logger.info(f"Admin {user.username} logged in")
         return redirect(f"{current_app.config['FRONTEND_URL']}/dashboard")
 
     except requests.RequestException as e:

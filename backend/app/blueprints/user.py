@@ -43,6 +43,7 @@ def update_config(user: User):
     # Validate format and count
     errors = validate_blocklist_config(config, user.limits["max_source_lists"])
     if errors:
+        current_app.logger.warning(f"User {user.username} config validation failed: {errors}")
         return jsonify({"error": "Invalid configuration", "details": errors}), 400
 
     # Save config
@@ -258,23 +259,16 @@ def mark_jobs_read(user: User):
 @login_required
 def copy_default_template(user: User):
     """Copy default config as a template for user."""
-    default_dir = current_app.config["DEFAULT_DIR"]
-    default_config = os.path.join(default_dir, "config", "blocklists.conf")
-    default_whitelist = os.path.join(default_dir, "config", "whitelist.txt")
+    from app.extensions import mongo
 
-    # Check if default config exists
-    if not os.path.exists(default_config):
+    # Get default config from MongoDB system_config collection
+    system_config = mongo.db["system_config"].find_one({"_id": "default_config"})
+
+    if not system_config:
         return jsonify({"error": "Default configuration not available"}), 404
 
-    # Read default config
-    with open(default_config, "r", encoding="utf-8") as f:
-        config_content = f.read()
-
-    # Read default whitelist if exists
-    whitelist_content = ""
-    if os.path.exists(default_whitelist):
-        with open(default_whitelist, "r", encoding="utf-8") as f:
-            whitelist_content = f.read()
+    config_content = system_config.get("blocklists", "")
+    whitelist_content = system_config.get("whitelist", "")
 
     # Check for overwrite option
     data = request.get_json() or {}

@@ -44,10 +44,14 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <div className="glass-card p-8">
             <div className="text-center mb-8">
-              <h1 className="font-display text-3xl text-chrome-light mb-2">WELCOME BACK</h1>
+              <h1 className="font-display text-3xl text-chrome-light mb-2">ADMIN LOGIN</h1>
               <p className="text-chrome">
                 Sign in to manage your blocklists
               </p>
+            </div>
+
+            <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 px-4 py-3 rounded-lg mb-6 text-sm">
+              This dashboard is currently in development and restricted to administrators only.
             </div>
 
             {error && (
@@ -55,7 +59,8 @@ export default function LoginPage() {
                 {error === 'access_denied' && 'You denied access to your GitHub account.'}
                 {error === 'no_email' && 'Unable to retrieve email from GitHub. Please ensure your email is public or verify your email.'}
                 {error === 'disabled' && 'Your account has been disabled. Please contact support.'}
-                {!['access_denied', 'no_email', 'disabled'].includes(error) && 'An error occurred during authentication.'}
+                {error === 'admin_only' && 'Access is currently restricted to administrators only.'}
+                {!['access_denied', 'no_email', 'disabled', 'admin_only'].includes(error) && 'An error occurred during authentication.'}
               </div>
             )}
 
@@ -64,7 +69,7 @@ export default function LoginPage() {
               className="w-full btn bg-[#24292f] hover:bg-[#32383f] text-white flex items-center justify-center gap-3 py-3"
             >
               <GitHubIcon className="w-5 h-5" />
-              Continue with GitHub
+              Admin Login with GitHub
             </button>
 
             <p className="text-chrome text-sm text-center mt-6">

@@ -196,7 +196,7 @@ export default function ConfigPage() {
               <div>
                 <h2 className="font-semibold text-pihole-text">Blocklist Sources</h2>
                 <p className="text-sm text-pihole-text-muted mt-1">
-                  Enter URLs of blocklists to include, one per line. Lines starting with # are comments.
+                  Format: <code className="text-pihole-accent">url|name|category</code> — one per line. Lines starting with # are comments.
                 </p>
               </div>
             </div>
@@ -204,7 +204,7 @@ export default function ConfigPage() {
               value={localConfig}
               onChange={(e) => setLocalConfig(e.target.value)}
               className="w-full h-96 bg-pihole-darkest border border-pihole-border rounded-lg p-4 font-mono text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
-              placeholder="# Enter blocklist URLs here&#10;https://example.com/blocklist.txt&#10;https://another.com/hosts.txt"
+              placeholder="# Enter blocklist sources here&#10;https://example.com/blocklist.txt|my_blocklist|advertising&#10;https://another.com/hosts.txt|another_list|malicious"
               spellCheck={false}
             />
           </div>
@@ -259,10 +259,11 @@ export default function ConfigPage() {
           <div>
             <h4 className="text-pihole-text font-medium mb-2">Blocklist Format</h4>
             <ul className="space-y-1 text-pihole-text-muted">
-              <li>• One URL per line</li>
+              <li>• Format: <code className="text-pihole-accent">url|name|category</code></li>
+              <li>• <code className="text-pihole-accent">url</code> - HTTP/HTTPS URL to blocklist</li>
+              <li>• <code className="text-pihole-accent">name</code> - Unique identifier (alphanumeric, dashes, underscores)</li>
+              <li>• <code className="text-pihole-accent">category</code> - e.g. advertising, malicious, tracking, suspicious</li>
               <li>• Lines starting with # are comments</li>
-              <li>• Supports hosts files, plain domains, and AdBlock format</li>
-              <li>• HTTP and HTTPS URLs only</li>
             </ul>
           </div>
           <div>
