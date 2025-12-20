@@ -286,6 +286,26 @@ impl WhitelistManager {
             patterns: pattern_matches,
         }
     }
+
+    /// Export all patterns as normalized strings for fingerprint computation
+    /// Returns patterns sorted for consistent hashing
+    pub fn patterns_as_strings(&self) -> Vec<String> {
+        let mut patterns: Vec<String> = self
+            .all_patterns
+            .iter()
+            .map(|p| {
+                // Normalize pattern to lowercase for consistent fingerprinting
+                p.original.to_lowercase()
+            })
+            .collect();
+        patterns.sort();
+        patterns
+    }
+
+    /// Check if whitelist is empty
+    pub fn is_empty(&self) -> bool {
+        self.all_patterns.is_empty()
+    }
 }
 
 impl Default for WhitelistManager {

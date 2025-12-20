@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Copy, Check, ExternalLink, Star } from 'lucide-react';
+import { Copy, Check, ExternalLink, Star } from 'lucide-react';
 import { api, listsApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import PublicNav from '../components/PublicNav';
@@ -16,13 +16,6 @@ interface FeaturedList {
   display_order: number;
 }
 
-interface CommunityList {
-  username: string;
-  name: string;
-  domain_count: number;
-  last_updated: string;
-}
-
 interface DefaultList {
   name: string;
   domain_count: number;
@@ -31,25 +24,21 @@ interface DefaultList {
 }
 
 export default function BrowsePage() {
-  const [activeTab, setActiveTab] = useState<'default' | 'featured' | 'community'>('default');
+  const [activeTab, setActiveTab] = useState<'default' | 'featured'>('default');
   const [defaultLists, setDefaultLists] = useState<DefaultList[]>([]);
   const [featuredLists, setFeaturedLists] = useState<FeaturedList[]>([]);
-  const [communityLists, setCommunityLists] = useState<CommunityList[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [defaultData, featuredData, communityData] = await Promise.all([
+        const [defaultData, featuredData] = await Promise.all([
           listsApi.getDefaultLists().catch(() => []),
           api.get('/api/browse/featured').then((r) => r.data).catch(() => []),
-          api.get('/api/browse/community').then((r) => r.data).catch(() => []),
         ]);
         setDefaultLists(defaultData);
         setFeaturedLists(featuredData);
-        setCommunityLists(communityData);
       } catch (error) {
         console.error('Failed to fetch lists:', error);
       } finally {
@@ -64,12 +53,6 @@ export default function BrowsePage() {
     setCopiedUrl(url);
     setTimeout(() => setCopiedUrl(null), 2000);
   };
-
-  const filteredCommunityLists = communityLists.filter(
-    (list) =>
-      list.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      list.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   if (loading) {
     return (
@@ -123,16 +106,6 @@ export default function BrowsePage() {
                   {featuredLists.length}
                 </span>
               )}
-            </button>
-            <button
-              onClick={() => setActiveTab('community')}
-              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'community'
-                  ? 'border-rust text-rust'
-                  : 'border-transparent text-chrome hover:text-chrome-light'
-              }`}
-            >
-              Community
             </button>
           </div>
         </div>
@@ -249,73 +222,6 @@ export default function BrowsePage() {
                       </button>
                       <a
                         href={`/api/u/${list.username}/${list.list_name}.txt`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn btn-ghost text-sm"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Community Lists Tab */}
-        {activeTab === 'community' && (
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <p className="text-chrome">
-                Public lists shared by community members.
-              </p>
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search lists..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="input w-64 pl-10"
-                />
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-chrome" />
-              </div>
-            </div>
-
-            {filteredCommunityLists.length === 0 ? (
-              <div className="glass-card text-center py-12 text-chrome">
-                {searchQuery ? 'No lists match your search.' : 'No community lists available yet.'}
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredCommunityLists.map((list) => (
-                  <div key={`${list.username}-${list.name}`} className="glass-card p-5">
-                    <div className="mb-3">
-                      <h3 className="font-semibold text-chrome-light">{list.name}</h3>
-                      <p className="text-sm text-chrome">by {list.username}</p>
-                    </div>
-                    <div className="flex items-center justify-between text-sm text-chrome mb-4">
-                      <span>{list.domain_count?.toLocaleString()} domains</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => copyToClipboard(getUserListUrl(list.username, list.name))}
-                        className="btn btn-primary flex-1 text-sm"
-                      >
-                        {copiedUrl === getUserListUrl(list.username, list.name) ? (
-                          <>
-                            <Check className="w-4 h-4" />
-                            Copied!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-4 h-4" />
-                            Copy URL
-                          </>
-                        )}
-                      </button>
-                      <a
-                        href={`/api/u/${list.username}/${list.name}.txt`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="btn btn-ghost text-sm"

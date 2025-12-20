@@ -7,9 +7,8 @@ import { getUserListUrl } from '../config/site';
 
 export default function ListsPage() {
   const { user } = useAuthStore();
-  const { lists, setLists, updateListVisibility } = useUserDataStore();
+  const { lists, setLists } = useUserDataStore();
   const [loading, setLoading] = useState(true);
-  const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,18 +24,6 @@ export default function ListsPage() {
     };
     fetchLists();
   }, [setLists]);
-
-  const handleToggleVisibility = async (list: UserList) => {
-    setTogglingVisibility(list.name);
-    try {
-      await userApi.toggleListVisibility(list.name, !list.is_public);
-      updateListVisibility(list.name, !list.is_public);
-    } catch (error) {
-      console.error('Failed to toggle visibility:', error);
-    } finally {
-      setTogglingVisibility(null);
-    }
-  };
 
   const getListUrl = (list: UserList, format?: string) => {
     const base = getUserListUrl(user?.username || '', list.name);
@@ -83,38 +70,12 @@ export default function ListsPage() {
         <div className="space-y-4">
           {lists.map((list) => (
             <div key={list.name} className="card">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold text-pihole-text">{list.name}</h3>
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        list.is_public
-                          ? 'bg-green-500/20 text-green-400'
-                          : 'bg-gray-500/20 text-gray-400'
-                      }`}
-                    >
-                      {list.is_public ? 'Public' : 'Private'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-pihole-text-muted mt-1">
-                    {list.domain_count?.toLocaleString()} domains • Last updated{' '}
-                    {new Date(list.last_updated).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleToggleVisibility(list)}
-                  disabled={togglingVisibility === list.name}
-                  className="btn btn-ghost text-sm"
-                >
-                  {togglingVisibility === list.name ? (
-                    <LoadingSpinner size="sm" />
-                  ) : list.is_public ? (
-                    'Make Private'
-                  ) : (
-                    'Make Public'
-                  )}
-                </button>
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-pihole-text">{list.name}</h3>
+                <p className="text-sm text-pihole-text-muted mt-1">
+                  {list.domain_count?.toLocaleString()} domains • Last updated{' '}
+                  {new Date(list.last_updated).toLocaleString()}
+                </p>
               </div>
 
               {/* Formats */}
@@ -164,18 +125,6 @@ export default function ListsPage() {
                   ))}
                 </div>
               </div>
-
-              {/* View Link */}
-              <div className="mt-4 pt-4 border-t border-pihole-border">
-                <a
-                  href={`/api/u/${user?.username}/${list.name}.txt`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-pihole-accent hover:underline"
-                >
-                  View raw list
-                </a>
-              </div>
             </div>
           ))}
         </div>
@@ -199,12 +148,6 @@ export default function ListsPage() {
               <li>• <strong>plain</strong> - <code>domain.com</code> (one per line)</li>
               <li>• <strong>adblock</strong> - <code>||domain.com^</code> (AdBlock/uBlock)</li>
             </ul>
-          </div>
-          <div>
-            <h4 className="text-pihole-text font-medium mb-1">Privacy</h4>
-            <p className="text-pihole-text-muted">
-              Private lists require authentication. Public lists can be accessed by anyone with the URL.
-            </p>
           </div>
         </div>
       </div>

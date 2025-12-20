@@ -2,7 +2,7 @@ use anyhow::Result;
 use bson::{doc, oid::ObjectId, DateTime as BsonDateTime};
 use chrono::Utc;
 use mongodb::{
-    options::{FindOneAndUpdateOptions, ReturnDocument},
+    options::{FindOneAndUpdateOptions, FindOneOptions, ReturnDocument},
     Collection, Database,
 };
 use serde::{Deserialize, Serialize};
@@ -263,5 +263,23 @@ impl JobRepository {
             .await?;
 
         Ok(result.modified_count)
+    }
+
+    /// Get the result from a user's last completed job
+    ///
+    /// Used for copying build stats when fingerprint matches another user.
+    pub async fn get_last_completed_result(&self, username: &str) -> Result<Option<JobResult>> {
+        let filter = doc! {
+            "username": username,
+            "status": "completed",
+            "result": { "$exists": true }
+        };
+
+        let options = FindOneOptions::builder()
+            .sort(doc! { "completed_at": -1 })
+            .build();
+
+        let job = self.collection.find_one(filter).with_options(options).await?;
+        Ok(job.and_then(|j| j.result))
     }
 }

@@ -12,10 +12,10 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::db::job::{Job, JobRepository};
 use crate::db::progress::{
-    JobProgress, JobResult, OutputFile, SourceProgress,
+    JobProgress, JobResult, JobStage, OutputFile, SourceProgress,
     SourceStatus,
 };
-use crate::db::user::{ListMetadata, UserRepository};
+use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
 use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
@@ -91,6 +91,121 @@ impl JobProcessor {
         format!("{:x}", hasher.finalize())
     }
 
+    /// Compute normalized config fingerprint for cross-user matching
+    ///
+    /// Creates a fingerprint from sorted, normalized sources and whitelist patterns.
+    /// Two configs with same sources and whitelist (regardless of comments/order) → same fingerprint.
+    fn compute_config_fingerprint(blocklists: &str, whitelist: &str) -> String {
+        // Parse and sort sources by URL
+        let mut sources = Downloader::parse_config(blocklists);
+        sources.sort_by(|a, b| a.url.cmp(&b.url));
+
+        // Create normalized string representation of sources
+        let sources_str: Vec<String> = sources
+            .iter()
+            .map(|s| {
+                format!(
+                    "{}|{}|{}",
+                    s.url.to_lowercase().trim_end_matches('/'),
+                    s.name.to_lowercase(),
+                    s.category.as_deref().unwrap_or("").to_lowercase()
+                )
+            })
+            .collect();
+
+        // Parse and sort whitelist patterns
+        let whitelist_mgr = WhitelistManager::from_content(whitelist);
+        let patterns = whitelist_mgr.patterns_as_strings();
+
+        // Hash combined normalized content
+        let combined = format!("{}\n---\n{}", sources_str.join("\n"), patterns.join("\n"));
+        let mut hasher = Sha256::new();
+        hasher.update(combined.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Copy output files from a matching user to the target user
+    async fn copy_output_files(
+        &self,
+        source: &MatchedUser,
+        target_username: &str,
+    ) -> Result<Vec<OutputFile>> {
+        let source_dir = self.config.output_dir(&source.username);
+        let target_dir = self.config.output_dir(target_username);
+
+        info!(
+            "Copying output files from {} to {}",
+            source_dir.display(),
+            target_dir.display()
+        );
+
+        // Ensure target directory exists
+        std::fs::create_dir_all(&target_dir)?;
+
+        // Clean up any existing files in target
+        if let Ok(entries) = std::fs::read_dir(&target_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "gz") {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+
+        // Copy all .gz files from source to target
+        let mut output_files = Vec::new();
+        let entries = std::fs::read_dir(&source_dir)?;
+
+        for entry in entries.flatten() {
+            let filename = entry.file_name();
+            let filename_str = filename.to_string_lossy();
+
+            if filename_str.ends_with(".txt.gz") {
+                let source_path = entry.path();
+                let target_path = target_dir.join(&filename);
+
+                std::fs::copy(&source_path, &target_path)?;
+
+                // Extract format and domain count from filename
+                // Format: {name}_{format}.txt.gz (e.g., all_domains_hosts.txt.gz)
+                let base_name = filename_str.trim_end_matches(".txt.gz");
+                let parts: Vec<&str> = base_name.rsplitn(2, '_').collect();
+                let format = if parts.len() == 2 {
+                    parts[0].to_string()
+                } else {
+                    "unknown".to_string()
+                };
+
+                // Get domain count from source's list metadata if available
+                let domain_count = source
+                    .lists
+                    .iter()
+                    .find(|l| base_name.starts_with(&l.name))
+                    .map(|l| l.domain_count)
+                    .unwrap_or(0);
+
+                let size_bytes = std::fs::metadata(&target_path)?.len();
+
+                output_files.push(OutputFile {
+                    name: filename_str.to_string(),
+                    format,
+                    size_bytes,
+                    domain_count,
+                });
+
+                debug!("Copied {} ({} bytes)", filename_str, size_bytes);
+            }
+        }
+
+        info!(
+            "Copied {} output files ({} bytes total)",
+            output_files.len(),
+            output_files.iter().map(|f| f.size_bytes).sum::<u64>()
+        );
+
+        Ok(output_files)
+    }
+
     /// Process a single job
     pub async fn process_job(&self, job: &Job) -> Result<()> {
         let start_time = Instant::now();
@@ -116,6 +231,9 @@ impl JobProcessor {
 
         // Compute current config hash
         let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
+
+        // Compute normalized fingerprint for cross-user matching
+        let config_fingerprint = Self::compute_config_fingerprint(&config_content, &whitelist_content);
 
         // Parse sources
         let sources = Downloader::parse_config(&config_content);
@@ -146,6 +264,166 @@ impl JobProcessor {
                         )
                         .await?;
                     return Ok(());
+                }
+            }
+        }
+
+        // Check for matching config fingerprint in other users (copy-on-match optimization)
+        if let Ok(Some(matched)) = self
+            .user_repo
+            .find_user_by_fingerprint(&config_fingerprint, &job.username)
+            .await
+        {
+            info!(
+                "Config matches user '{}' - copying output files instead of rebuilding",
+                matched.username
+            );
+
+            // Get source user's last job stats first (needed for domain counts and stats)
+            let source_stats = self
+                .job_repo
+                .get_last_completed_result(&matched.username)
+                .await
+                .ok()
+                .flatten();
+
+            // Copy output files from matched user
+            match self.copy_output_files(&matched, &job.username).await {
+                Ok(mut output_files) => {
+                    // Populate domain counts from source_stats.output_files if available
+                    // This handles the case where matched.lists is empty (e.g., __default__)
+                    if let Some(ref src) = source_stats {
+                        for file in &mut output_files {
+                            if let Some(src_file) = src.output_files.iter().find(|f| f.name == file.name) {
+                                file.domain_count = src_file.domain_count;
+                            }
+                        }
+                    }
+
+                    let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
+                    let unique_domains = output_files
+                        .iter()
+                        .find(|f| f.name.starts_with("all_domains"))
+                        .map(|f| f.domain_count)
+                        .unwrap_or_else(|| {
+                            // Fallback to source stats or matched.total_domains
+                            source_stats
+                                .as_ref()
+                                .map(|s| s.unique_domains)
+                                .unwrap_or(matched.total_domains)
+                        });
+
+                    // Build result indicating this was a copy, with stats from source
+                    let result = if let Some(ref src) = source_stats {
+                        JobResult::copied_from_user(
+                            matched.username.clone(),
+                            src.total_domains,
+                            unique_domains,
+                            output_files.clone(),
+                            src.sources_processed,
+                            src.sources_failed,
+                            src.whitelisted_removed,
+                            src.categories.clone(),
+                        )
+                    } else {
+                        // Fallback if no source job found
+                        JobResult::copied_from_user(
+                            matched.username.clone(),
+                            matched.total_domains,
+                            unique_domains,
+                            output_files.clone(),
+                            0,
+                            0,
+                            0,
+                            std::collections::HashMap::new(),
+                        )
+                    };
+
+                    // Update progress to completed state for UI
+                    let sources_count = source_stats
+                        .as_ref()
+                        .map(|s| s.sources_processed + s.sources_failed)
+                        .unwrap_or(0);
+                    let mut progress = JobProgress::default();
+                    progress.current_step = "completed".to_string();
+                    progress.stage = JobStage::Completed;
+                    progress.total_sources = sources_count;
+                    progress.processed_sources = sources_count;
+                    self.job_repo.update_progress(&job.id, &progress).await?;
+
+                    // Mark job as completed
+                    self.job_repo.complete(&job.id, result).await?;
+
+                    // Build list metadata from output files
+                    let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
+                    let mut all_lists: Vec<ListMetadata> = Vec::new();
+
+                    // If we have lists from matched user, use those
+                    if !matched.lists.is_empty() {
+                        for list in &matched.lists {
+                            all_lists.push(ListMetadata {
+                                name: list.name.clone(),
+                                is_public: true,
+                                formats: list.formats.clone(),
+                                domain_count: list.domain_count,
+                                last_updated: now,
+                            });
+                        }
+                    } else {
+                        // Build list metadata from output files
+                        let mut seen_names: HashSet<String> = HashSet::new();
+                        for file in &output_files {
+                            let base_name = file.name.trim_end_matches(".txt.gz");
+                            let name = base_name.rsplitn(2, '_').last().unwrap_or(base_name);
+                            if !seen_names.contains(name) {
+                                seen_names.insert(name.to_string());
+                                all_lists.push(ListMetadata {
+                                    name: name.to_string(),
+                                    is_public: true,
+                                    formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
+                                    domain_count: file.domain_count,
+                                    last_updated: now,
+                                });
+                            }
+                        }
+                    }
+
+                    // Update user document
+                    if let Err(e) = self
+                        .user_repo
+                        .update_after_build(
+                            &job.username,
+                            all_lists,
+                            unique_domains,
+                            total_output_size,
+                            current_config_hash.clone(),
+                            config_fingerprint.clone(),
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to update user document for {}: {}",
+                            job.username, e
+                        );
+                    }
+
+                    let duration = start_time.elapsed();
+                    info!(
+                        "Job {} completed in {:.2}s (copied from {}) - {} domains",
+                        job.job_id,
+                        duration.as_secs_f64(),
+                        matched.username,
+                        unique_domains
+                    );
+
+                    return Ok(());
+                }
+                Err(e) => {
+                    // Copy failed, fall through to normal build
+                    warn!(
+                        "Failed to copy files from {}: {} - proceeding with normal build",
+                        matched.username, e
+                    );
                 }
             }
         }
@@ -267,31 +545,67 @@ impl JobProcessor {
         self.job_repo.complete(&job.id, result).await?;
 
         // Update user document with lists and stats
-        // Get existing lists to preserve is_public settings
-        let existing_lists = self.user_repo.get_existing_lists(&job.username).await
-            .unwrap_or_default();
-
-        // Build list metadata for "all_domains" (combined list)
+        // Build list metadata for all categories + all_domains
         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
+        let mut all_lists: Vec<ListMetadata> = Vec::new();
+
+        // Group output files by category to build ListMetadata for each
+        // Files are named: {category}_{format}.txt.gz (e.g., advertising_hosts.txt.gz)
+        // or all_domains_{format}.txt.gz for the combined list
+        let mut category_domain_counts: HashMap<String, u64> = HashMap::new();
+        for file in &output_files {
+            // Skip all_domains files - handled separately below
+            if file.name.starts_with("all_domains") {
+                continue;
+            }
+
+            // Extract category name: e.g., "advertising_hosts.txt.gz" -> "advertising"
+            // or "uncategorized_hosts.txt.gz" -> "uncategorized"
+            if let Some(category) = file.name.split('_').next() {
+                // Only count hosts format files to get domain count (avoid triple-counting)
+                if file.format == "hosts" {
+                    category_domain_counts.insert(category.to_string(), file.domain_count);
+                }
+            }
+        }
+
+        // Build ListMetadata for each category
+        for (category, domain_count) in &category_domain_counts {
+            let list = ListMetadata {
+                name: category.clone(),
+                is_public: true,  // All lists are always public
+                formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
+                domain_count: *domain_count,
+                last_updated: now,
+            };
+            all_lists.push(list);
+        }
+
+        // Add all_domains (combined list)
         let all_domains_list = ListMetadata {
             name: "all_domains".to_string(),
-            // Preserve is_public from existing list, default to false
-            is_public: existing_lists.iter()
-                .find(|l| l.name == "all_domains")
-                .map(|l| l.is_public)
-                .unwrap_or(false),
+            is_public: true,  // All lists are always public
             formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
             domain_count: unique_domains,
             last_updated: now,
         };
+        all_lists.push(all_domains_list);
+
+        info!(
+            "Saving {} lists for user {}: {:?}",
+            all_lists.len(),
+            job.username,
+            all_lists.iter().map(|l| &l.name).collect::<Vec<_>>()
+        );
 
         // Update user document
         if let Err(e) = self.user_repo.update_after_build(
             &job.username,
-            vec![all_domains_list],
+            all_lists,
             unique_domains,
             total_output_size,
             current_config_hash,
+            config_fingerprint,
         ).await {
             warn!("Failed to update user document for {}: {}", job.username, e);
             // Don't fail the job for this - it's not critical

@@ -89,13 +89,6 @@ export const userApi = {
     return response.data;
   },
 
-  toggleListVisibility: async (name: string, isPublic: boolean) => {
-    const response = await api.put(`/api/user/lists/${name}/visibility`, {
-      is_public: isPublic,
-    });
-    return response.data;
-  },
-
   triggerBuild: async () => {
     const response = await api.post('/api/user/build');
     return response.data;

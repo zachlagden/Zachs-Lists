@@ -530,9 +530,6 @@ def add_featured_list(admin: User):
     if not list_info:
         return jsonify({"error": "List not found"}), 404
 
-    if not list_info.get("is_public"):
-        return jsonify({"error": "List is not public"}), 400
-
     # Get next order number
     max_order = mongo.db.featured_lists.find_one(sort=[("order", -1)])
     next_order = (max_order.get("order", 0) + 1) if max_order else 1

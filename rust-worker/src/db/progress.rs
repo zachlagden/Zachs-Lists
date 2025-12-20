@@ -271,6 +271,9 @@ pub struct JobResult {
     pub errors: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<String>,
+    /// Username whose output was copied (for fingerprint-matched builds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copied_from: Option<String>,
 }
 
 /// Output file info
@@ -302,6 +305,7 @@ impl JobResult {
             categories: std::collections::HashMap::new(),
             errors: Vec::new(),
             skip_reason: None,
+            copied_from: None,
         }
     }
 
@@ -317,6 +321,34 @@ impl JobResult {
             categories: std::collections::HashMap::new(),
             errors,
             skip_reason: None,
+            copied_from: None,
+        }
+    }
+
+    /// Create a result for a job that copied output from another user
+    ///
+    /// Copies all build stats from the source user's last job, except build time.
+    pub fn copied_from_user(
+        source_username: String,
+        total_domains: u64,
+        unique_domains: u64,
+        output_files: Vec<OutputFile>,
+        sources_processed: u64,
+        sources_failed: u64,
+        whitelisted_removed: u64,
+        categories: std::collections::HashMap<String, u64>,
+    ) -> Self {
+        Self {
+            sources_processed,
+            sources_failed,
+            total_domains,
+            unique_domains,
+            whitelisted_removed,
+            output_files,
+            categories,
+            errors: Vec::new(),
+            skip_reason: None,
+            copied_from: Some(source_username),
         }
     }
 }

@@ -33,7 +33,6 @@ export interface UserStats {
 
 export interface UserList {
   name: string;
-  is_public: boolean;
   formats: string[];
   domain_count: number;
   last_updated: string;

@@ -266,26 +266,6 @@ def get_lists(user: User):
     )
 
 
-@user_bp.route("/lists/<name>/visibility", methods=["PUT"])
-@login_required
-def toggle_visibility(user: User, name: str):
-    """Toggle public/private for a list."""
-    data = request.get_json()
-    is_public = data.get("is_public", False)
-
-    # Check if list exists
-    list_info = user.get_list(name)
-    if not list_info:
-        return jsonify({"error": "List not found"}), 404
-
-    user.set_list_visibility(name, is_public)
-    current_app.logger.info(
-        f"User {user.username} set list {name} visibility to {is_public}"
-    )
-
-    return jsonify({"success": True, "is_public": is_public})
-
-
 @user_bp.route("/build", methods=["POST"])
 @login_required
 def trigger_build(user: User):

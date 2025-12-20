@@ -221,13 +221,6 @@ class User:
                 return lst
         return None
 
-    def set_list_visibility(self, name: str, is_public: bool) -> None:
-        """Set visibility for a list."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id, "lists.name": name},
-            {"$set": {"lists.$.is_public": is_public, "updated_at": datetime.utcnow()}},
-        )
-
     def update_lists(self, lists_data: List[Dict[str, Any]]) -> None:
         """Update user's lists."""
         mongo.db[self.COLLECTION].update_one(

@@ -57,7 +57,6 @@ interface UserDataState {
   setStats: (stats: UserStats) => void;
   setLimits: (limits: UserLimits) => void;
   setRemainingUpdates: (count: number) => void;
-  updateListVisibility: (name: string, isPublic: boolean) => void;
   reset: () => void;
 }
 
@@ -75,12 +74,6 @@ export const useUserDataStore = create<UserDataState>((set) => ({
   setStats: (stats) => set({ stats }),
   setLimits: (limits) => set({ limits }),
   setRemainingUpdates: (count) => set({ remainingUpdates: count }),
-  updateListVisibility: (name, isPublic) =>
-    set((state) => ({
-      lists: state.lists.map((list) =>
-        list.name === name ? { ...list, is_public: isPublic } : list
-      ),
-    })),
   reset: () =>
     set({
       config: '',

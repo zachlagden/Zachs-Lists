@@ -230,8 +230,7 @@ def serve_user_list(username: str, name: str):
     if not list_info:
         abort(404)
 
-    if not list_info.get("is_public", False):
-        abort(403)
+    # All lists are public - no visibility check needed
 
     # Get format
     format_type = request.args.get("format", "hosts")
@@ -367,7 +366,7 @@ def get_featured_lists():
             continue
 
         list_info = user.get_list(f.get("list_name"))
-        if not list_info or not list_info.get("is_public"):
+        if not list_info:
             continue
 
         result.append({
@@ -388,15 +387,13 @@ def get_community_lists():
     """Get all public community lists."""
     from app.extensions import mongo
 
-    # Get all enabled users with public lists
-    users = list(mongo.db.users.find({"is_enabled": True, "lists.is_public": True}))
+    # Get all enabled users with lists
+    users = list(mongo.db.users.find({"is_enabled": True, "lists": {"$exists": True, "$ne": []}}))
 
     result = []
     for u in users:
         username = u.get("username")
         for list_info in u.get("lists", []):
-            if not list_info.get("is_public"):
-                continue
             result.append({
                 "username": username,
                 "name": list_info.get("name"),
