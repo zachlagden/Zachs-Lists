@@ -29,6 +29,12 @@ function formatDomainChange(change: number | null | undefined): { text: string; 
   return { text: change.toLocaleString(), color: 'text-red-400' };
 }
 
+const formatBadgeStyles: Record<string, string> = {
+  hosts: 'bg-blue-500/20 text-blue-400',
+  plain: 'bg-gray-500/20 text-gray-400',
+  adblock: 'bg-orange-500/20 text-orange-400',
+};
+
 export default function SourceProgressCard({ source }: SourceProgressCardProps) {
   const config = statusConfig[source.status];
   const domainChange = formatDomainChange(source.domain_change);
@@ -92,7 +98,7 @@ export default function SourceProgressCard({ source }: SourceProgressCardProps) 
 
       {/* Stats row for completed sources */}
       {source.status === 'completed' && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-pihole-text-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-pihole-text-muted">
           {source.domain_count != null && (
             <span>
               {source.domain_count.toLocaleString()} domains
@@ -100,6 +106,21 @@ export default function SourceProgressCard({ source }: SourceProgressCardProps) 
                 <span className={`ml-1 ${domainChange.color}`}>({domainChange.text})</span>
               )}
             </span>
+          )}
+          {/* Format badges */}
+          {source.detected_formats && source.detected_formats.length > 0 && (
+            <div className="flex gap-1">
+              {source.detected_formats.map((format) => (
+                <span
+                  key={format}
+                  className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                    formatBadgeStyles[format] || 'bg-gray-500/20 text-gray-400'
+                  }`}
+                >
+                  {format}
+                </span>
+              ))}
+            </div>
           )}
           {source.download_time_ms != null && (
             <span>{(source.download_time_ms / 1000).toFixed(1)}s</span>
