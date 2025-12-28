@@ -27,11 +27,17 @@ pub struct CategoryDomains {
     /// Map from category name to domains in that category
     /// None key = uncategorized sources
     pub by_category: HashMap<Option<String>, HashSet<String>>,
+    /// Raw adblock rules keyed by domain (for adblock output passthrough)
+    /// Only populated for domains that came from adblock-format sources
+    pub adblock_rules: HashMap<String, String>,
 }
 
 impl CategoryDomains {
     pub fn new() -> Self {
-        Self { by_category: HashMap::new() }
+        Self {
+            by_category: HashMap::new(),
+            adblock_rules: HashMap::new(),
+        }
     }
 
     /// Get all unique domains across all categories
@@ -692,10 +698,10 @@ impl JobProcessor {
             };
 
             // Extract domains from content
-            let domains = self.extractor.extract_from_content(&content_str);
+            let extraction_results = self.extractor.extract_from_content(&content_str);
 
             // domain_count = total domains from this source
-            let source_domain_count = domains.len() as u64;
+            let source_domain_count = extraction_results.len() as u64;
 
             // Calculate domain_change = current - previous
             let domain_change = result.previous_domain_count
@@ -704,12 +710,20 @@ impl JobProcessor {
             // Get category from source
             let category = result.source.category.clone();
 
-            // Add domains to category bucket
+            // Add domains to category bucket and store raw adblock rules
             let category_set = category_domains.by_category
                 .entry(category.clone())
                 .or_insert_with(HashSet::new);
             let count_before = category_set.len();
-            category_set.extend(domains);
+
+            for extraction_result in extraction_results {
+                category_set.insert(extraction_result.domain.clone());
+                // Store raw adblock rule if present (for adblock output passthrough)
+                if let Some(raw_rule) = extraction_result.raw_adblock_rule {
+                    category_domains.adblock_rules.insert(extraction_result.domain, raw_rule);
+                }
+            }
+
             let new_in_category = category_set.len() - count_before;
 
             debug!(
@@ -774,6 +788,14 @@ impl JobProcessor {
             }
         }
 
+        // Copy over adblock_rules for domains that remain after whitelist filtering
+        let remaining_domains = filtered.all_unique();
+        for (domain, rule) in category_domains.adblock_rules {
+            if remaining_domains.contains(&domain) {
+                filtered.adblock_rules.insert(domain, rule);
+            }
+        }
+
         let domains_after = filtered.total_count() as u64;
 
         // Create whitelist progress
@@ -813,6 +835,9 @@ impl JobProcessor {
         // Clean up old files
         generator.cleanup_old_files()?;
 
+        // Extract adblock_rules before consuming category_domains
+        let adblock_rules = category_domains.adblock_rules;
+
         // Convert HashSets to sorted Vecs per category
         let sorted_by_category: HashMap<Option<String>, Vec<String>> = category_domains
             .by_category
@@ -820,8 +845,8 @@ impl JobProcessor {
             .map(|(cat, domains)| (cat, DomainExtractor::sort_domains(domains)))
             .collect();
 
-        // Generate all category files in parallel
-        let mut output_files = generator.generate_all_categories(&sorted_by_category)?;
+        // Generate all category files in parallel (with adblock passthrough)
+        let mut output_files = generator.generate_all_categories(&sorted_by_category, &adblock_rules)?;
 
         // Create combined "all domains" list (deduplicated across categories)
         // Note: nsfw category is excluded from the combined list
@@ -837,7 +862,7 @@ impl JobProcessor {
 
         // Generate combined files (all_domains_*.txt.gz) for backward compatibility
         let progress_clone = Arc::clone(&progress);
-        let combined_files = generator.generate_all(&all_sorted, |gen_progress| {
+        let combined_files = generator.generate_all(&all_sorted, &adblock_rules, |gen_progress| {
             let progress = Arc::clone(&progress_clone);
             let gen_progress = gen_progress.clone();
             tokio::task::block_in_place(|| {

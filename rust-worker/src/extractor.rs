@@ -2,17 +2,29 @@ use rayon::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
 
+/// Result of extracting from a line
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtractionResult {
+    /// The extracted domain (lowercase, normalized)
+    pub domain: String,
+    /// Original adblock rule if source was adblock format (for passthrough)
+    pub raw_adblock_rule: Option<String>,
+}
+
 /// Domain extractor with high-performance regex parsing
 pub struct DomainExtractor {
     /// Pattern for hosts file format: IP domain
     hosts_pattern: Regex,
     /// Pattern for plain domain
     plain_pattern: Regex,
-    /// Pattern for adblock format: ||domain^
+    /// Pattern for adblock format: ||domain^ with optional modifiers
     adblock_pattern: Regex,
     /// Pattern for comments
     comment_pattern: Regex,
-    // Note: domain_validator regex removed - extraction patterns already validate format
+    /// Pattern for CSS/cosmetic filter rules (to skip)
+    css_filter_pattern: Regex,
+    /// Pattern to detect modifiers that mean this isn't a DNS-level block
+    skip_modifiers_pattern: Regex,
 }
 
 impl DomainExtractor {
@@ -23,15 +35,22 @@ impl DomainExtractor {
             hosts_pattern: Regex::new(r"^(?:0\.0\.0\.0|127\.0\.0\.1)\s+([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)").unwrap(),
             // Matches: just a domain on its own line
             plain_pattern: Regex::new(r"^([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)$").unwrap(),
-            // Matches: ||domain.com^ or ||domain.com^$...
-            adblock_pattern: Regex::new(r"^\|\|([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)\^").unwrap(),
+            // Matches: ||domain.com^ or ||domain.com^$... (captures domain and optional modifiers)
+            adblock_pattern: Regex::new(r"^\|\|([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)\^?(\$.+)?$").unwrap(),
             // Matches comment lines
             comment_pattern: Regex::new(r"^[#!]").unwrap(),
+            // Matches CSS/cosmetic filter rules (element hiding - not DNS level)
+            css_filter_pattern: Regex::new(r"##|#@#|#\?#|#\$#|#\+js\(").unwrap(),
+            // Matches modifiers that indicate the rule doesn't block at DNS level
+            // $third-party = context-aware blocking (can't do at DNS level)
+            // $badfilter = exception rule that DISABLES a blocking rule
+            // $removeparam, $redirect, $csp, $replace, $cookie = browser-level features
+            skip_modifiers_pattern: Regex::new(r"(?i)\$(.*,)?(third-party|badfilter|removeparam|redirect|csp|replace|cookie)").unwrap(),
         }
     }
 
     /// Extract domain from a single line
-    fn extract_domain(&self, line: &str) -> Option<String> {
+    fn extract_domain(&self, line: &str) -> Option<ExtractionResult> {
         let line = line.trim();
 
         // Skip empty lines and comments
@@ -39,24 +58,45 @@ impl DomainExtractor {
             return None;
         }
 
+        // Skip CSS/cosmetic filter rules (element hiding, not DNS level)
+        if self.css_filter_pattern.is_match(line) {
+            return None;
+        }
+
         // Try hosts format first (most common)
         if let Some(caps) = self.hosts_pattern.captures(line) {
             if let Some(domain) = caps.get(1) {
-                return Some(domain.as_str().to_lowercase());
+                return Some(ExtractionResult {
+                    domain: domain.as_str().to_lowercase(),
+                    raw_adblock_rule: None, // Not adblock format
+                });
             }
         }
 
         // Try adblock format
         if let Some(caps) = self.adblock_pattern.captures(line) {
             if let Some(domain) = caps.get(1) {
-                return Some(domain.as_str().to_lowercase());
+                // Check for modifiers that mean this isn't a DNS-level block
+                if let Some(modifiers) = caps.get(2) {
+                    let mod_str = modifiers.as_str();
+                    if self.skip_modifiers_pattern.is_match(mod_str) {
+                        return None;
+                    }
+                }
+                return Some(ExtractionResult {
+                    domain: domain.as_str().to_lowercase(),
+                    raw_adblock_rule: Some(line.to_string()), // Preserve original rule
+                });
             }
         }
 
         // Try plain domain
         if let Some(caps) = self.plain_pattern.captures(line) {
             if let Some(domain) = caps.get(1) {
-                return Some(domain.as_str().to_lowercase());
+                return Some(ExtractionResult {
+                    domain: domain.as_str().to_lowercase(),
+                    raw_adblock_rule: None, // Not adblock format
+                });
             }
         }
 
@@ -64,7 +104,7 @@ impl DomainExtractor {
     }
 
     /// Extract domains from file content (parallel processing)
-    pub fn extract_from_content(&self, content: &str) -> Vec<String> {
+    pub fn extract_from_content(&self, content: &str) -> Vec<ExtractionResult> {
         content
             .par_lines()
             .filter_map(|line| self.extract_domain(line))
@@ -93,38 +133,91 @@ mod tests {
     fn test_hosts_format() {
         let extractor = DomainExtractor::new();
 
-        assert_eq!(
-            extractor.extract_domain("0.0.0.0 ads.example.com"),
-            Some("ads.example.com".to_string())
-        );
-        assert_eq!(
-            extractor.extract_domain("127.0.0.1 tracker.example.com"),
-            Some("tracker.example.com".to_string())
-        );
+        let result = extractor.extract_domain("0.0.0.0 ads.example.com");
+        assert_eq!(result, Some(ExtractionResult {
+            domain: "ads.example.com".to_string(),
+            raw_adblock_rule: None,
+        }));
+
+        let result = extractor.extract_domain("127.0.0.1 tracker.example.com");
+        assert_eq!(result, Some(ExtractionResult {
+            domain: "tracker.example.com".to_string(),
+            raw_adblock_rule: None,
+        }));
     }
 
     #[test]
     fn test_adblock_format() {
         let extractor = DomainExtractor::new();
 
-        assert_eq!(
-            extractor.extract_domain("||ads.example.com^"),
-            Some("ads.example.com".to_string())
-        );
-        assert_eq!(
-            extractor.extract_domain("||tracker.example.com^$third-party"),
-            Some("tracker.example.com".to_string())
-        );
+        // Basic adblock rule - should preserve original
+        let result = extractor.extract_domain("||ads.example.com^");
+        assert_eq!(result, Some(ExtractionResult {
+            domain: "ads.example.com".to_string(),
+            raw_adblock_rule: Some("||ads.example.com^".to_string()),
+        }));
+
+        // Adblock with $important modifier - should preserve
+        let result = extractor.extract_domain("||tracker.example.com^$important");
+        assert_eq!(result, Some(ExtractionResult {
+            domain: "tracker.example.com".to_string(),
+            raw_adblock_rule: Some("||tracker.example.com^$important".to_string()),
+        }));
+    }
+
+    #[test]
+    fn test_third_party_skipped() {
+        let extractor = DomainExtractor::new();
+
+        // $third-party rules cannot work at DNS level - skip them
+        assert_eq!(extractor.extract_domain("||facebook.com^$third-party"), None);
+        assert_eq!(extractor.extract_domain("||tracker.com^$third-party,image"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$image,third-party"), None);
+    }
+
+    #[test]
+    fn test_badfilter_exception() {
+        let extractor = DomainExtractor::new();
+
+        // $badfilter rules UNBLOCK domains - skip them
+        assert_eq!(extractor.extract_domain("||facebook.com^$badfilter"), None);
+        assert_eq!(extractor.extract_domain("||amazon.co.uk^$badfilter"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$third-party,badfilter"), None);
+    }
+
+    #[test]
+    fn test_css_selectors_skipped() {
+        let extractor = DomainExtractor::new();
+
+        // CSS/cosmetic filters are element hiding - not DNS level
+        assert_eq!(extractor.extract_domain("facebook.com##.ad-banner"), None);
+        assert_eq!(extractor.extract_domain("example.com#@#.sponsored"), None);
+        assert_eq!(extractor.extract_domain("site.com#?#.ad-container"), None);
+        assert_eq!(extractor.extract_domain("page.com#$#.tracking"), None);
+        assert_eq!(extractor.extract_domain("domain.com#+js(abort-on-property-read)"), None);
+    }
+
+    #[test]
+    fn test_non_blocking_modifiers() {
+        let extractor = DomainExtractor::new();
+
+        // These modifiers don't block at DNS level
+        assert_eq!(extractor.extract_domain("||example.com^$removeparam=utm"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$redirect=nooptext"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$csp=script-src 'none'"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$replace=/bad/good/"), None);
+        assert_eq!(extractor.extract_domain("||example.com^$cookie"), None);
     }
 
     #[test]
     fn test_plain_format() {
         let extractor = DomainExtractor::new();
 
-        assert_eq!(
-            extractor.extract_domain("ads.example.com"),
-            Some("ads.example.com".to_string())
-        );
+        let result = extractor.extract_domain("ads.example.com");
+        assert_eq!(result, Some(ExtractionResult {
+            domain: "ads.example.com".to_string(),
+            raw_adblock_rule: None,
+        }));
     }
 
     #[test]
@@ -133,5 +226,20 @@ mod tests {
 
         assert_eq!(extractor.extract_domain("# This is a comment"), None);
         assert_eq!(extractor.extract_domain("! Adblock comment"), None);
+    }
+
+    #[test]
+    fn test_valid_modifiers_preserved() {
+        let extractor = DomainExtractor::new();
+
+        // $important and other valid DNS-compatible modifiers should be preserved
+        let result = extractor.extract_domain("||ads.example.com^$important");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().raw_adblock_rule, Some("||ads.example.com^$important".to_string()));
+
+        // $all modifier (block everything) is valid for DNS
+        let result = extractor.extract_domain("||malware.com^$all");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().raw_adblock_rule, Some("||malware.com^$all".to_string()));
     }
 }

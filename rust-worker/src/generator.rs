@@ -74,8 +74,15 @@ impl OutputGenerator {
     }
 
     /// Write a domain directly to encoder without intermediate String allocation
+    /// For hosts/plain: always uses domain format
+    /// For adblock: uses raw_rule if available, otherwise generates ||domain^
     #[inline]
-    fn write_domain<W: Write>(encoder: &mut W, format: OutputFormat, domain: &str) -> std::io::Result<()> {
+    fn write_domain<W: Write>(
+        encoder: &mut W,
+        format: OutputFormat,
+        domain: &str,
+        adblock_rules: Option<&HashMap<String, String>>,
+    ) -> std::io::Result<()> {
         match format {
             OutputFormat::Hosts => {
                 encoder.write_all(b"0.0.0.0 ")?;
@@ -87,6 +94,15 @@ impl OutputGenerator {
                 encoder.write_all(b"\n")?;
             }
             OutputFormat::Adblock => {
+                // For adblock format, use raw rule if available (preserves modifiers)
+                if let Some(rules) = adblock_rules {
+                    if let Some(raw_rule) = rules.get(domain) {
+                        encoder.write_all(raw_rule.as_bytes())?;
+                        encoder.write_all(b"\n")?;
+                        return Ok(());
+                    }
+                }
+                // Fallback: generate standard adblock format (for hosts/plain sources)
                 encoder.write_all(b"||")?;
                 encoder.write_all(domain.as_bytes())?;
                 encoder.write_all(b"^\n")?;
@@ -100,6 +116,7 @@ impl OutputGenerator {
         &self,
         format: OutputFormat,
         domains: &[String],
+        adblock_rules: &HashMap<String, String>,
         mut progress_callback: impl FnMut(u64, u64),
     ) -> Result<OutputFile> {
         let total_domains = domains.len() as u64;
@@ -120,8 +137,9 @@ impl OutputGenerator {
 
         // Write domains directly without String allocation
         let update_interval = (total_domains / 100).max(1000);
+        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
         for (i, domain) in domains.iter().enumerate() {
-            Self::write_domain(&mut encoder, format, domain)?;
+            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
 
             // Progress callback (sparse)
             if i as u64 % update_interval == 0 {
@@ -150,7 +168,12 @@ impl OutputGenerator {
     }
 
     /// Generate a single output file without progress callback (for parallel execution)
-    fn generate_file_parallel(&self, format: OutputFormat, domains: &[String]) -> Result<OutputFile> {
+    fn generate_file_parallel(
+        &self,
+        format: OutputFormat,
+        domains: &[String],
+        adblock_rules: &HashMap<String, String>,
+    ) -> Result<OutputFile> {
         let total_domains = domains.len() as u64;
         let filename = format!("all_domains{}", format.file_suffix());
         let output_path = self.output_dir.join(&filename);
@@ -165,8 +188,9 @@ impl OutputGenerator {
         encoder.write_all(header.as_bytes())?;
 
         // Write all domains directly
+        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
         for domain in domains {
-            Self::write_domain(&mut encoder, format, domain)?;
+            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
         }
 
         // Finish compression
@@ -192,6 +216,7 @@ impl OutputGenerator {
     pub fn generate_all(
         &self,
         domains: &[String],
+        adblock_rules: &HashMap<String, String>,
         mut progress_callback: impl FnMut(&GenerationProgress),
     ) -> Result<Vec<OutputFile>> {
         let total_domains = domains.len() as u64;
@@ -222,7 +247,7 @@ impl OutputGenerator {
         // Generate all formats in parallel using rayon
         let results: Vec<Result<OutputFile>> = formats
             .par_iter()
-            .map(|format| self.generate_file_parallel(*format, domains))
+            .map(|format| self.generate_file_parallel(*format, domains, adblock_rules))
             .collect();
 
         // Collect results and update progress
@@ -248,6 +273,7 @@ impl OutputGenerator {
         category: Option<&str>,
         format: OutputFormat,
         domains: &[String],
+        adblock_rules: &HashMap<String, String>,
     ) -> Result<OutputFile> {
         let total_domains = domains.len() as u64;
 
@@ -268,8 +294,9 @@ impl OutputGenerator {
         encoder.write_all(header.as_bytes())?;
 
         // Write all domains
+        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
         for domain in domains {
-            Self::write_domain(&mut encoder, format, domain)?;
+            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
         }
 
         // Finish compression
@@ -294,6 +321,7 @@ impl OutputGenerator {
     pub fn generate_all_categories(
         &self,
         category_domains: &HashMap<Option<String>, Vec<String>>,
+        adblock_rules: &HashMap<String, String>,
     ) -> Result<Vec<OutputFile>> {
         // Ensure output directory exists before parallel execution
         fs::create_dir_all(&self.output_dir)?;
@@ -317,7 +345,7 @@ impl OutputGenerator {
         let results: Vec<Result<OutputFile>> = tasks
             .par_iter()
             .map(|(category, format, domains)| {
-                self.generate_category_file(*category, *format, domains)
+                self.generate_category_file(*category, *format, domains, adblock_rules)
             })
             .collect();
 
@@ -356,19 +384,46 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_write_domain() {
+    fn test_write_domain_hosts() {
         let mut buf = Vec::new();
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Hosts, "example.com", None).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "0.0.0.0 example.com\n");
+    }
 
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Hosts, "example.com").unwrap();
-        assert_eq!(String::from_utf8(buf.clone()).unwrap(), "0.0.0.0 example.com\n");
+    #[test]
+    fn test_write_domain_plain() {
+        let mut buf = Vec::new();
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Plain, "example.com", None).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "example.com\n");
+    }
 
-        buf.clear();
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Plain, "example.com").unwrap();
-        assert_eq!(String::from_utf8(buf.clone()).unwrap(), "example.com\n");
-
-        buf.clear();
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com").unwrap();
+    #[test]
+    fn test_write_domain_adblock_no_rule() {
+        let mut buf = Vec::new();
+        // No adblock rule stored - generates default format
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", None).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "||example.com^\n");
+    }
+
+    #[test]
+    fn test_write_domain_adblock_with_rule() {
+        let mut buf = Vec::new();
+        let mut rules = HashMap::new();
+        rules.insert("example.com".to_string(), "||example.com^$important".to_string());
+
+        // Has adblock rule - preserves original with modifiers
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", Some(&rules)).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "||example.com^$important\n");
+    }
+
+    #[test]
+    fn test_write_domain_adblock_preserves_complex_rule() {
+        let mut buf = Vec::new();
+        let mut rules = HashMap::new();
+        rules.insert("tracker.com".to_string(), "||tracker.com^$all,important".to_string());
+
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "tracker.com", Some(&rules)).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "||tracker.com^$all,important\n");
     }
 
     #[test]
@@ -377,14 +432,35 @@ mod tests {
         let generator = OutputGenerator::new(temp_dir.path());
 
         let domains = vec!["ads.example.com".to_string(), "tracker.example.com".to_string()];
+        let adblock_rules = HashMap::new();
 
         let output = generator
-            .generate_file(OutputFormat::Hosts, &domains, |_, _| {})
+            .generate_file(OutputFormat::Hosts, &domains, &adblock_rules, |_, _| {})
             .unwrap();
 
         assert_eq!(output.format, "hosts");
         assert_eq!(output.domain_count, 2);
         assert!(output.size_bytes > 0);
         assert!(temp_dir.path().join(&output.name).exists());
+    }
+
+    #[test]
+    fn test_generate_adblock_with_passthrough() {
+        let temp_dir = TempDir::new().unwrap();
+        let generator = OutputGenerator::new(temp_dir.path());
+
+        let domains = vec!["ads.example.com".to_string(), "plain.example.com".to_string()];
+        let mut adblock_rules = HashMap::new();
+        // Only ads.example.com has an original rule
+        adblock_rules.insert("ads.example.com".to_string(), "||ads.example.com^$important".to_string());
+        // plain.example.com has no rule (came from hosts/plain source)
+
+        let output = generator
+            .generate_file(OutputFormat::Adblock, &domains, &adblock_rules, |_, _| {})
+            .unwrap();
+
+        assert_eq!(output.format, "adblock");
+        assert_eq!(output.domain_count, 2);
+        // File should contain ||ads.example.com^$important and ||plain.example.com^
     }
 }
