@@ -1,3 +1,4 @@
+use crate::extractor::FormatBreakdown;
 use serde::{Deserialize, Serialize};
 
 /// Job stage enum
@@ -70,6 +71,12 @@ pub struct SourceProgress {
     pub domain_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain_change: Option<i64>,
+    /// Format breakdown - counts per format type (hosts/plain/adblock)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_breakdown: Option<FormatBreakdown>,
+    /// Detected format names (e.g., ["hosts", "adblock"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detected_formats: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -124,6 +131,15 @@ pub struct GenerationProgress {
     pub formats: Vec<FormatProgress>,
 }
 
+/// Snapshot of a stage's final state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageSnapshot {
+    /// When this stage completed
+    pub completed_at: String,
+    /// Stage-specific data snapshot
+    pub data: serde_json::Value,
+}
+
 /// Full job progress structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobProgress {
@@ -156,6 +172,9 @@ pub struct JobProgress {
     /// When current stage started
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage_started_at: Option<String>,
+    /// Snapshots of completed stages (for viewing historical state)
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub stage_snapshots: std::collections::HashMap<String, StageSnapshot>,
 }
 
 impl Default for JobProgress {
@@ -172,6 +191,7 @@ impl Default for JobProgress {
             whitelist: None,
             generation: None,
             stage_started_at: None,
+            stage_snapshots: std::collections::HashMap::new(),
         }
     }
 }
@@ -191,6 +211,7 @@ impl JobProgress {
             whitelist: None,
             generation: None,
             stage_started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+            stage_snapshots: std::collections::HashMap::new(),
         }
     }
 

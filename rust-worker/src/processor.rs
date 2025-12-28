@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::db::job::{Job, JobRepository};
 use crate::db::progress::{
     JobProgress, JobResult, JobStage, OutputFile, SourceProgress,
-    SourceStatus,
+    SourceStatus, StageSnapshot,
 };
 use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
 use crate::db::user_config::UserConfigRepository;
@@ -345,16 +345,29 @@ impl JobProcessor {
                         )
                     };
 
-                    // Update progress to completed state for UI
-                    let sources_count = source_stats
-                        .as_ref()
-                        .map(|s| s.sources_processed + s.sources_failed)
-                        .unwrap_or(0);
-                    let mut progress = JobProgress::default();
-                    progress.current_step = "completed".to_string();
-                    progress.stage = JobStage::Completed;
-                    progress.total_sources = sources_count;
-                    progress.processed_sources = sources_count;
+                    // Copy full progress from source job (includes whitelist breakdown, stage snapshots)
+                    let progress = if let Ok(Some(mut source_progress)) = self
+                        .job_repo
+                        .get_last_completed_progress(&matched.username)
+                        .await
+                    {
+                        // Ensure it shows as completed
+                        source_progress.current_step = "completed".to_string();
+                        source_progress.stage = JobStage::Completed;
+                        source_progress
+                    } else {
+                        // Fallback to minimal progress if source not found
+                        let sources_count = source_stats
+                            .as_ref()
+                            .map(|s| s.sources_processed + s.sources_failed)
+                            .unwrap_or(0);
+                        let mut p = JobProgress::default();
+                        p.current_step = "completed".to_string();
+                        p.stage = JobStage::Completed;
+                        p.total_sources = sources_count;
+                        p.processed_sources = sources_count;
+                        p
+                    };
                     self.job_repo.update_progress(&job.id, &progress).await?;
 
                     // Mark job as completed
@@ -454,6 +467,8 @@ impl JobProcessor {
                     download_time_ms: None,
                     domain_count: None,
                     domain_change: None,
+                    format_breakdown: None,
+                    detected_formats: Vec::new(),
                     error: None,
                     warnings: Vec::new(),
                     started_at: None,
@@ -697,8 +712,10 @@ impl JobProcessor {
                 std::borrow::Cow::Owned(s) => s,
             };
 
-            // Extract domains from content
-            let extraction_results = self.extractor.extract_from_content(&content_str);
+            // Extract domains from content with format breakdown
+            let extraction_output = self.extractor.extract_from_content_with_breakdown(&content_str);
+            let extraction_results = extraction_output.results;
+            let format_breakdown = extraction_output.format_breakdown;
 
             // domain_count = total domains from this source
             let source_domain_count = extraction_results.len() as u64;
@@ -706,6 +723,9 @@ impl JobProcessor {
             // Calculate domain_change = current - previous
             let domain_change = result.previous_domain_count
                 .map(|prev| source_domain_count as i64 - prev as i64);
+
+            // Get detected format names
+            let detected_formats = format_breakdown.detected_formats();
 
             // Get category from source
             let category = result.source.category.clone();
@@ -727,20 +747,23 @@ impl JobProcessor {
             let new_in_category = category_set.len() - count_before;
 
             debug!(
-                "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?})",
+                "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?}, formats: {:?})",
                 source_domain_count,
                 result.source.name,
                 category,
                 new_in_category,
-                domain_change
+                domain_change,
+                detected_formats
             );
 
-            // Update source progress with correct domain_count and domain_change
+            // Update source progress with domain_count, domain_change, and format info
             {
                 let mut p = progress.lock().await;
                 if let Some(source) = p.sources.iter_mut().find(|s| s.id == result.url_hash) {
                     source.domain_count = Some(source_domain_count);
                     source.domain_change = domain_change;
+                    source.format_breakdown = Some(format_breakdown);
+                    source.detected_formats = detected_formats;
                 }
             }
 
@@ -764,6 +787,20 @@ impl JobProcessor {
         // Get all unique domains for global stats
         let all_domains = category_domains.all_unique();
         let domains_before = all_domains.len() as u64;
+
+        // Capture downloading stage snapshot before transitioning
+        {
+            let mut p = progress.lock().await;
+            let snapshot = StageSnapshot {
+                completed_at: chrono::Utc::now().to_rfc3339(),
+                data: serde_json::json!({
+                    "sources": &p.sources,
+                    "total_sources": p.total_sources,
+                    "processed_sources": p.processed_sources,
+                }),
+            };
+            p.stage_snapshots.insert("downloading".to_string(), snapshot);
+        }
 
         // Update progress to whitelist stage
         {
@@ -821,6 +858,18 @@ impl JobProcessor {
     ) -> Result<Vec<OutputFile>> {
         let total_domains = category_domains.total_count() as u64;
 
+        // Capture whitelist stage snapshot before transitioning
+        {
+            let mut p = progress.lock().await;
+            if let Some(whitelist) = &p.whitelist {
+                let snapshot = StageSnapshot {
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    data: serde_json::to_value(whitelist).unwrap_or(serde_json::Value::Null),
+                };
+                p.stage_snapshots.insert("whitelist".to_string(), snapshot);
+            }
+        }
+
         // Update progress to generation stage
         {
             let mut p = progress.lock().await;
@@ -873,6 +922,18 @@ impl JobProcessor {
             });
         })?;
         output_files.extend(combined_files);
+
+        // Capture generation stage snapshot before completing
+        {
+            let mut p = progress.lock().await;
+            if let Some(generation) = &p.generation {
+                let snapshot = StageSnapshot {
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    data: serde_json::to_value(generation).unwrap_or(serde_json::Value::Null),
+                };
+                p.stage_snapshots.insert("generation".to_string(), snapshot);
+            }
+        }
 
         // Final progress update
         {
