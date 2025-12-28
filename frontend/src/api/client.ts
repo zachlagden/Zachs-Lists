@@ -141,6 +141,11 @@ export const userApi = {
     const response = await api.post(`/api/user/notifications/${notificationId}/read`);
     return response.data;
   },
+
+  getUrlMetadata: async (urls: string[]) => {
+    const response = await api.post('/api/user/config/url-metadata', { urls });
+    return response.data;
+  },
 };
 
 // Analytics API

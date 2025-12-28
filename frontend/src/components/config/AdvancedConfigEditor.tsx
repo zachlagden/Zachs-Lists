@@ -5,6 +5,8 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { StreamLanguage } from '@codemirror/language';
+import { urlMetadataExtension } from './urlMetadataExtension';
+import { userApi } from '../../api/client';
 
 // Valid categories for the blocklist config
 const VALID_CATEGORIES = new Set([
@@ -173,6 +175,8 @@ export default function AdvancedConfigEditor({
           onChange(newValue);
         }
       }),
+      // URL metadata decorations (domain counts)
+      urlMetadataExtension(userApi.getUrlMetadata),
     ];
 
     if (readOnly) {
