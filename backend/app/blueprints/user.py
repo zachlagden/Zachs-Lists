@@ -21,6 +21,7 @@ from app.utils.validators import (
 )
 from app.socketio import emit_validation_progress, emit_validation_complete
 from app.models.blocklist_library import BlocklistLibrary
+from app.models.cache import CacheMetadata
 
 user_bp = Blueprint("user", __name__)
 
@@ -181,6 +182,36 @@ def get_categories(user: User):
         "categories": sorted(VALID_CATEGORIES),
         "nsfw_excluded_from_all_domains": True,
     })
+
+
+@user_bp.route("/config/url-metadata", methods=["POST"])
+@login_required
+def get_url_metadata(user: User):
+    """Fetch cached metadata (domain counts) for a list of URLs."""
+    data = request.get_json()
+    urls = data.get("urls", [])
+
+    if not urls or len(urls) > 100:
+        return jsonify({"error": "Provide 1-100 URLs"}), 400
+
+    result = {}
+    for url in urls:
+        # CacheMetadata uses URL hash as key
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        cached = CacheMetadata.get_by_url_hash(url_hash)
+
+        if cached and cached.stats:
+            result[url] = {
+                "domain_count": cached.stats.get("domain_count"),
+                "cached": True,
+            }
+        else:
+            result[url] = {
+                "domain_count": None,
+                "cached": False,
+            }
+
+    return jsonify(result)
 
 
 @user_bp.route("/library", methods=["GET"])
