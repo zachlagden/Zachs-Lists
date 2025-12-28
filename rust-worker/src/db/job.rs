@@ -282,4 +282,23 @@ impl JobRepository {
         let job = self.collection.find_one(filter).with_options(options).await?;
         Ok(job.and_then(|j| j.result))
     }
+
+    /// Get the progress from a user's last completed job
+    ///
+    /// Used for copying full progress (sources, whitelist breakdown, stage snapshots)
+    /// when fingerprint matches another user.
+    pub async fn get_last_completed_progress(&self, username: &str) -> Result<Option<JobProgress>> {
+        let filter = doc! {
+            "username": username,
+            "status": "completed",
+            "progress": { "$exists": true }
+        };
+
+        let options = FindOneOptions::builder()
+            .sort(doc! { "completed_at": -1 })
+            .build();
+
+        let job = self.collection.find_one(filter).with_options(options).await?;
+        Ok(job.map(|j| j.progress))
+    }
 }
