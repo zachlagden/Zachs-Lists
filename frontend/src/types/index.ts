@@ -75,6 +75,13 @@ export interface JobProgress {
   current_source?: string;
 }
 
+// Format breakdown for a source (hosts/plain/adblock counts)
+export interface FormatBreakdown {
+  hosts: number;
+  plain: number;
+  adblock: number;
+}
+
 // Source progress for downloading stage
 export interface SourceProgress {
   id: string;
@@ -88,6 +95,8 @@ export interface SourceProgress {
   download_time_ms: number | null;
   domain_count: number | null;
   domain_change: number | null;
+  format_breakdown?: FormatBreakdown;
+  detected_formats?: string[];  // e.g., ["hosts", "adblock"]
   error: string | null;
   warnings?: string[];
   started_at: string | null;
@@ -128,6 +137,12 @@ export interface GenerationProgress {
   current_format: string | null;
 }
 
+// Snapshot of a stage's final state
+export interface StageSnapshot {
+  completed_at: string;
+  data: unknown;  // Stage-specific data
+}
+
 // Enhanced job progress with all stages
 export interface EnhancedJobProgress {
   stage: JobStage;
@@ -150,6 +165,9 @@ export interface EnhancedJobProgress {
   // Timing
   stage_started_at: string | null;
 
+  // Stage snapshots for viewing historical state
+  stage_snapshots?: Record<string, StageSnapshot>;
+
   // Legacy compatibility
   current_step: string;
   current_source: string | null;
@@ -165,6 +183,7 @@ export interface JobResult {
   categories?: Record<string, number>;
   errors: string[];
   skip_reason?: string;
+  copied_from?: string;  // Username whose build was copied (fingerprint match)
 }
 
 export interface OutputFile {
