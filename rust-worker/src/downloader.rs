@@ -251,6 +251,8 @@ impl Downloader {
                         download_time_ms: None,
                         domain_count: None,
                         domain_change: None,
+                        format_breakdown: None,
+                        detected_formats: Vec::new(),
                         error: None,
                         warnings: Vec::new(),
                         started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
