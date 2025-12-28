@@ -46,7 +46,7 @@ class Config:
     MAX_DOMAINS_LIMIT = 20_000_000  # Maximum requestable: 20 million
     DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers
     DEFAULT_MAX_CONFIG_SIZE_MB = 10
-    DEFAULT_MANUAL_UPDATES_PER_WEEK = 6
+    DEFAULT_MANUAL_UPDATES_PER_WEEK = 3
 
     # Processing
     MAX_CONCURRENT_JOBS = 5
