@@ -14,7 +14,7 @@ pymongo==4.6.3
 
 # HTTP client
 requests==2.32.4
-urllib3==2.6.0
+urllib3==2.6.3
 
 # Scheduler
 APScheduler==3.10.4
