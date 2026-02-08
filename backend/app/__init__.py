@@ -103,6 +103,7 @@ def register_blueprints(app: Flask) -> None:
 
     # Health check endpoint
     @app.route("/health")
+    @limiter.exempt
     def health_check():
         return {"status": "healthy"}
 
