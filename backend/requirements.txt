@@ -28,6 +28,11 @@ python-dotenv==1.0.0
 
 # Production server
 gunicorn==22.0.0
+gevent==24.11.1
+gevent-websocket==0.10.1
+
+# Static file serving
+whitenoise==6.8.2
 
 # Development
 pytest==7.4.3

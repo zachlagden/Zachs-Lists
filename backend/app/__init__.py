@@ -4,7 +4,7 @@ Flask application factory.
 
 import os
 import logging
-from flask import Flask
+from flask import Flask, send_from_directory, abort
 
 from app.config import config
 from app.extensions import mongo, limiter, cors, scheduler
@@ -35,6 +35,14 @@ def create_app(config_name: str = None) -> Flask:
 
     # Register blueprints
     register_blueprints(app)
+
+    # Serve frontend static files via WhiteNoise in production
+    frontend_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'frontend', 'dist')
+    if os.path.isdir(frontend_dist):
+        from whitenoise import WhiteNoise
+        app.wsgi_app = WhiteNoise(app.wsgi_app, root=frontend_dist, prefix="/")
+        # Immutable caching for Vite's hashed assets
+        app.wsgi_app.add_files(os.path.join(frontend_dist, "assets"), prefix="assets/")
 
     # Initialize scheduler (not in testing)
     if not app.config.get("TESTING"):
@@ -89,6 +97,17 @@ def register_blueprints(app: Flask) -> None:
     @app.route("/health")
     def health_check():
         return {"status": "healthy"}
+
+    # SPA catch-all: serve index.html for client-side routes
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def serve_spa(path):
+        if path.startswith(("api/", "socket.io/", "lists/", "u/", "health")):
+            abort(404)
+        frontend_dist = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), '..', 'frontend', 'dist'
+        )
+        return send_from_directory(frontend_dist, "index.html")
 
 
 def init_scheduler(app: Flask) -> None:

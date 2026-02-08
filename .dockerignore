@@ -1,0 +1,14 @@
+node_modules/
+frontend/dist/
+rust-worker/target/
+__pycache__/
+*.pyc
+.git/
+.env
+.env.*
+*.md
+LICENSE
+.vscode/
+.idea/
+*.log
+data/

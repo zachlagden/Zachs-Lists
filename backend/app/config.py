@@ -32,8 +32,8 @@ class Config:
     # Root user (super admin) - REQUIRED
     ROOT_USERNAME = os.environ.get("ROOT_USERNAME")
 
-    # Data paths (output files still on filesystem for nginx serving)
-    DATA_DIR = os.environ.get("DATA_DIR", "/opt/webapps/zml/lists.zachlagden.uk/data")
+    # Data paths
+    DATA_DIR = os.environ.get("DATA_DIR", "./data")
     USERS_DIR = os.path.join(DATA_DIR, "users")
     DEFAULT_DIR = os.path.join(DATA_DIR, "default")
 
@@ -60,9 +60,7 @@ class Config:
     RATELIMIT_STORAGE_URL = os.environ.get("REDIS_URL", "memory://")
 
     # Analytics
-    GEOIP_DATABASE_PATH = os.environ.get(
-        "GEOIP_DATABASE_PATH", "/opt/webapps/zml/lists.zachlagden.uk/data/GeoLite2-City.mmdb"
-    )
+    GEOIP_DATABASE_PATH = os.environ.get("GEOIP_DATABASE_PATH", "")
 
     # Scheduler
     SCHEDULER_API_ENABLED = False
