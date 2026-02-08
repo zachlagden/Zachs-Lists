@@ -289,7 +289,7 @@ def trigger_rebuild(admin: User, user_id: str):
 
     from app.services.job_queue import JobQueue
 
-    job = JobQueue.queue_job(target_user, job_type=Job.TYPE_ADMIN)
+    job = JobQueue.queue_job(target_user, job_type=Job.TYPE_ADMIN, force_rebuild=True)
 
     current_app.logger.info(
         f"Admin {admin.username} triggered rebuild for user {target_user.username}: {job.job_id}"
@@ -304,7 +304,7 @@ def trigger_default_rebuild(admin: User):
     """Trigger rebuild for default lists."""
     from app.services.job_queue import JobQueue
 
-    job = JobQueue.queue_default_job(job_type=Job.TYPE_ADMIN)
+    job = JobQueue.queue_default_job(job_type=Job.TYPE_ADMIN, force_rebuild=True)
 
     current_app.logger.info(
         f"Admin {admin.username} triggered default lists rebuild: {job.job_id}"

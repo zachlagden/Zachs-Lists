@@ -238,6 +238,7 @@ class Job:
         username: str,
         job_type: str = TYPE_MANUAL,
         priority: int = PRIORITY_NORMAL,
+        force_rebuild: bool = False,
     ) -> "Job":
         """Create a new job."""
         job_data = {
@@ -247,6 +248,7 @@ class Job:
             "type": job_type,
             "status": cls.STATUS_QUEUED,
             "priority": priority,
+            "force_rebuild": force_rebuild,
             "progress": {
                 "current_step": "queued",
                 "stage": "queue",
@@ -276,7 +278,10 @@ class Job:
 
     @classmethod
     def create_default(
-        cls, job_type: str = TYPE_SCHEDULED, priority: int = PRIORITY_HIGH
+        cls,
+        job_type: str = TYPE_SCHEDULED,
+        priority: int = PRIORITY_HIGH,
+        force_rebuild: bool = False,
     ) -> "Job":
         """Create a job for default lists (no user). High priority by default."""
         job_data = {
@@ -286,6 +291,7 @@ class Job:
             "type": job_type,
             "status": cls.STATUS_QUEUED,
             "priority": priority,
+            "force_rebuild": force_rebuild,
             "progress": {
                 "current_step": "queued",
                 "stage": "queue",

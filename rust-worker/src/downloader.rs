@@ -66,33 +66,37 @@ impl Downloader {
     }
 
     /// Download a single source
-    pub async fn download_source(&self, source: &Source) -> DownloadResult {
+    pub async fn download_source(&self, source: &Source, force: bool) -> DownloadResult {
         let url_hash = Self::hash_url(&source.url);
         let start = Instant::now();
         let mut warnings = Vec::new();
 
-        // Check cache first
-        match self.cache_repo.get_content(&url_hash).await {
-            Ok(Some(content)) => {
-                debug!("Cache hit for {} ({} bytes)", source.name, content.len());
-                return DownloadResult {
-                    source: source.clone(),
-                    url_hash,
-                    content: Some(content),
-                    cache_hit: true,
-                    bytes_downloaded: 0,
-                    download_time_ms: start.elapsed().as_millis() as u64,
-                    error: None,
-                    warnings,
-                    previous_domain_count: None, // TODO: Get from cache stats
-                };
+        // Check cache first (skip when force rebuild is requested)
+        if !force {
+            match self.cache_repo.get_content(&url_hash).await {
+                Ok(Some(content)) => {
+                    debug!("Cache hit for {} ({} bytes)", source.name, content.len());
+                    return DownloadResult {
+                        source: source.clone(),
+                        url_hash,
+                        content: Some(content),
+                        cache_hit: true,
+                        bytes_downloaded: 0,
+                        download_time_ms: start.elapsed().as_millis() as u64,
+                        error: None,
+                        warnings,
+                        previous_domain_count: None, // TODO: Get from cache stats
+                    };
+                }
+                Ok(None) => {
+                    debug!("Cache miss for {}", source.name);
+                }
+                Err(e) => {
+                    warn!("Cache read error for {}: {}", source.name, e);
+                }
             }
-            Ok(None) => {
-                debug!("Cache miss for {}", source.name);
-            }
-            Err(e) => {
-                warn!("Cache read error for {}: {}", source.name, e);
-            }
+        } else {
+            debug!("Force rebuild: skipping cache for {}", source.name);
         }
 
         // Download fresh
@@ -230,6 +234,7 @@ impl Downloader {
     pub async fn download_sources(
         &self,
         sources: Vec<Source>,
+        force: bool,
         progress_callback: impl Fn(usize, &SourceProgress) + Send + Sync,
     ) -> Vec<DownloadResult> {
         let max_concurrent = self.config.max_concurrent_downloads;
@@ -260,7 +265,7 @@ impl Downloader {
                     };
 
                     // Download
-                    let result = downloader.download_source(&source).await;
+                    let result = downloader.download_source(&source, force).await;
 
                     // Update progress with result
                     progress.status = if result.error.is_some() {

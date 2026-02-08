@@ -13,7 +13,9 @@ from app.models.job import Job
 logger = logging.getLogger(__name__)
 
 
-def create_job(user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
+def create_job(
+    user: User, job_type: str = Job.TYPE_MANUAL, force_rebuild: bool = False
+) -> Job:
     """
     Create a new job for a user.
 
@@ -22,6 +24,7 @@ def create_job(user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
     Args:
         user: User to process for
         job_type: Type of job (manual, scheduled, admin)
+        force_rebuild: If True, worker bypasses all caching optimizations
 
     Returns:
         Created Job instance
@@ -32,6 +35,7 @@ def create_job(user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
         username=user.username,
         job_type=job_type,
         priority=Job.PRIORITY_NORMAL,
+        force_rebuild=force_rebuild,
     )
 
     # Emit Socket.IO event
@@ -46,7 +50,9 @@ def create_job(user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
     return job
 
 
-def create_default_job(job_type: str = Job.TYPE_SCHEDULED) -> Job:
+def create_default_job(
+    job_type: str = Job.TYPE_SCHEDULED, force_rebuild: bool = False
+) -> Job:
     """
     Create a job for default lists.
 
@@ -54,6 +60,7 @@ def create_default_job(job_type: str = Job.TYPE_SCHEDULED) -> Job:
 
     Args:
         job_type: Type of job (scheduled, admin)
+        force_rebuild: If True, worker bypasses all caching optimizations
 
     Returns:
         Created Job instance
@@ -62,6 +69,7 @@ def create_default_job(job_type: str = Job.TYPE_SCHEDULED) -> Job:
     job = Job.create_default(
         job_type=job_type,
         priority=Job.PRIORITY_HIGH,
+        force_rebuild=force_rebuild,
     )
 
     # Emit Socket.IO event
@@ -107,14 +115,18 @@ class JobQueue:
         pass
 
     @classmethod
-    def queue_job(cls, user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
+    def queue_job(
+        cls, user: User, job_type: str = Job.TYPE_MANUAL, force_rebuild: bool = False
+    ) -> Job:
         """Queue a new job for a user."""
-        return create_job(user, job_type)
+        return create_job(user, job_type, force_rebuild=force_rebuild)
 
     @classmethod
-    def queue_default_job(cls, job_type: str = Job.TYPE_SCHEDULED) -> Job:
+    def queue_default_job(
+        cls, job_type: str = Job.TYPE_SCHEDULED, force_rebuild: bool = False
+    ) -> Job:
         """Queue a job for default lists."""
-        return create_default_job(job_type)
+        return create_default_job(job_type, force_rebuild=force_rebuild)
 
     @classmethod
     def queue_length(cls) -> int:

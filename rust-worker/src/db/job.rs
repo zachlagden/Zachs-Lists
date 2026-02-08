@@ -58,6 +58,8 @@ pub struct Job {
     pub heartbeat_at: Option<BsonDateTime>,
     #[serde(default)]
     pub read: bool,
+    #[serde(default)]
+    pub force_rebuild: bool,
 }
 
 /// Job repository for MongoDB operations

@@ -220,6 +220,10 @@ impl JobProcessor {
             job.job_id, job.username
         );
 
+        if job.force_rebuild {
+            info!("Force rebuild requested - bypassing all caching optimizations");
+        }
+
         // Load config from MongoDB
         let config_content = match self.user_config_repo.get_blocklists(&job.username).await {
             Ok(content) => content,
@@ -254,27 +258,30 @@ impl JobProcessor {
 
         // Check for "no changes" optimization
         // Skip if: config hash unchanged AND all sources would be cache hits
-        if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
-            if stored_hash == current_config_hash {
-                // Config unchanged, check if all sources are cached
-                let all_cached = self.downloader.check_all_cached(&sources).await;
-                if all_cached {
-                    info!(
-                        "Skipping job {} - no changes detected (config hash matches, all sources cached)",
-                        job.job_id
-                    );
-                    self.job_repo
-                        .skip(
-                            &job.id,
-                            "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
-                        )
-                        .await?;
-                    return Ok(());
+        if !job.force_rebuild {
+            if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
+                if stored_hash == current_config_hash {
+                    // Config unchanged, check if all sources are cached
+                    let all_cached = self.downloader.check_all_cached(&sources).await;
+                    if all_cached {
+                        info!(
+                            "Skipping job {} - no changes detected (config hash matches, all sources cached)",
+                            job.job_id
+                        );
+                        self.job_repo
+                            .skip(
+                                &job.id,
+                                "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
+                            )
+                            .await?;
+                        return Ok(());
+                    }
                 }
             }
         }
 
         // Check for matching config fingerprint in other users (copy-on-match optimization)
+        if !job.force_rebuild {
         if let Ok(Some(matched)) = self
             .user_repo
             .find_user_by_fingerprint(&config_fingerprint, &job.username)
@@ -446,6 +453,7 @@ impl JobProcessor {
                 }
             }
         }
+        }
 
         // Initialize progress tracking
         let progress = Arc::new(Mutex::new(JobProgress::downloading(sources.len() as u64)));
@@ -482,7 +490,7 @@ impl JobProcessor {
 
         // Stage 1: Download sources
         let download_results = self
-            .download_stage(&job.id, sources, Arc::clone(&progress))
+            .download_stage(&job.id, sources, job.force_rebuild, Arc::clone(&progress))
             .await?;
 
         // Check for complete failure
@@ -648,12 +656,13 @@ impl JobProcessor {
         &self,
         job_id: &bson::oid::ObjectId,
         sources: Vec<Source>,
+        force: bool,
         progress: Arc<Mutex<JobProgress>>,
     ) -> Result<Vec<DownloadResult>> {
         // Download sources - the callback just logs progress, we'll update DB after
         let results = self
             .downloader
-            .download_sources(sources, |_idx, _source_progress| {
+            .download_sources(sources, force, |_idx, _source_progress| {
                 // Progress updates are handled after all downloads complete
                 // to avoid frequent DB writes during parallel downloads
             })
