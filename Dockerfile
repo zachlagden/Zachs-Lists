@@ -12,6 +12,8 @@ COPY frontend/ ./
 
 # Empty VITE_API_URL = same-origin requests in production
 ENV VITE_API_URL=""
+ARG VITE_SITE_URL
+ENV VITE_SITE_URL=${VITE_SITE_URL}
 RUN pnpm build
 
 # ==============================================================================
