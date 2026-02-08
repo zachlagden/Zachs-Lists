@@ -1,0 +1,8 @@
+node_modules/
+frontend/dist/
+rust-worker/target/
+__pycache__/
+*.pyc
+data/
+pnpm-lock.yaml
+frontend/pnpm-lock.yaml

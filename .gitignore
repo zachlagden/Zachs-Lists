@@ -20,9 +20,12 @@ __pycache__/
 backend/.env
 frontend/.env
 
+# Node modules
+node_modules/
+frontend/node_modules/
+
 # Frontend build artifacts
 frontend/dist/
-frontend/node_modules/
 
 # Rust build artifacts
 rust-worker/target/
