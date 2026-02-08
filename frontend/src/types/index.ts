@@ -267,6 +267,19 @@ export interface AdminStats {
   };
 }
 
+// Announcement types
+export interface Announcement {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'critical';
+  is_active: boolean;
+  expires_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // Notification types
 export interface Notification {
   id: string;

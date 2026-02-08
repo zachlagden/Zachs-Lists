@@ -320,6 +320,23 @@ class User:
             },
         )
 
+    # Announcement dismissal methods
+    @property
+    def dismissed_announcements(self) -> List[str]:
+        """Get list of dismissed announcement IDs."""
+        return self._data.get("dismissed_announcements", [])
+
+    def dismiss_announcement(self, announcement_id: str) -> None:
+        """Add announcement ID to dismissed list (idempotent)."""
+        mongo.db[self.COLLECTION].update_one(
+            {"_id": self._id},
+            {"$addToSet": {"dismissed_announcements": announcement_id}},
+        )
+        if "dismissed_announcements" not in self._data:
+            self._data["dismissed_announcements"] = []
+        if announcement_id not in self._data["dismissed_announcements"]:
+            self._data["dismissed_announcements"].append(announcement_id)
+
     # Notification methods
     def add_notification(
         self,

@@ -1,8 +1,11 @@
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { useAuthStore, useJobsStore } from '../store';
-import { authApi } from '../api/client';
+import { authApi, userApi } from '../api/client';
 import { SITE_DOMAIN } from '../config/site';
+import AnnouncementBanner from './AnnouncementBanner';
+import type { Announcement } from '../types';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -21,6 +24,23 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const { hasUnreadFailures } = useJobsStore();
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    userApi
+      .getAnnouncements()
+      .then((data) => setAnnouncements(data.announcements || []))
+      .catch(() => {});
+  }, []);
+
+  const handleDismissAnnouncement = useCallback(async (id: string) => {
+    try {
+      await userApi.dismissAnnouncement(id);
+      setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    } catch (error) {
+      console.error('Failed to dismiss announcement:', error);
+    }
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -134,7 +154,10 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <div className="p-8">{children}</div>
+        <div className="p-8">
+          <AnnouncementBanner announcements={announcements} onDismiss={handleDismissAnnouncement} />
+          {children}
+        </div>
       </main>
     </div>
   );

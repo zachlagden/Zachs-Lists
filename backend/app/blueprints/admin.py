@@ -13,6 +13,7 @@ from app.models.cache import CacheMetadata
 from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
 from app.models.blocklist_library import BlocklistLibrary
+from app.models.announcement import Announcement
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -881,6 +882,135 @@ def delete_library_entry(admin: User, entry_id: str):
 
     current_app.logger.info(
         f"Admin {admin.username} deleted library entry: {name} ({entry_id})"
+    )
+
+    return jsonify({"success": True})
+
+
+# Announcement Management
+
+
+@admin_bp.route("/announcements", methods=["GET"])
+@admin_required
+def list_announcements(admin: User):
+    """List all announcements for admin management."""
+    limit = request.args.get("limit", 50, type=int)
+    announcements = Announcement.get_all(limit=limit)
+    return jsonify({"announcements": [a.to_dict() for a in announcements]})
+
+
+@admin_bp.route("/announcements", methods=["POST"])
+@admin_required
+def create_announcement(admin: User):
+    """Create a new announcement."""
+    from datetime import datetime
+
+    data = request.get_json()
+    title = data.get("title", "").strip()
+    message = data.get("message", "").strip()
+    ann_type = data.get("type", "info")
+    expires_at_str = data.get("expires_at")
+
+    if not title:
+        return jsonify({"error": "Title is required"}), 400
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    if ann_type not in Announcement.VALID_TYPES:
+        return (
+            jsonify(
+                {
+                    "error": f"Invalid type. Must be one of: {', '.join(Announcement.VALID_TYPES)}"
+                }
+            ),
+            400,
+        )
+
+    expires_at = None
+    if expires_at_str:
+        try:
+            expires_at = datetime.fromisoformat(
+                expires_at_str.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            return jsonify({"error": "Invalid expires_at format"}), 400
+
+    announcement = Announcement.create(
+        title=title,
+        message=message,
+        type=ann_type,
+        expires_at=expires_at,
+        created_by=admin.username,
+    )
+
+    current_app.logger.info(f"Admin {admin.username} created announcement: {title}")
+
+    return jsonify({"success": True, "announcement": announcement.to_dict()}), 201
+
+
+@admin_bp.route("/announcements/<announcement_id>", methods=["PUT"])
+@admin_required
+def update_announcement(admin: User, announcement_id: str):
+    """Update an announcement."""
+    from datetime import datetime
+
+    announcement = Announcement.get_by_id(announcement_id)
+    if not announcement:
+        return jsonify({"error": "Announcement not found"}), 404
+
+    data = request.get_json()
+    update_kwargs = {}
+
+    if "title" in data:
+        update_kwargs["title"] = data["title"].strip()
+    if "message" in data:
+        update_kwargs["message"] = data["message"].strip()
+    if "type" in data:
+        if data["type"] not in Announcement.VALID_TYPES:
+            return (
+                jsonify(
+                    {
+                        "error": f"Invalid type. Must be one of: {', '.join(Announcement.VALID_TYPES)}"
+                    }
+                ),
+                400,
+            )
+        update_kwargs["type"] = data["type"]
+    if "is_active" in data:
+        update_kwargs["is_active"] = bool(data["is_active"])
+    if "expires_at" in data:
+        if data["expires_at"] is None:
+            update_kwargs["expires_at"] = None
+        else:
+            try:
+                update_kwargs["expires_at"] = datetime.fromisoformat(
+                    data["expires_at"].replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except (ValueError, AttributeError):
+                return jsonify({"error": "Invalid expires_at format"}), 400
+
+    announcement.update(**update_kwargs)
+
+    current_app.logger.info(
+        f"Admin {admin.username} updated announcement {announcement_id}"
+    )
+
+    announcement = Announcement.get_by_id(announcement_id)
+    return jsonify({"success": True, "announcement": announcement.to_dict()})
+
+
+@admin_bp.route("/announcements/<announcement_id>", methods=["DELETE"])
+@admin_required
+def delete_announcement(admin: User, announcement_id: str):
+    """Delete an announcement."""
+    announcement = Announcement.get_by_id(announcement_id)
+    if not announcement:
+        return jsonify({"error": "Announcement not found"}), 404
+
+    title = announcement.title
+    announcement.delete()
+
+    current_app.logger.info(
+        f"Admin {admin.username} deleted announcement: {title} ({announcement_id})"
     )
 
     return jsonify({"success": True})

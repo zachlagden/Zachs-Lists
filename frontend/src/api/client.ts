@@ -146,6 +146,17 @@ export const userApi = {
     const response = await api.post('/api/user/config/url-metadata', { urls });
     return response.data;
   },
+
+  // Announcements
+  getAnnouncements: async () => {
+    const response = await api.get('/api/user/announcements');
+    return response.data;
+  },
+
+  dismissAnnouncement: async (announcementId: string) => {
+    const response = await api.post(`/api/user/announcements/${announcementId}/dismiss`);
+    return response.data;
+  },
 };
 
 // Analytics API
@@ -391,6 +402,41 @@ export const adminApi = {
 
   deleteLibraryEntry: async (entryId: string) => {
     const response = await api.delete(`/api/admin/library/${entryId}`);
+    return response.data;
+  },
+
+  // Announcement Management
+  getAnnouncements: async () => {
+    const response = await api.get('/api/admin/announcements');
+    return response.data;
+  },
+
+  createAnnouncement: async (data: {
+    title: string;
+    message: string;
+    type?: string;
+    expires_at?: string | null;
+  }) => {
+    const response = await api.post('/api/admin/announcements', data);
+    return response.data;
+  },
+
+  updateAnnouncement: async (
+    announcementId: string,
+    data: {
+      title?: string;
+      message?: string;
+      type?: string;
+      is_active?: boolean;
+      expires_at?: string | null;
+    },
+  ) => {
+    const response = await api.put(`/api/admin/announcements/${announcementId}`, data);
+    return response.data;
+  },
+
+  deleteAnnouncement: async (announcementId: string) => {
+    const response = await api.delete(`/api/admin/announcements/${announcementId}`);
     return response.data;
   },
 };

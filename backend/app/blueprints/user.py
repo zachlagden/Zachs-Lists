@@ -611,3 +611,28 @@ def mark_notification_read(user: User, notification_id: str):
         return jsonify({"error": "Notification not found"}), 404
 
     return jsonify({"success": True})
+
+
+# Announcement Endpoints
+
+
+@user_bp.route("/announcements", methods=["GET"])
+@login_required
+def get_announcements(user: User):
+    """Get active announcements excluding dismissed ones."""
+    from app.models.announcement import Announcement
+
+    active = Announcement.get_active()
+    dismissed = set(user.dismissed_announcements)
+
+    announcements = [a.to_dict() for a in active if a.id not in dismissed]
+
+    return jsonify({"announcements": announcements})
+
+
+@user_bp.route("/announcements/<announcement_id>/dismiss", methods=["POST"])
+@login_required
+def dismiss_announcement(user: User, announcement_id: str):
+    """Dismiss an announcement for this user."""
+    user.dismiss_announcement(announcement_id)
+    return jsonify({"success": True})

@@ -32,10 +32,18 @@ ChartJS.register(
   Filler,
 );
 
-import type { LimitRequest } from '../types';
+import type { LimitRequest, Announcement } from '../types';
 import { INTENDED_USE_LABELS } from '../types';
 
-type TabType = 'overview' | 'users' | 'limits' | 'default' | 'featured' | 'jobs' | 'library';
+type TabType =
+  | 'overview'
+  | 'users'
+  | 'limits'
+  | 'default'
+  | 'featured'
+  | 'jobs'
+  | 'library'
+  | 'announcements';
 
 interface AdminStats {
   total_users: number;
@@ -91,6 +99,7 @@ const VALID_TABS: TabType[] = [
   'featured',
   'jobs',
   'library',
+  'announcements',
 ];
 
 const LIBRARY_CATEGORIES = [
@@ -155,6 +164,17 @@ export default function AdminPage() {
     domain_count: 0,
   });
   const [editingEntry, setEditingEntry] = useState<LibraryEntry | null>(null);
+
+  // Announcements state
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [newAnnouncement, setNewAnnouncement] = useState({
+    title: '',
+    message: '',
+    type: 'info' as 'info' | 'warning' | 'critical',
+    expires_at: '',
+  });
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [editExpiresAt, setEditExpiresAt] = useState('');
 
   // Users table pagination, search, and filters (server-side)
   const [currentPage, setCurrentPage] = useState(1);
@@ -271,6 +291,7 @@ export default function AdminPage() {
           userGrowthData,
           limitRequestsData,
           libraryData,
+          announcementsData,
         ] = await Promise.all([
           adminApi.getStats().catch(() => null),
           adminApi.getAllJobs().catch(() => ({ jobs: [] })),
@@ -281,6 +302,7 @@ export default function AdminPage() {
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
           adminApi.getLimitRequests().catch(() => ({ requests: [], pending_count: 0 })),
           adminApi.getLibraryEntries().catch(() => ({ entries: [] })),
+          adminApi.getAnnouncements().catch(() => ({ announcements: [] })),
         ]);
 
         setStats(statsData);
@@ -294,6 +316,7 @@ export default function AdminPage() {
         setLimitRequests(limitRequestsData?.requests || []);
         setPendingRequestCount(limitRequestsData?.pending_count || 0);
         setLibraryEntries(libraryData?.entries || []);
+        setAnnouncements(announcementsData?.announcements || []);
       } catch (error) {
         console.error('Failed to fetch admin data:', error);
       } finally {
@@ -491,6 +514,74 @@ export default function AdminPage() {
     }
   };
 
+  // Announcement handlers
+  const handleCreateAnnouncement = async () => {
+    if (!newAnnouncement.title || !newAnnouncement.message) return;
+
+    try {
+      const result = await adminApi.createAnnouncement({
+        title: newAnnouncement.title,
+        message: newAnnouncement.message,
+        type: newAnnouncement.type,
+        expires_at: newAnnouncement.expires_at || null,
+      });
+      setAnnouncements([result.announcement, ...announcements]);
+      setNewAnnouncement({ title: '', message: '', type: 'info', expires_at: '' });
+      setMessage({ type: 'success', text: 'Announcement created' });
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error || 'Failed to create announcement';
+      setMessage({ type: 'error', text: errorMsg });
+    }
+  };
+
+  const handleUpdateAnnouncement = async () => {
+    if (!editingAnnouncement) return;
+
+    try {
+      const result = await adminApi.updateAnnouncement(editingAnnouncement.id, {
+        title: editingAnnouncement.title,
+        message: editingAnnouncement.message,
+        type: editingAnnouncement.type,
+        is_active: editingAnnouncement.is_active,
+        expires_at: editExpiresAt || null,
+      });
+      setAnnouncements(
+        announcements.map((a) => (a.id === editingAnnouncement.id ? result.announcement : a)),
+      );
+      setEditingAnnouncement(null);
+      setEditExpiresAt('');
+      setMessage({ type: 'success', text: 'Announcement updated' });
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error || 'Failed to update announcement';
+      setMessage({ type: 'error', text: errorMsg });
+    }
+  };
+
+  const handleToggleAnnouncement = async (id: string, isActive: boolean) => {
+    try {
+      const result = await adminApi.updateAnnouncement(id, { is_active: isActive });
+      setAnnouncements(announcements.map((a) => (a.id === id ? result.announcement : a)));
+      setMessage({
+        type: 'success',
+        text: `Announcement ${isActive ? 'activated' : 'deactivated'}`,
+      });
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to update announcement' });
+    }
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this announcement?')) return;
+
+    try {
+      await adminApi.deleteAnnouncement(id);
+      setAnnouncements(announcements.filter((a) => a.id !== id));
+      setMessage({ type: 'success', text: 'Announcement deleted' });
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to delete announcement' });
+    }
+  };
+
   const formatDomainCount = (count: number) => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
@@ -539,26 +630,34 @@ export default function AdminPage() {
       {/* Tabs */}
       <div className="border-b border-pihole-border">
         <div className="flex gap-4">
-          {(['overview', 'users', 'limits', 'default', 'featured', 'jobs'] as TabType[]).map(
-            (tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors capitalize flex items-center gap-2 ${
-                  activeTab === tab
-                    ? 'border-pihole-accent text-pihole-accent'
-                    : 'border-transparent text-pihole-text-muted hover:text-pihole-text'
-                }`}
-              >
-                {tab}
-                {tab === 'limits' && pendingRequestCount > 0 && (
-                  <span className="px-1.5 py-0.5 bg-pihole-accent text-white text-xs rounded-full">
-                    {pendingRequestCount}
-                  </span>
-                )}
-              </button>
-            ),
-          )}
+          {(
+            [
+              'overview',
+              'users',
+              'limits',
+              'default',
+              'featured',
+              'jobs',
+              'announcements',
+            ] as TabType[]
+          ).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors capitalize flex items-center gap-2 ${
+                activeTab === tab
+                  ? 'border-pihole-accent text-pihole-accent'
+                  : 'border-transparent text-pihole-text-muted hover:text-pihole-text'
+              }`}
+            >
+              {tab}
+              {tab === 'limits' && pendingRequestCount > 0 && (
+                <span className="px-1.5 py-0.5 bg-pihole-accent text-white text-xs rounded-full">
+                  {pendingRequestCount}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1624,6 +1723,248 @@ export default function AdminPage() {
           {libraryEntries.length === 0 && (
             <div className="card text-center py-8">
               <p className="text-pihole-text-muted">No library entries yet. Add one above.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Announcements Tab */}
+      {activeTab === 'announcements' && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold text-pihole-text">Announcements</h2>
+            <p className="text-sm text-pihole-text-muted">
+              Create site-wide announcements visible to all logged-in users
+            </p>
+          </div>
+
+          {/* Create Announcement Form */}
+          <div className="card">
+            <h3 className="font-semibold text-pihole-text mb-4">Create Announcement</h3>
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Title"
+                  value={newAnnouncement.title}
+                  onChange={(e) =>
+                    setNewAnnouncement({ ...newAnnouncement, title: e.target.value })
+                  }
+                  className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                />
+                <div className="flex gap-4">
+                  <select
+                    value={newAnnouncement.type}
+                    onChange={(e) =>
+                      setNewAnnouncement({
+                        ...newAnnouncement,
+                        type: e.target.value as 'info' | 'warning' | 'critical',
+                      })
+                    }
+                    className="flex-1 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                  >
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                  <input
+                    type="datetime-local"
+                    value={newAnnouncement.expires_at}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, expires_at: e.target.value })
+                    }
+                    className="flex-1 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                    placeholder="Expires at (optional)"
+                  />
+                </div>
+              </div>
+              <textarea
+                placeholder="Message"
+                value={newAnnouncement.message}
+                onChange={(e) =>
+                  setNewAnnouncement({ ...newAnnouncement, message: e.target.value })
+                }
+                rows={3}
+                className="w-full bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
+              />
+              <div className="flex justify-end">
+                <button onClick={handleCreateAnnouncement} className="btn btn-primary">
+                  Create Announcement
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Announcements List */}
+          {announcements.length === 0 ? (
+            <div className="card text-center py-8">
+              <p className="text-pihole-text-muted">No announcements yet. Create one above.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {announcements.map((announcement) => {
+                const isExpired =
+                  announcement.expires_at && new Date(announcement.expires_at) < new Date();
+                const isEditing = editingAnnouncement?.id === announcement.id;
+
+                return (
+                  <div
+                    key={announcement.id}
+                    className={`card border ${
+                      !announcement.is_active || isExpired
+                        ? 'border-pihole-border opacity-60'
+                        : announcement.type === 'critical'
+                          ? 'border-red-500/30'
+                          : announcement.type === 'warning'
+                            ? 'border-yellow-500/30'
+                            : 'border-blue-500/30'
+                    }`}
+                  >
+                    {isEditing ? (
+                      <div className="space-y-4">
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <input
+                            type="text"
+                            value={editingAnnouncement.title}
+                            onChange={(e) =>
+                              setEditingAnnouncement({
+                                ...editingAnnouncement,
+                                title: e.target.value,
+                              })
+                            }
+                            className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                          />
+                          <div className="flex gap-4">
+                            <select
+                              value={editingAnnouncement.type}
+                              onChange={(e) =>
+                                setEditingAnnouncement({
+                                  ...editingAnnouncement,
+                                  type: e.target.value as 'info' | 'warning' | 'critical',
+                                })
+                              }
+                              className="flex-1 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                            >
+                              <option value="info">Info</option>
+                              <option value="warning">Warning</option>
+                              <option value="critical">Critical</option>
+                            </select>
+                            <input
+                              type="datetime-local"
+                              value={editExpiresAt}
+                              onChange={(e) => setEditExpiresAt(e.target.value)}
+                              className="flex-1 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
+                            />
+                          </div>
+                        </div>
+                        <textarea
+                          value={editingAnnouncement.message}
+                          onChange={(e) =>
+                            setEditingAnnouncement({
+                              ...editingAnnouncement,
+                              message: e.target.value,
+                            })
+                          }
+                          rows={3}
+                          className="w-full bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingAnnouncement(null);
+                              setEditExpiresAt('');
+                            }}
+                            className="btn btn-ghost text-sm"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleUpdateAnnouncement}
+                            className="btn btn-primary text-sm"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-pihole-text">
+                              {announcement.title}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                announcement.type === 'critical'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : announcement.type === 'warning'
+                                    ? 'bg-yellow-500/20 text-yellow-400'
+                                    : 'bg-blue-500/20 text-blue-400'
+                              }`}
+                            >
+                              {announcement.type}
+                            </span>
+                            {announcement.is_active && !isExpired ? (
+                              <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+                                Active
+                              </span>
+                            ) : isExpired ? (
+                              <span className="px-2 py-0.5 bg-pihole-border text-pihole-text-muted text-xs rounded">
+                                Expired
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-pihole-border text-pihole-text-muted text-xs rounded">
+                                Inactive
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-pihole-text-muted mb-2">
+                            {announcement.message}
+                          </p>
+                          <div className="flex items-center gap-4 text-xs text-pihole-text-muted">
+                            <span>By {announcement.created_by}</span>
+                            <span>
+                              Created {new Date(announcement.created_at).toLocaleDateString()}
+                            </span>
+                            {announcement.expires_at && (
+                              <span>
+                                Expires {new Date(announcement.expires_at).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() =>
+                              handleToggleAnnouncement(announcement.id, !announcement.is_active)
+                            }
+                            className="btn btn-ghost text-sm"
+                          >
+                            {announcement.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingAnnouncement(announcement);
+                              setEditExpiresAt(
+                                announcement.expires_at ? announcement.expires_at.slice(0, 16) : '',
+                              );
+                            }}
+                            className="btn btn-ghost text-sm"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAnnouncement(announcement.id)}
+                            className="btn btn-ghost text-sm text-red-400"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
