@@ -39,16 +39,16 @@ Powered by a Rust backend that processes millions of domains in seconds.
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **Custom Curation** | Pick and choose from dozens of blocklist sources to build your perfect list |
-| **Rust-Powered** | Parallel downloads and processing means lists built in seconds, not minutes |
-| **Auto Updates** | Set it and forget it — weekly automatic rebuilds keep everything fresh |
-| **Multi-Format** | Export as hosts file, plain text, or Adblock syntax for any blocker |
-| **Smart Whitelisting** | Powerful pattern matching: exact, wildcard, subdomain, and full regex |
-| **Real-time Progress** | Watch your list build live with WebSocket-powered progress tracking |
-| **Public Lists** | Browse and use community-curated blocklists, or share your own |
-| **GitHub Login** | One-click authentication — no passwords to remember |
+| Feature                | Description                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- |
+| **Custom Curation**    | Pick and choose from dozens of blocklist sources to build your perfect list |
+| **Rust-Powered**       | Parallel downloads and processing means lists built in seconds, not minutes |
+| **Auto Updates**       | Set it and forget it — weekly automatic rebuilds keep everything fresh      |
+| **Multi-Format**       | Export as hosts file, plain text, or Adblock syntax for any blocker         |
+| **Smart Whitelisting** | Powerful pattern matching: exact, wildcard, subdomain, and full regex       |
+| **Real-time Progress** | Watch your list build live with WebSocket-powered progress tracking         |
+| **Public Lists**       | Browse and use community-curated blocklists, or share your own              |
+| **GitHub Login**       | One-click authentication — no passwords to remember                         |
 
 ---
 
@@ -57,12 +57,15 @@ Powered by a Rust backend that processes millions of domains in seconds.
 Getting started takes less than a minute:
 
 ### 1. Sign in
+
 Head to [lists.zachlagden.uk](https://lists.zachlagden.uk) and sign in with your GitHub account.
 
 ### 2. Configure
+
 Add your blocklist sources (one URL per line) and set up your whitelist patterns.
 
 ### 3. Build & Use
+
 Hit "Build Now" and grab your personalized blocklist URL:
 
 ```bash
@@ -101,15 +104,15 @@ That's it. Your blocklist will auto-update weekly.
 
 ## Why Zach's Lists?
 
-| Feature | Zach's Lists | Traditional Lists | DIY Scripts |
-|---------|:------------:|:-----------------:|:-----------:|
-| Custom sources | ✅ | ❌ | ✅ |
-| Whitelist filtering | ✅ | ❌ | ⚠️ |
-| Auto updates | ✅ | ✅ | ⚠️ |
-| Real-time progress | ✅ | ❌ | ❌ |
-| Multiple formats | ✅ | ⚠️ | ⚠️ |
-| Performance | ✅ | N/A | ⚠️ |
-| Web UI | ✅ | ❌ | ❌ |
+| Feature             | Zach's Lists | Traditional Lists | DIY Scripts |
+| ------------------- | :----------: | :---------------: | :---------: |
+| Custom sources      |      ✅      |        ❌         |     ✅      |
+| Whitelist filtering |      ✅      |        ❌         |     ⚠️      |
+| Auto updates        |      ✅      |        ✅         |     ⚠️      |
+| Real-time progress  |      ✅      |        ❌         |     ❌      |
+| Multiple formats    |      ✅      |        ⚠️         |     ⚠️      |
+| Performance         |      ✅      |        N/A        |     ⚠️      |
+| Web UI              |      ✅      |        ❌         |     ❌      |
 
 **The bottom line:** Traditional blocklists give you no control. DIY scripts require maintenance. Zach's Lists gives you the flexibility of custom lists with the convenience of a managed service.
 
@@ -118,18 +121,21 @@ That's it. Your blocklist will auto-update weekly.
 ## Tech Stack
 
 ### Frontend
+
 - **React 18 + TypeScript** — Type-safe, component-based UI
 - **Tailwind CSS** — Custom cyberpunk-inspired theme
 - **Socket.io** — Real-time job progress updates
 - **Framer Motion** — Smooth animations and transitions
 
 ### Backend
+
 - **Flask 3 + MongoDB** — Flexible REST API with document storage
 - **APScheduler** — Automated weekly rebuilds
 - **GitHub OAuth** — Secure, passwordless authentication
 - **GeoIP2** — Analytics and geographic insights
 
 ### Worker
+
 - **Rust + Tokio** — Async runtime for maximum performance
 - **10 concurrent downloads** — Parallel source fetching
 - **7-day intelligent caching** — Only download what's changed
@@ -141,15 +147,15 @@ That's it. Your blocklist will auto-update weekly.
 
 Works with any DNS blocker or browser extension that accepts blocklists:
 
-| Platform | Formats |
-|----------|---------|
-| **Pi-hole** | hosts, plain |
-| **AdGuard Home** | hosts, plain, adblock |
-| **uBlock Origin** | adblock |
-| **AdBlock Plus** | adblock |
-| **Blocky** | plain |
-| **NextDNS** | plain |
-| **ControlD** | plain |
+| Platform          | Formats               |
+| ----------------- | --------------------- |
+| **Pi-hole**       | hosts, plain          |
+| **AdGuard Home**  | hosts, plain, adblock |
+| **uBlock Origin** | adblock               |
+| **AdBlock Plus**  | adblock               |
+| **Blocky**        | plain                 |
+| **NextDNS**       | plain                 |
+| **ControlD**      | plain                 |
 
 If it accepts a URL to a blocklist, it'll work with Zach's Lists.
 
@@ -161,20 +167,28 @@ If it accepts a URL to a blocklist, it'll work with Zach's Lists.
 <summary>📸 Click to expand</summary>
 
 ### Dashboard
+
 <!-- ![Dashboard](./assets/screenshots/dashboard.png) -->
-*Your command center — usage stats, recent jobs, and quick actions*
+
+_Your command center — usage stats, recent jobs, and quick actions_
 
 ### Configuration Editor
+
 <!-- ![Config](./assets/screenshots/config.png) -->
-*Add sources, configure whitelists, and trigger builds*
+
+_Add sources, configure whitelists, and trigger builds_
 
 ### Real-time Job Progress
+
 <!-- ![Jobs](./assets/screenshots/jobs.png) -->
-*Watch your list build live with per-source progress*
+
+_Watch your list build live with per-source progress_
 
 ### Browse Public Lists
+
 <!-- ![Browse](./assets/screenshots/browse.png) -->
-*Discover community-curated blocklists*
+
+_Discover community-curated blocklists_
 
 </details>
 

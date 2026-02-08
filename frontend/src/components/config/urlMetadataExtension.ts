@@ -20,7 +20,7 @@ function formatCount(count: number): string {
 class UrlMetadataWidget extends WidgetType {
   constructor(
     private domainCount: number | null,
-    private cached: boolean
+    private cached: boolean,
   ) {
     super();
   }
@@ -34,7 +34,8 @@ class UrlMetadataWidget extends WidgetType {
       span.style.cssText = 'color: #6b7280; opacity: 0.7; font-size: 0.9em; margin-left: 0.5em;';
     } else if (!this.cached) {
       span.textContent = ' \u2190 (not cached)';
-      span.style.cssText = 'color: #6b7280; opacity: 0.5; font-style: italic; font-size: 0.9em; margin-left: 0.5em;';
+      span.style.cssText =
+        'color: #6b7280; opacity: 0.5; font-style: italic; font-size: 0.9em; margin-left: 0.5em;';
     }
 
     return span;
@@ -146,6 +147,6 @@ export function urlMetadataExtension(fetchMetadata: FetchMetadataFn): Extension 
     },
     {
       decorations: (v) => v.decorations,
-    }
+    },
   );
 }

@@ -88,7 +88,8 @@ export default function QueueStage({ progress, queueInfo }: QueueStageProps) {
         </p>
       ) : countdown !== null && countdown > 0 ? (
         <p className="text-pihole-text-muted text-center">
-          Starting in <span className="text-pihole-accent font-medium">{countdown}</span> second{countdown !== 1 ? 's' : ''}...
+          Starting in <span className="text-pihole-accent font-medium">{countdown}</span> second
+          {countdown !== 1 ? 's' : ''}...
         </p>
       ) : (
         <p className="text-pihole-text-muted text-center">Preparing to start...</p>
@@ -99,21 +100,43 @@ export default function QueueStage({ progress, queueInfo }: QueueStageProps) {
         <div className="mt-4 flex items-center gap-4 text-sm">
           {activeWorkers > 0 && (
             <div className="flex items-center gap-1.5 text-pihole-text-muted">
-              <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              <svg
+                className="w-4 h-4 text-green-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+                />
               </svg>
               <span>
-                <span className="text-pihole-text font-medium">{activeWorkers}</span> worker{activeWorkers !== 1 ? 's' : ''} active
+                <span className="text-pihole-text font-medium">{activeWorkers}</span> worker
+                {activeWorkers !== 1 ? 's' : ''} active
               </span>
             </div>
           )}
           {jobsProcessing > 0 && (
             <div className="flex items-center gap-1.5 text-pihole-text-muted">
-              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <svg
+                className="w-4 h-4 text-blue-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
               </svg>
               <span>
-                <span className="text-pihole-text font-medium">{jobsProcessing}</span> job{jobsProcessing !== 1 ? 's' : ''} processing
+                <span className="text-pihole-text font-medium">{jobsProcessing}</span> job
+                {jobsProcessing !== 1 ? 's' : ''} processing
               </span>
             </div>
           )}

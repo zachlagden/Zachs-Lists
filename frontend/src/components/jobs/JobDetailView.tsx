@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import type { Job, SourceProgress, WhitelistProgress, FormatProgress, JobStatus, EnhancedJobProgress } from '../../types';
+import type {
+  Job,
+  SourceProgress,
+  WhitelistProgress,
+  FormatProgress,
+  JobStatus,
+  EnhancedJobProgress,
+} from '../../types';
 import JobStageStepper from './JobStageStepper';
 import QueueStage from './stages/QueueStage';
 import DownloadingStage from './stages/DownloadingStage';
@@ -12,7 +19,7 @@ interface JobDetailViewProps {
   sources: SourceProgress[];
   whitelist: WhitelistProgress | null;
   formats: Record<string, FormatProgress>;
-  showUsername?: boolean;  // Show username for admin view
+  showUsername?: boolean; // Show username for admin view
 }
 
 const statusColors: Record<JobStatus, string> = {
@@ -25,14 +32,25 @@ const statusColors: Record<JobStatus, string> = {
 
 function formatSnapshotTime(isoString: string): string {
   const date = new Date(isoString);
-  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return date.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
-export default function JobDetailView({ job, sources, whitelist, formats, showUsername = false }: JobDetailViewProps) {
+export default function JobDetailView({
+  job,
+  sources,
+  whitelist,
+  formats,
+  showUsername = false,
+}: JobDetailViewProps) {
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
 
   const stage = job.progress?.stage || 'queue';
-  const isFinished = job.status === 'completed' || job.status === 'failed' || job.status === 'skipped';
+  const isFinished =
+    job.status === 'completed' || job.status === 'failed' || job.status === 'skipped';
   const stageSnapshots = job.progress?.stage_snapshots;
 
   // Get snapshot data if viewing a historical stage
@@ -78,7 +96,10 @@ export default function JobDetailView({ job, sources, whitelist, formats, showUs
         return <WhitelistStage whitelist={whitelistData} />;
       }
       case 'generation': {
-        const generationData = data as { formats?: FormatProgress[]; current_format?: string | null };
+        const generationData = data as {
+          formats?: FormatProgress[];
+          current_format?: string | null;
+        };
         const generationProgress = {
           formats: generationData.formats || [],
           current_format: generationData.current_format || null,
@@ -103,9 +124,7 @@ export default function JobDetailView({ job, sources, whitelist, formats, showUs
               </span>
             )}
           </h2>
-          <p className="text-sm text-pihole-text-muted font-mono">
-            {job.job_id}
-          </p>
+          <p className="text-sm text-pihole-text-muted font-mono">{job.job_id}</p>
         </div>
         <span className={`px-3 py-1.5 text-sm rounded font-medium ${statusColors[job.status]}`}>
           {job.status === 'processing' && (
@@ -128,8 +147,18 @@ export default function JobDetailView({ job, sources, whitelist, formats, showUs
       {selectedSnapshot && (
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="w-4 h-4 text-blue-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             <span className="text-sm text-blue-400">
               Viewing snapshot from {formatSnapshotTime(selectedSnapshot.completed_at)}
@@ -160,9 +189,7 @@ export default function JobDetailView({ job, sources, whitelist, formats, showUs
               <DownloadingStage progress={job.progress} sources={sources} />
             )}
 
-            {!isFinished && stage === 'whitelist' && (
-              <WhitelistStage whitelist={whitelist} />
-            )}
+            {!isFinished && stage === 'whitelist' && <WhitelistStage whitelist={whitelist} />}
 
             {!isFinished && stage === 'generation' && (
               <GenerationStage generation={job.progress.generation} formats={formats} />

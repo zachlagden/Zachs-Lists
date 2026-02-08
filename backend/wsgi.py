@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Try parent directory first (project root), then current directory
 env_paths = [
     Path(__file__).parent.parent / ".env",  # Project root
-    Path(__file__).parent / ".env",          # Backend directory (fallback)
+    Path(__file__).parent / ".env",  # Backend directory (fallback)
 ]
 
 for env_path in env_paths:

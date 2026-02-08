@@ -31,7 +31,8 @@ export default function Footer() {
               <span className="font-bold text-xl text-chrome-light">Zach's Lists</span>
             </Link>
             <p className="text-chrome text-sm max-w-sm leading-relaxed mb-4">
-              Curated blocklists that update themselves. Keeping your network clean, one domain at a time.
+              Curated blocklists that update themselves. Keeping your network clean, one domain at a
+              time.
             </p>
 
             {/* Rust Badge */}

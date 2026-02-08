@@ -38,7 +38,7 @@ export interface ValidationResult {
   warning_count: number;
   has_errors: boolean;
   has_warnings: boolean;
-  validation_token?: string;  // Token for saving - ties validated config to save
+  validation_token?: string; // Token for saving - ties validated config to save
 }
 
 // Category info
@@ -51,7 +51,7 @@ export const CATEGORIES = [
   { value: 'nsfw', label: 'NSFW', description: 'Adult content (excluded from all_domains)' },
 ] as const;
 
-export type CategoryValue = typeof CATEGORIES[number]['value'];
+export type CategoryValue = (typeof CATEGORIES)[number]['value'];
 
 // Parse config string into lines
 export function parseConfig(config: string): ConfigLine[] {

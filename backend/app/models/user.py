@@ -84,8 +84,7 @@ class User:
     def set_admin(self, value: bool) -> None:
         """Set admin status in database."""
         mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {"$set": {"is_admin": value}}
+            {"_id": self._id}, {"$set": {"is_admin": value}}
         )
         self._data["is_admin"] = value
 
@@ -265,9 +264,10 @@ class User:
             )
             return True
 
-        return stats.get("manual_updates_this_week", 0) < self.limits[
-            "manual_updates_per_week"
-        ]
+        return (
+            stats.get("manual_updates_this_week", 0)
+            < self.limits["manual_updates_per_week"]
+        )
 
     def increment_manual_updates(self) -> None:
         """Increment manual update counter."""
@@ -373,8 +373,7 @@ class User:
 
         # Check if this IP hash already exists
         existing = mongo.db[self.COLLECTION].find_one(
-            {"_id": self._id, "ip_log.ip_hash": ip_hash},
-            {"ip_log.$": 1}
+            {"_id": self._id, "ip_log.ip_hash": ip_hash}, {"ip_log.$": 1}
         )
 
         if existing:
@@ -384,7 +383,7 @@ class User:
                 {
                     "$set": {"ip_log.$.last_seen": now},
                     "$inc": {"ip_log.$.access_count": 1},
-                }
+                },
             )
         else:
             # Add new IP entry
@@ -399,7 +398,7 @@ class User:
                             "access_count": 1,
                         }
                     }
-                }
+                },
             )
 
     def delete_with_data(self) -> None:
@@ -415,9 +414,13 @@ class User:
         mongo.db[self.COLLECTION].delete_one({"_id": self._id})
 
     # Serialization
-    def _serialize_notifications(self, unread_only: bool = False) -> List[Dict[str, Any]]:
+    def _serialize_notifications(
+        self, unread_only: bool = False
+    ) -> List[Dict[str, Any]]:
         """Serialize notifications with proper datetime formatting."""
-        notifications = self.get_unread_notifications() if unread_only else self.notifications
+        notifications = (
+            self.get_unread_notifications() if unread_only else self.notifications
+        )
         return [
             {
                 "id": n.get("id"),
@@ -427,9 +430,7 @@ class User:
                 "data": n.get("data", {}),
                 "read": n.get("read", False),
                 "created_at": (
-                    n["created_at"].isoformat()
-                    if n.get("created_at")
-                    else None
+                    n["created_at"].isoformat() if n.get("created_at") else None
                 ),
             }
             for n in notifications
@@ -480,14 +481,10 @@ class User:
             {
                 "ip_hash": entry.get("ip_hash"),
                 "first_seen": (
-                    entry["first_seen"].isoformat()
-                    if entry.get("first_seen")
-                    else None
+                    entry["first_seen"].isoformat() if entry.get("first_seen") else None
                 ),
                 "last_seen": (
-                    entry["last_seen"].isoformat()
-                    if entry.get("last_seen")
-                    else None
+                    entry["last_seen"].isoformat() if entry.get("last_seen") else None
                 ),
                 "access_count": entry.get("access_count", 0),
             }
@@ -626,11 +623,21 @@ class User:
                 role_conditions.append({"$or": [{"is_admin": True}, {"is_root": True}]})
             elif show_enabled:
                 role_conditions.append(
-                    {"$and": [{"$or": [{"is_admin": True}, {"is_root": True}]}, {"is_enabled": True}]}
+                    {
+                        "$and": [
+                            {"$or": [{"is_admin": True}, {"is_root": True}]},
+                            {"is_enabled": True},
+                        ]
+                    }
                 )
             elif show_disabled:
                 role_conditions.append(
-                    {"$and": [{"$or": [{"is_admin": True}, {"is_root": True}]}, {"is_enabled": False}]}
+                    {
+                        "$and": [
+                            {"$or": [{"is_admin": True}, {"is_root": True}]},
+                            {"is_enabled": False},
+                        ]
+                    }
                 )
 
         # Regular users (not admin, not root)

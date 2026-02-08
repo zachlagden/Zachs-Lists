@@ -135,7 +135,8 @@ def get_admin_analytics(admin: User):
 
     # Combined stats
     combined_stats = {
-        "total_requests": default_stats["total_requests"] + user_stats["total_requests"],
+        "total_requests": default_stats["total_requests"]
+        + user_stats["total_requests"],
         "total_bandwidth": default_stats["total_bandwidth"]
         + user_stats["total_bandwidth"],
         "total_unique_ips": default_stats["total_unique_ips"]

@@ -110,7 +110,9 @@ class LimitRequest:
             "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
         }
 
-    def approve(self, admin_username: str, approved_limit: int = None, response: str = None) -> None:
+    def approve(
+        self, admin_username: str, approved_limit: int = None, response: str = None
+    ) -> None:
         """Approve the limit request."""
         from app.models.user import User
 

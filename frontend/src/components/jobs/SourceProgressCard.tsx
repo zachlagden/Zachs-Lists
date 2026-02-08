@@ -21,7 +21,9 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function formatDomainChange(change: number | null | undefined): { text: string; color: string } | null {
+function formatDomainChange(
+  change: number | null | undefined,
+): { text: string; color: string } | null {
   if (change == null || change === 0) return null;
   if (change > 0) {
     return { text: `+${change.toLocaleString()}`, color: 'text-green-400' };
@@ -69,12 +71,7 @@ export default function SourceProgressCard({ source }: SourceProgressCardProps) 
       {/* Download progress */}
       {isDownloading && source.bytes_total && source.bytes_total > 0 && (
         <div className="mb-2">
-          <ProgressBar
-            percent={source.download_percent || 0}
-            color="blue"
-            size="sm"
-            animated
-          />
+          <ProgressBar percent={source.download_percent || 0} color="blue" size="sm" animated />
           <div className="flex justify-between text-xs text-pihole-text-muted mt-1">
             <span>{formatBytes(source.bytes_downloaded)}</span>
             <span>{formatBytes(source.bytes_total)}</span>

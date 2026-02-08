@@ -5,10 +5,7 @@ interface LoadingSpinnerProps {
   className?: string;
 }
 
-export default function LoadingSpinner({
-  size = 'md',
-  className,
-}: LoadingSpinnerProps) {
+export default function LoadingSpinner({ size = 'md', className }: LoadingSpinnerProps) {
   const sizeClasses = {
     sm: 'w-4 h-4',
     md: 'w-8 h-8',
@@ -20,7 +17,7 @@ export default function LoadingSpinner({
       className={clsx(
         'animate-spin rounded-full border-2 border-pihole-border border-t-pihole-accent',
         sizeClasses[size],
-        className
+        className,
       )}
     />
   );

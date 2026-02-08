@@ -175,6 +175,7 @@ class Job:
         """Emit job skipped via Socket.IO."""
         try:
             from app.socketio import emit_job_skipped
+
             user_id = str(self.user_id) if self.user_id else None
             emit_job_skipped(self.job_id, reason, user_id)
         except Exception:
@@ -184,6 +185,7 @@ class Job:
         """Emit job update via Socket.IO."""
         try:
             from app.socketio import emit_job_updated
+
             user_id = str(self.user_id) if self.user_id else None
             emit_job_updated(self.to_dict(), user_id)
         except Exception:
@@ -193,6 +195,7 @@ class Job:
         """Emit job completed via Socket.IO."""
         try:
             from app.socketio import emit_job_completed
+
             user_id = str(self.user_id) if self.user_id else None
             emit_job_completed(self.to_dict(), user_id)
         except Exception:
@@ -335,19 +338,14 @@ class Job:
             query["status"] = status
 
         cursor = (
-            mongo.db[cls.COLLECTION]
-            .find(query)
-            .sort("created_at", -1)
-            .limit(limit)
+            mongo.db[cls.COLLECTION].find(query).sort("created_at", -1).limit(limit)
         )
         return [cls(data) for data in cursor]
 
     @classmethod
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
-        cursor = (
-            mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
-        )
+        cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
         return [cls(data) for data in cursor]
 
     @classmethod
@@ -424,7 +422,10 @@ class Job:
                     "started_at": now,
                 }
             },
-            sort=[("priority", 1), ("created_at", 1)],  # priority ASC (1=high), then FIFO
+            sort=[
+                ("priority", 1),
+                ("created_at", 1),
+            ],  # priority ASC (1=high), then FIFO
             return_document=ReturnDocument.AFTER,
         )
         return cls(doc) if doc else None
@@ -521,17 +522,17 @@ class Job:
         Returns:
             List of active jobs sorted by priority then created_at
         """
-        cursor = mongo.db[cls.COLLECTION].find(
-            {"status": {"$in": [cls.STATUS_QUEUED, cls.STATUS_PROCESSING]}}
-        ).sort([("priority", 1), ("created_at", 1)])
+        cursor = (
+            mongo.db[cls.COLLECTION]
+            .find({"status": {"$in": [cls.STATUS_QUEUED, cls.STATUS_PROCESSING]}})
+            .sort([("priority", 1), ("created_at", 1)])
+        )
         return [cls(data) for data in cursor]
 
     @classmethod
     def count_queued(cls) -> int:
         """Count jobs waiting in queue."""
-        return mongo.db[cls.COLLECTION].count_documents(
-            {"status": cls.STATUS_QUEUED}
-        )
+        return mongo.db[cls.COLLECTION].count_documents({"status": cls.STATUS_QUEUED})
 
     @classmethod
     def get_queue_position(cls, job_id: str) -> int:
@@ -544,16 +545,17 @@ class Job:
             return 0
 
         # Count jobs ahead in queue (higher priority or same priority but earlier)
-        count = mongo.db[cls.COLLECTION].count_documents({
-            "status": cls.STATUS_QUEUED,
-            "$or": [
-                {"priority": {"$lt": job.priority}},  # Higher priority (lower number)
-                {
-                    "priority": job.priority,
-                    "created_at": {"$lt": job.created_at}
-                }
-            ]
-        })
+        count = mongo.db[cls.COLLECTION].count_documents(
+            {
+                "status": cls.STATUS_QUEUED,
+                "$or": [
+                    {
+                        "priority": {"$lt": job.priority}
+                    },  # Higher priority (lower number)
+                    {"priority": job.priority, "created_at": {"$lt": job.created_at}},
+                ],
+            }
+        )
         return count + 1  # 1-based position
 
     @classmethod
@@ -562,7 +564,7 @@ class Job:
         pipeline = [
             {"$match": {"status": cls.STATUS_PROCESSING, "worker_id": {"$ne": None}}},
             {"$group": {"_id": "$worker_id"}},
-            {"$count": "count"}
+            {"$count": "count"},
         ]
         result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
         return result[0]["count"] if result else 0
@@ -612,12 +614,7 @@ class Job:
         if job_type:
             query["type"] = job_type
 
-        doc = (
-            mongo.db[cls.COLLECTION]
-            .find(query)
-            .sort("completed_at", -1)
-            .limit(1)
-        )
+        doc = mongo.db[cls.COLLECTION].find(query).sort("completed_at", -1).limit(1)
         docs = list(doc)
         return cls(docs[0]) if docs else None
 
@@ -641,7 +638,9 @@ class Job:
         return mongo.db[cls.COLLECTION].count_documents(query) > 0
 
     @classmethod
-    def get_cooldown_remaining(cls, user_id: ObjectId, cooldown_minutes: int = 5) -> int:
+    def get_cooldown_remaining(
+        cls, user_id: ObjectId, cooldown_minutes: int = 5
+    ) -> int:
         """
         Get remaining cooldown time in seconds for a user.
         Returns 0 if no cooldown active.

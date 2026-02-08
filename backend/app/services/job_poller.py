@@ -120,7 +120,9 @@ class JobStatusPoller:
                         Job.STATUS_FAILED,
                         Job.STATUS_SKIPPED,
                     ):
-                        emit_job_completed(job.to_dict(), str(job.user_id) if job.user_id else None)
+                        emit_job_completed(
+                            job.to_dict(), str(job.user_id) if job.user_id else None
+                        )
                         self.completed_emitted.add(job_id)
                         logger.debug(f"Emitted completion for job {job_id[:8]}")
 

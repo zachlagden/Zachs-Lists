@@ -4,7 +4,7 @@ interface JobListProps {
   jobs: Job[];
   selectedJobId: string | null;
   onSelectJob: (job: Job) => void;
-  showUsername?: boolean;  // Show username for admin view
+  showUsername?: boolean; // Show username for admin view
 }
 
 const statusColors: Record<JobStatus, string> = {
@@ -42,7 +42,12 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-export default function JobList({ jobs, selectedJobId, onSelectJob, showUsername = false }: JobListProps) {
+export default function JobList({
+  jobs,
+  selectedJobId,
+  onSelectJob,
+  showUsername = false,
+}: JobListProps) {
   if (jobs.length === 0) {
     return (
       <div className="text-center text-pihole-text-muted py-8">

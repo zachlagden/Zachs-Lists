@@ -91,7 +91,9 @@ def github_callback():
     # Verify state
     if not state or state != session.get("oauth_state"):
         current_app.logger.error("OAuth state mismatch")
-        return redirect(f"{current_app.config['FRONTEND_URL']}/login?error=state_mismatch")
+        return redirect(
+            f"{current_app.config['FRONTEND_URL']}/login?error=state_mismatch"
+        )
 
     session.pop("oauth_state", None)
 

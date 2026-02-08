@@ -41,9 +41,7 @@ export default function RustBadge({
         className="object-contain"
       />
       {showText && (
-        <span className={`${config.text} font-medium text-rust-light`}>
-          Powered by Rust
-        </span>
+        <span className={`${config.text} font-medium text-rust-light`}>Powered by Rust</span>
       )}
     </motion.div>
   );

@@ -45,17 +45,17 @@ export default function LoginPage() {
           <div className="glass-card p-8">
             <div className="text-center mb-8">
               <h1 className="font-display text-3xl text-chrome-light mb-2">LOGIN</h1>
-              <p className="text-chrome">
-                Sign in to manage your blocklists
-              </p>
+              <p className="text-chrome">Sign in to manage your blocklists</p>
             </div>
 
             {error && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm">
                 {error === 'access_denied' && 'You denied access to your GitHub account.'}
-                {error === 'no_email' && 'Unable to retrieve email from GitHub. Please ensure your email is public or verify your email.'}
+                {error === 'no_email' &&
+                  'Unable to retrieve email from GitHub. Please ensure your email is public or verify your email.'}
                 {error === 'disabled' && 'Your account has been disabled. Please contact support.'}
-                {!['access_denied', 'no_email', 'disabled'].includes(error) && 'An error occurred during authentication.'}
+                {!['access_denied', 'no_email', 'disabled'].includes(error) &&
+                  'An error occurred during authentication.'}
               </div>
             )}
 

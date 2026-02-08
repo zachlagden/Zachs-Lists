@@ -100,6 +100,7 @@ def register_handlers():
 
 # Event emitters
 
+
 def emit_job_created(job_data: dict, user_id: str = None):
     """
     Emit job:created event.
@@ -301,6 +302,7 @@ def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
 
 
 # Config validation events
+
 
 def emit_validation_progress(user_id: str, progress: dict):
     """

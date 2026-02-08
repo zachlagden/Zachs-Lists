@@ -46,8 +46,8 @@ export default function SupportSection() {
             </h2>
 
             <p className="text-chrome mb-6 max-w-xl mx-auto">
-              Zach's Lists is a one-person project. Your support helps cover the costs of running this service
-              and keeps it free for everyone.
+              Zach's Lists is a one-person project. Your support helps cover the costs of running
+              this service and keeps it free for everyone.
             </p>
 
             {/* Costs */}
@@ -76,9 +76,7 @@ export default function SupportSection() {
               Become a Sponsor
             </motion.a>
 
-            <p className="mt-4 text-sm text-chrome/60">
-              Every contribution makes a difference
-            </p>
+            <p className="mt-4 text-sm text-chrome/60">Every contribution makes a difference</p>
           </div>
         </motion.div>
       </div>

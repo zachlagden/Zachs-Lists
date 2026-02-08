@@ -31,15 +31,19 @@ def create_app(config_name: str = None) -> Flask:
 
     # Initialize Socket.IO
     from app.socketio import init_socketio
+
     socketio = init_socketio(app)
 
     # Register blueprints
     register_blueprints(app)
 
     # Serve frontend static files via WhiteNoise in production
-    frontend_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'frontend', 'dist')
+    frontend_dist = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "..", "frontend", "dist"
+    )
     if os.path.isdir(frontend_dist):
         from whitenoise import WhiteNoise
+
         app.wsgi_app = WhiteNoise(app.wsgi_app, root=frontend_dist, prefix="/")
         # Immutable caching for Vite's hashed assets
         app.wsgi_app.add_files(os.path.join(frontend_dist, "assets"), prefix="assets/")
@@ -88,8 +92,12 @@ def register_blueprints(app: Flask) -> None:
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(user_bp, url_prefix="/api/user")
-    app.register_blueprint(lists_public_bp)                    # No prefix - handles /lists/ and /u/ file serving
-    app.register_blueprint(lists_api_bp, url_prefix="/api")    # /api prefix - handles /api/lists and /api/browse
+    app.register_blueprint(
+        lists_public_bp
+    )  # No prefix - handles /lists/ and /u/ file serving
+    app.register_blueprint(
+        lists_api_bp, url_prefix="/api"
+    )  # /api prefix - handles /api/lists and /api/browse
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(analytics_bp, url_prefix="/api/analytics")
 
@@ -105,7 +113,7 @@ def register_blueprints(app: Flask) -> None:
         if path.startswith(("api/", "socket.io/", "lists/", "u/", "health")):
             abort(404)
         frontend_dist = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), '..', 'frontend', 'dist'
+            os.path.dirname(os.path.dirname(__file__)), "..", "frontend", "dist"
         )
         return send_from_directory(frontend_dist, "index.html")
 

@@ -4,10 +4,24 @@ import { AlertTriangle, Eye, Clock, XCircle } from 'lucide-react';
 
 // Sample tracking domains that scroll by
 const TRACKER_DOMAINS = [
-  'doubleclick.net', 'google-analytics.com', 'facebook.net', 'scorecardresearch.com',
-  'quantserve.com', 'taboola.com', 'outbrain.com', 'criteo.net', 'amazon-adsystem.com',
-  'adnxs.com', 'rubiconproject.com', 'pubmatic.com', 'openx.net', 'casalemedia.com',
-  'advertising.com', 'spotxchange.com', 'sharethrough.com', 'contextweb.com',
+  'doubleclick.net',
+  'google-analytics.com',
+  'facebook.net',
+  'scorecardresearch.com',
+  'quantserve.com',
+  'taboola.com',
+  'outbrain.com',
+  'criteo.net',
+  'amazon-adsystem.com',
+  'adnxs.com',
+  'rubiconproject.com',
+  'pubmatic.com',
+  'openx.net',
+  'casalemedia.com',
+  'advertising.com',
+  'spotxchange.com',
+  'sharethrough.com',
+  'contextweb.com',
 ];
 
 const problems = [
@@ -43,10 +57,7 @@ export default function ProblemSection() {
   const textY = useTransform(scrollYProgress, [0, 0.5], [50, 0]);
 
   return (
-    <section
-      ref={sectionRef}
-      className="relative py-24 lg:py-32 bg-void-deep overflow-hidden"
-    >
+    <section ref={sectionRef} className="relative py-24 lg:py-32 bg-void-deep overflow-hidden">
       {/* Scrolling chaos background */}
       <motion.div
         style={{ opacity: chaosOpacity }}
@@ -65,7 +76,9 @@ export default function ProblemSection() {
           >
             <span className="text-red-500/10 font-mono text-sm tracking-wider">
               {[...TRACKER_DOMAINS, ...TRACKER_DOMAINS].map((domain, i) => (
-                <span key={i} className="mx-8">{domain}</span>
+                <span key={i} className="mx-8">
+                  {domain}
+                </span>
               ))}
             </span>
           </div>
@@ -77,10 +90,7 @@ export default function ProblemSection() {
 
       {/* Content */}
       <div className="container mx-auto px-6 relative z-10">
-        <motion.div
-          style={{ y: textY }}
-          className="max-w-4xl mx-auto"
-        >
+        <motion.div style={{ y: textY }} className="max-w-4xl mx-auto">
           {/* Section Header */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -101,8 +111,8 @@ export default function ProblemSection() {
             </h2>
 
             <p className="text-xl text-chrome max-w-2xl mx-auto">
-              Every device on your network is under constant attack from trackers,
-              ads, and malware. Manual protection is a losing battle.
+              Every device on your network is under constant attack from trackers, ads, and malware.
+              Manual protection is a losing battle.
             </p>
           </motion.div>
 
@@ -123,9 +133,7 @@ export default function ProblemSection() {
                 <div className={`text-4xl lg:text-5xl font-display ${problem.color} mb-2`}>
                   {problem.stat}
                 </div>
-                <p className="text-chrome text-sm">
-                  {problem.label}
-                </p>
+                <p className="text-chrome text-sm">{problem.label}</p>
               </motion.div>
             ))}
           </div>

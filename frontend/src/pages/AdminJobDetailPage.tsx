@@ -89,10 +89,14 @@ export default function AdminJobDetailPage() {
           <p className="text-pihole-text-muted text-sm font-mono">{job.job_id}</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${typeColors[job.type] || 'bg-gray-500/20 text-gray-400'}`}>
+          <span
+            className={`px-3 py-1 rounded-full text-sm font-medium ${typeColors[job.type] || 'bg-gray-500/20 text-gray-400'}`}
+          >
             {job.type}
           </span>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[job.status]}`}>
+          <span
+            className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[job.status]}`}
+          >
             {job.status}
           </span>
         </div>
@@ -109,7 +113,10 @@ export default function AdminJobDetailPage() {
                 {job.username === '__default__' ? (
                   <span className="text-blue-400">Default Lists</span>
                 ) : (
-                  <Link to={`/admin/users/${job.user_id}`} className="text-pihole-accent hover:underline">
+                  <Link
+                    to={`/admin/users/${job.user_id}`}
+                    className="text-pihole-accent hover:underline"
+                  >
                     {job.username}
                   </Link>
                 )}
@@ -134,7 +141,9 @@ export default function AdminJobDetailPage() {
             {job.started_at && job.completed_at && (
               <div className="flex justify-between">
                 <dt className="text-pihole-text-muted">Duration</dt>
-                <dd className="text-pihole-text">{formatDuration(job.started_at, job.completed_at)}</dd>
+                <dd className="text-pihole-text">
+                  {formatDuration(job.started_at, job.completed_at)}
+                </dd>
               </div>
             )}
           </dl>
@@ -156,7 +165,10 @@ export default function AdminJobDetailPage() {
             {job.progress.current_source && (
               <div className="flex justify-between">
                 <dt className="text-pihole-text-muted">Current Source</dt>
-                <dd className="text-pihole-text text-xs truncate max-w-[200px]" title={job.progress.current_source}>
+                <dd
+                  className="text-pihole-text text-xs truncate max-w-[200px]"
+                  title={job.progress.current_source}
+                >
                   {job.progress.current_source}
                 </dd>
               </div>
@@ -167,7 +179,9 @@ export default function AdminJobDetailPage() {
               <div className="h-2 bg-pihole-darkest rounded-full overflow-hidden">
                 <div
                   className="h-full bg-pihole-accent transition-all"
-                  style={{ width: `${(job.progress.processed_sources / job.progress.total_sources) * 100}%` }}
+                  style={{
+                    width: `${(job.progress.processed_sources / job.progress.total_sources) * 100}%`,
+                  }}
                 />
               </div>
             </div>
@@ -184,25 +198,35 @@ export default function AdminJobDetailPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <div className="bg-pihole-darkest rounded-lg p-4">
               <div className="text-sm text-pihole-text-muted">Sources Processed</div>
-              <div className="text-xl font-bold text-pihole-text">{job.result.sources_processed}</div>
+              <div className="text-xl font-bold text-pihole-text">
+                {job.result.sources_processed}
+              </div>
             </div>
             <div className="bg-pihole-darkest rounded-lg p-4">
               <div className="text-sm text-pihole-text-muted">Sources Failed</div>
-              <div className={`text-xl font-bold ${job.result.sources_failed > 0 ? 'text-red-400' : 'text-pihole-text'}`}>
+              <div
+                className={`text-xl font-bold ${job.result.sources_failed > 0 ? 'text-red-400' : 'text-pihole-text'}`}
+              >
                 {job.result.sources_failed}
               </div>
             </div>
             <div className="bg-pihole-darkest rounded-lg p-4">
               <div className="text-sm text-pihole-text-muted">Total Domains</div>
-              <div className="text-xl font-bold text-pihole-text">{job.result.total_domains.toLocaleString()}</div>
+              <div className="text-xl font-bold text-pihole-text">
+                {job.result.total_domains.toLocaleString()}
+              </div>
             </div>
             <div className="bg-pihole-darkest rounded-lg p-4">
               <div className="text-sm text-pihole-text-muted">Unique Domains</div>
-              <div className="text-xl font-bold text-green-400">{job.result.unique_domains.toLocaleString()}</div>
+              <div className="text-xl font-bold text-green-400">
+                {job.result.unique_domains.toLocaleString()}
+              </div>
             </div>
             <div className="bg-pihole-darkest rounded-lg p-4">
               <div className="text-sm text-pihole-text-muted">Whitelisted Removed</div>
-              <div className="text-xl font-bold text-pihole-text">{job.result.whitelisted_removed.toLocaleString()}</div>
+              <div className="text-xl font-bold text-pihole-text">
+                {job.result.whitelisted_removed.toLocaleString()}
+              </div>
             </div>
           </div>
 
@@ -223,7 +247,8 @@ export default function AdminJobDetailPage() {
                       </span>
                     </div>
                     <div className="text-sm text-pihole-text-muted">
-                      {formatBytes(file.size_bytes)} &bull; {file.domain_count?.toLocaleString()} domains
+                      {formatBytes(file.size_bytes)} &bull; {file.domain_count?.toLocaleString()}{' '}
+                      domains
                     </div>
                   </div>
                 ))}
@@ -237,9 +262,14 @@ export default function AdminJobDetailPage() {
               <h3 className="text-sm font-medium text-pihole-text-muted mb-3">Categories</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {Object.entries(job.result.categories).map(([category, count]) => (
-                  <div key={category} className="flex items-center justify-between p-2 bg-pihole-darkest rounded">
+                  <div
+                    key={category}
+                    className="flex items-center justify-between p-2 bg-pihole-darkest rounded"
+                  >
                     <span className="text-sm text-pihole-text capitalize">{category}</span>
-                    <span className="text-sm text-pihole-text-muted">{(count as number).toLocaleString()}</span>
+                    <span className="text-sm text-pihole-text-muted">
+                      {(count as number).toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -249,10 +279,15 @@ export default function AdminJobDetailPage() {
           {/* Errors */}
           {job.result.errors && job.result.errors.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-red-400 mb-3">Errors ({job.result.errors.length})</h3>
+              <h3 className="text-sm font-medium text-red-400 mb-3">
+                Errors ({job.result.errors.length})
+              </h3>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {job.result.errors.map((err, idx) => (
-                  <div key={idx} className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300 font-mono">
+                  <div
+                    key={idx}
+                    className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300 font-mono"
+                  >
                     {err}
                   </div>
                 ))}

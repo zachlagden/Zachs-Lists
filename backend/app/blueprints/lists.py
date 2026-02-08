@@ -13,8 +13,12 @@ from app.models.user import User
 from app.models.analytics import Analytics
 
 # Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
-lists_public_bp = Blueprint("lists_public", __name__)  # Handles /lists/ and /u/ file serving
-lists_api_bp = Blueprint("lists_api", __name__)         # Handles /api/lists and /api/browse metadata
+lists_public_bp = Blueprint(
+    "lists_public", __name__
+)  # Handles /lists/ and /u/ file serving
+lists_api_bp = Blueprint(
+    "lists_api", __name__
+)  # Handles /api/lists and /api/browse metadata
 
 
 def get_client_ip() -> str:
@@ -354,9 +358,7 @@ def get_featured_lists():
     """Get featured community lists."""
     from app.extensions import mongo
 
-    featured = list(
-        mongo.db.featured_lists.find().sort("display_order", 1)
-    )
+    featured = list(mongo.db.featured_lists.find().sort("display_order", 1))
 
     result = []
     for f in featured:
@@ -369,15 +371,21 @@ def get_featured_lists():
         if not list_info:
             continue
 
-        result.append({
-            "id": str(f["_id"]),
-            "username": f.get("username"),
-            "list_name": f.get("list_name"),
-            "description": f.get("description", ""),
-            "domain_count": list_info.get("domain_count", 0),
-            "last_updated": list_info.get("last_updated", "").isoformat() if list_info.get("last_updated") else None,
-            "display_order": f.get("display_order", 0),
-        })
+        result.append(
+            {
+                "id": str(f["_id"]),
+                "username": f.get("username"),
+                "list_name": f.get("list_name"),
+                "description": f.get("description", ""),
+                "domain_count": list_info.get("domain_count", 0),
+                "last_updated": (
+                    list_info.get("last_updated", "").isoformat()
+                    if list_info.get("last_updated")
+                    else None
+                ),
+                "display_order": f.get("display_order", 0),
+            }
+        )
 
     return jsonify(result)
 
@@ -388,18 +396,26 @@ def get_community_lists():
     from app.extensions import mongo
 
     # Get all enabled users with lists
-    users = list(mongo.db.users.find({"is_enabled": True, "lists": {"$exists": True, "$ne": []}}))
+    users = list(
+        mongo.db.users.find({"is_enabled": True, "lists": {"$exists": True, "$ne": []}})
+    )
 
     result = []
     for u in users:
         username = u.get("username")
         for list_info in u.get("lists", []):
-            result.append({
-                "username": username,
-                "name": list_info.get("name"),
-                "domain_count": list_info.get("domain_count", 0),
-                "last_updated": list_info.get("last_updated", "").isoformat() if list_info.get("last_updated") else None,
-            })
+            result.append(
+                {
+                    "username": username,
+                    "name": list_info.get("name"),
+                    "domain_count": list_info.get("domain_count", 0),
+                    "last_updated": (
+                        list_info.get("last_updated", "").isoformat()
+                        if list_info.get("last_updated")
+                        else None
+                    ),
+                }
+            )
 
     # Sort by domain count (most popular first)
     result.sort(key=lambda x: x.get("domain_count", 0), reverse=True)

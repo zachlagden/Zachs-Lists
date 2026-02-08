@@ -40,7 +40,12 @@ class SystemConfig:
                 "updated_at": doc.get("updated_at"),
                 "updated_by": doc.get("updated_by"),
             }
-        return {"blocklists": "", "whitelist": "", "updated_at": None, "updated_by": None}
+        return {
+            "blocklists": "",
+            "whitelist": "",
+            "updated_at": None,
+            "updated_by": None,
+        }
 
     @classmethod
     def update_default_blocklists(cls, content: str, updated_by: str) -> None:

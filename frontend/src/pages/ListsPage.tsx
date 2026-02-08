@@ -49,16 +49,12 @@ export default function ListsPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-pihole-text">My Lists</h1>
-        <p className="text-pihole-text-muted">
-          View and manage your generated blocklists
-        </p>
+        <p className="text-pihole-text-muted">View and manage your generated blocklists</p>
       </div>
 
       {lists.length === 0 ? (
         <div className="card text-center py-12">
-          <div className="text-pihole-text-muted mb-4">
-            No lists generated yet
-          </div>
+          <div className="text-pihole-text-muted mb-4">No lists generated yet</div>
           <p className="text-sm text-pihole-text-muted mb-6">
             Configure your blocklist sources and trigger a build to generate your first list.
           </p>
@@ -137,16 +133,22 @@ export default function ListsPage() {
           <div>
             <h4 className="text-pihole-text font-medium mb-1">In Pi-hole</h4>
             <p className="text-pihole-text-muted">
-              Go to Group Management → Adlists → Add your list URL.
-              Pi-hole will automatically fetch updates.
+              Go to Group Management → Adlists → Add your list URL. Pi-hole will automatically fetch
+              updates.
             </p>
           </div>
           <div>
             <h4 className="text-pihole-text font-medium mb-1">Format Options</h4>
             <ul className="text-pihole-text-muted space-y-1">
-              <li>• <strong>hosts</strong> - <code>0.0.0.0 domain.com</code> (default, Pi-hole)</li>
-              <li>• <strong>plain</strong> - <code>domain.com</code> (one per line)</li>
-              <li>• <strong>adblock</strong> - <code>||domain.com^</code> (AdBlock/uBlock)</li>
+              <li>
+                • <strong>hosts</strong> - <code>0.0.0.0 domain.com</code> (default, Pi-hole)
+              </li>
+              <li>
+                • <strong>plain</strong> - <code>domain.com</code> (one per line)
+              </li>
+              <li>
+                • <strong>adblock</strong> - <code>||domain.com^</code> (AdBlock/uBlock)
+              </li>
             </ul>
           </div>
         </div>

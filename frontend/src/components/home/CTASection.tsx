@@ -56,9 +56,7 @@ export default function CTASection({ isAuthenticated }: CTASectionProps) {
             <span className="text-gradient">BETTER LISTS</span>
           </h2>
 
-          <p className="text-xl text-chrome mb-8">
-            Free forever. Setup takes 30 seconds.
-          </p>
+          <p className="text-xl text-chrome mb-8">Free forever. Setup takes 30 seconds.</p>
 
           {/* Inline Terminal */}
           <motion.div
@@ -69,9 +67,7 @@ export default function CTASection({ isAuthenticated }: CTASectionProps) {
             className="mb-8"
           >
             <div className="inline-flex items-center gap-3 px-4 py-3 rounded-xl bg-void-deep border border-steel-light max-w-full overflow-hidden">
-              <code className="text-matrix text-sm font-mono truncate">
-                {listUrl}
-              </code>
+              <code className="text-matrix text-sm font-mono truncate">{listUrl}</code>
               <motion.button
                 onClick={handleCopy}
                 whileHover={{ scale: 1.05 }}
@@ -111,10 +107,7 @@ export default function CTASection({ isAuthenticated }: CTASectionProps) {
                 </Link>
               </motion.div>
             )}
-            <Link
-              to="/browse"
-              className="btn btn-secondary btn-lg"
-            >
+            <Link to="/browse" className="btn btn-secondary btn-lg">
               Browse All Lists
             </Link>
           </div>

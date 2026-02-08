@@ -2,7 +2,12 @@ import { useEffect, useState, useCallback } from 'react';
 import { useUserDataStore, useAuthStore } from '../store';
 import { userApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { AdvancedConfigEditor, VisualConfigEditor, WhitelistEditor, ValidationResult as ConfigValidationResult } from '../components/config';
+import {
+  AdvancedConfigEditor,
+  VisualConfigEditor,
+  WhitelistEditor,
+  ValidationResult as ConfigValidationResult,
+} from '../components/config';
 import { useValidationSocket } from '../hooks/useSocket';
 
 const EDITOR_MODE_KEY = 'blocklist-editor-mode';
@@ -30,7 +35,10 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [copyingTemplate, setCopyingTemplate] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    type: 'success' | 'error' | 'warning';
+    text: string;
+  } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
 
   // Validation state
@@ -117,7 +125,10 @@ export default function ConfigPage() {
         return;
       }
       if (validationResult?.has_errors) {
-        setMessage({ type: 'error', text: 'Cannot save: Configuration has errors. Fix them first.' });
+        setMessage({
+          type: 'error',
+          text: 'Cannot save: Configuration has errors. Fix them first.',
+        });
         return;
       }
     }
@@ -232,11 +243,7 @@ export default function ConfigPage() {
           >
             {copyingTemplate ? <LoadingSpinner size="sm" /> : 'Use Default Template'}
           </button>
-          <button
-            onClick={handleTriggerBuild}
-            disabled={saving}
-            className="btn btn-primary"
-          >
+          <button onClick={handleTriggerBuild} disabled={saving} className="btn btn-primary">
             Build Now
           </button>
         </div>
@@ -249,8 +256,8 @@ export default function ConfigPage() {
             message.type === 'success'
               ? 'bg-green-500/10 border border-green-500/30 text-green-400'
               : message.type === 'warning'
-              ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
-              : 'bg-red-500/10 border border-red-500/30 text-red-400'
+                ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+                : 'bg-red-500/10 border border-red-500/30 text-red-400'
           }`}
         >
           {message.text}
@@ -329,10 +336,7 @@ export default function ConfigPage() {
 
             {/* Editor Component */}
             {editorMode === 'visual' ? (
-              <VisualConfigEditor
-                value={localConfig}
-                onChange={setLocalConfig}
-              />
+              <VisualConfigEditor value={localConfig} onChange={setLocalConfig} />
             ) : (
               <AdvancedConfigEditor
                 value={localConfig}
@@ -347,7 +351,8 @@ export default function ConfigPage() {
               <div>
                 <h2 className="font-semibold text-pihole-text">Whitelist</h2>
                 <p className="text-sm text-pihole-text-muted mt-1">
-                  Domains to exclude from blocking. Supports exact, wildcard (*), and regex patterns.
+                  Domains to exclude from blocking. Supports exact, wildcard (*), and regex
+                  patterns.
                 </p>
               </div>
             </div>
@@ -405,20 +410,38 @@ export default function ConfigPage() {
           <div>
             <h4 className="text-pihole-text font-medium mb-2">Blocklist Format</h4>
             <ul className="space-y-1 text-pihole-text-muted">
-              <li>Format: <code className="text-pihole-accent">url|name|category</code></li>
-              <li><code className="text-pihole-accent">url</code> - HTTP/HTTPS URL to blocklist</li>
-              <li><code className="text-pihole-accent">name</code> - Unique identifier (alphanumeric, dashes, underscores)</li>
-              <li><code className="text-pihole-accent">category</code> - comprehensive, malicious, advertising, tracking, suspicious, nsfw</li>
+              <li>
+                Format: <code className="text-pihole-accent">url|name|category</code>
+              </li>
+              <li>
+                <code className="text-pihole-accent">url</code> - HTTP/HTTPS URL to blocklist
+              </li>
+              <li>
+                <code className="text-pihole-accent">name</code> - Unique identifier (alphanumeric,
+                dashes, underscores)
+              </li>
+              <li>
+                <code className="text-pihole-accent">category</code> - comprehensive, malicious,
+                advertising, tracking, suspicious, nsfw
+              </li>
               <li>Lines starting with # are comments</li>
-              <li className="text-yellow-500">NSFW category domains are excluded from all_domains lists</li>
+              <li className="text-yellow-500">
+                NSFW category domains are excluded from all_domains lists
+              </li>
             </ul>
           </div>
           <div>
             <h4 className="text-pihole-text font-medium mb-2">Whitelist Patterns</h4>
             <ul className="space-y-1 text-pihole-text-muted">
-              <li><code className="text-pihole-accent">example.com</code> - Exact match</li>
-              <li><code className="text-pihole-accent">*.example.com</code> - Wildcard (subdomains)</li>
-              <li><code className="text-pihole-accent">/^ads?\d*\./</code> - Regex pattern</li>
+              <li>
+                <code className="text-pihole-accent">example.com</code> - Exact match
+              </li>
+              <li>
+                <code className="text-pihole-accent">*.example.com</code> - Wildcard (subdomains)
+              </li>
+              <li>
+                <code className="text-pihole-accent">/^ads?\d*\./</code> - Regex pattern
+              </li>
               <li>Lines starting with # are comments</li>
             </ul>
           </div>
@@ -451,13 +474,7 @@ interface ValidationModalProps {
   onSave: () => void;
 }
 
-function ValidationModal({
-  validating,
-  progress,
-  result,
-  onClose,
-  onSave,
-}: ValidationModalProps) {
+function ValidationModal({ validating, progress, result, onClose, onSave }: ValidationModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-pihole-card rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
@@ -472,7 +489,12 @@ function ValidationModal({
               className="p-2 text-pihole-text-muted hover:text-pihole-text rounded-lg hover:bg-pihole-dark"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           )}
@@ -506,36 +528,74 @@ function ValidationModal({
           ) : result ? (
             <div className="space-y-4">
               {/* Summary */}
-              <div className={`p-4 rounded-lg ${
-                result.has_errors
-                  ? 'bg-red-500/10 border border-red-500/30'
-                  : result.has_warnings
-                  ? 'bg-yellow-500/10 border border-yellow-500/30'
-                  : 'bg-green-500/10 border border-green-500/30'
-              }`}>
+              <div
+                className={`p-4 rounded-lg ${
+                  result.has_errors
+                    ? 'bg-red-500/10 border border-red-500/30'
+                    : result.has_warnings
+                      ? 'bg-yellow-500/10 border border-yellow-500/30'
+                      : 'bg-green-500/10 border border-green-500/30'
+                }`}
+              >
                 <div className="flex items-center gap-3">
                   {result.has_errors ? (
-                    <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg
+                      className="w-6 h-6 text-red-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
                     </svg>
                   ) : result.has_warnings ? (
-                    <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    <svg
+                      className="w-6 h-6 text-yellow-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      />
                     </svg>
                   ) : (
-                    <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg
+                      className="w-6 h-6 text-green-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
                     </svg>
                   )}
                   <div>
-                    <p className={`font-medium ${
-                      result.has_errors ? 'text-red-400' : result.has_warnings ? 'text-yellow-400' : 'text-green-400'
-                    }`}>
+                    <p
+                      className={`font-medium ${
+                        result.has_errors
+                          ? 'text-red-400'
+                          : result.has_warnings
+                            ? 'text-yellow-400'
+                            : 'text-green-400'
+                      }`}
+                    >
                       {result.has_errors
                         ? `${result.error_count} error${result.error_count !== 1 ? 's' : ''} found`
                         : result.has_warnings
-                        ? `${result.warning_count} warning${result.warning_count !== 1 ? 's' : ''} found`
-                        : 'All URLs validated successfully'}
+                          ? `${result.warning_count} warning${result.warning_count !== 1 ? 's' : ''} found`
+                          : 'All URLs validated successfully'}
                     </p>
                     <p className="text-sm text-pihole-text-muted">
                       {result.validated_count} URL{result.validated_count !== 1 ? 's' : ''} checked
@@ -558,9 +618,11 @@ function ValidationModal({
                       }`}
                     >
                       <div className="flex items-start gap-2">
-                        <span className={`px-1.5 py-0.5 text-xs rounded font-medium ${
-                          issue.severity === 'error' ? 'bg-red-500/30' : 'bg-yellow-500/30'
-                        }`}>
+                        <span
+                          className={`px-1.5 py-0.5 text-xs rounded font-medium ${
+                            issue.severity === 'error' ? 'bg-red-500/30' : 'bg-yellow-500/30'
+                          }`}
+                        >
                           {issue.severity === 'error' ? 'ERROR' : 'WARN'}
                         </span>
                         <div className="flex-1 min-w-0">

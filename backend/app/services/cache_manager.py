@@ -151,7 +151,9 @@ class CacheManager:
                 "content_hash": entry.content_hash,
                 "size_bytes": entry.stats.get("size_bytes", 0),
                 "domain_count": entry.stats.get("domain_count", 0),
-                "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+                "updated_at": (
+                    entry.updated_at.isoformat() if entry.updated_at else None
+                ),
             }
         return None
 

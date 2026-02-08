@@ -31,7 +31,9 @@ class SourceProgress:
         d = asdict(self)
         # Calculate download percent
         if self.bytes_total and self.bytes_total > 0:
-            d["download_percent"] = round(self.bytes_downloaded / self.bytes_total * 100, 1)
+            d["download_percent"] = round(
+                self.bytes_downloaded / self.bytes_total * 100, 1
+            )
         else:
             d["download_percent"] = None
         return d

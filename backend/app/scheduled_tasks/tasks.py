@@ -80,7 +80,9 @@ def register_scheduled_tasks(app, scheduler):
                         continue
 
                     # Skip if user completed a manual build in last 30 minutes
-                    if Job.user_completed_recently(user_id, minutes=30, job_type=Job.TYPE_MANUAL):
+                    if Job.user_completed_recently(
+                        user_id, minutes=30, job_type=Job.TYPE_MANUAL
+                    ):
                         logger.info(f"Skipping {user.username}: recent manual build")
                         skipped += 1
                         continue
@@ -93,7 +95,9 @@ def register_scheduled_tasks(app, scheduler):
                             f"Failed to queue rebuild for {user.username}: {e}"
                         )
 
-                logger.info(f"Queued weekly rebuild for {queued} users, skipped {skipped}")
+                logger.info(
+                    f"Queued weekly rebuild for {queued} users, skipped {skipped}"
+                )
 
             except Exception as e:
                 logger.exception(f"Failed to queue user rebuilds: {e}")
@@ -119,9 +123,7 @@ def register_scheduled_tasks(app, scheduler):
                     },
                 )
 
-                logger.info(
-                    f"Reset weekly limits for {result.modified_count} users"
-                )
+                logger.info(f"Reset weekly limits for {result.modified_count} users")
 
             except Exception as e:
                 logger.exception(f"Failed to reset weekly limits: {e}")

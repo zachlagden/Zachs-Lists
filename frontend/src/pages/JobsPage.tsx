@@ -8,14 +8,8 @@ import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../
 
 export default function JobsPage() {
   const { user } = useAuthStore();
-  const {
-    jobs,
-    setJobs,
-    addJob,
-    updateJob,
-    setHasUnreadFailures,
-    clearJobProgress,
-  } = useJobsStore();
+  const { jobs, setJobs, addJob, updateJob, setHasUnreadFailures, clearJobProgress } =
+    useJobsStore();
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
@@ -26,14 +20,14 @@ export default function JobsPage() {
 
       // Check for unread failures
       const hasFailures = (data.jobs || []).some(
-        (job: Job) => job.status === 'failed' && !job.read
+        (job: Job) => job.status === 'failed' && !job.read,
       );
       setHasUnreadFailures(hasFailures);
 
       // Auto-select first active job or most recent
       if (data.jobs && data.jobs.length > 0 && !selectedJob) {
         const activeJob = data.jobs.find(
-          (j: Job) => j.status === 'queued' || j.status === 'processing'
+          (j: Job) => j.status === 'queued' || j.status === 'processing',
         );
         setSelectedJob(activeJob || data.jobs[0]);
       }
@@ -51,7 +45,7 @@ export default function JobsPage() {
       // Auto-select newly created jobs
       setSelectedJob(job);
     },
-    [addJob]
+    [addJob],
   );
 
   const handleJobProgress = useCallback(
@@ -61,7 +55,7 @@ export default function JobsPage() {
       // Update selected job if it matches
       setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
     },
-    [updateJob]
+    [updateJob],
   );
 
   const handleJobCompleted = useCallback(
@@ -76,23 +70,20 @@ export default function JobsPage() {
         clearJobProgress(job.job_id);
       }, 5000);
     },
-    [updateJob, setHasUnreadFailures, clearJobProgress]
+    [updateJob, setHasUnreadFailures, clearJobProgress],
   );
 
-  const handleJobSkipped = useCallback(
-    (data: { job_id: string; reason: string }) => {
-      setSelectedJob((prev) =>
-        prev?.job_id === data.job_id
-          ? {
-              ...prev,
-              status: 'skipped',
-              result: { ...prev.result, skip_reason: data.reason } as Job['result'],
-            }
-          : prev
-      );
-    },
-    []
-  );
+  const handleJobSkipped = useCallback((data: { job_id: string; reason: string }) => {
+    setSelectedJob((prev) =>
+      prev?.job_id === data.job_id
+        ? {
+            ...prev,
+            status: 'skipped',
+            result: { ...prev.result, skip_reason: data.reason } as Job['result'],
+          }
+        : prev,
+    );
+  }, []);
 
   // Subscribe to real-time updates
   useJobSocket({
@@ -198,9 +189,7 @@ export default function JobsPage() {
                   d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
                 />
               </svg>
-              <div className="text-pihole-text-muted">
-                Select a job to view details
-              </div>
+              <div className="text-pihole-text-muted">Select a job to view details</div>
             </div>
           )}
         </div>

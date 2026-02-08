@@ -59,10 +59,9 @@ def update_config(user: User):
         return jsonify({"error": "Validation required before saving"}), 400
 
     # Look up the validation token
-    token_doc = mongo.db.validation_tokens.find_one({
-        "user_id": ObjectId(user.id),
-        "expires_at": {"$gt": datetime.utcnow()}
-    })
+    token_doc = mongo.db.validation_tokens.find_one(
+        {"user_id": ObjectId(user.id), "expires_at": {"$gt": datetime.utcnow()}}
+    )
 
     if not token_doc:
         return jsonify({"error": "Validation expired, please re-validate"}), 400
@@ -70,15 +69,16 @@ def update_config(user: User):
     # Verify the config hasn't been modified since validation
     config_hash = _generate_config_hash(config)
     if token_doc["config_hash"] != config_hash:
-        return jsonify({
-            "error": "Config was modified after validation, please re-validate"
-        }), 400
+        return (
+            jsonify(
+                {"error": "Config was modified after validation, please re-validate"}
+            ),
+            400,
+        )
 
     # Check if validation had errors (shouldn't allow save with errors)
     if token_doc.get("has_errors"):
-        return jsonify({
-            "error": "Cannot save config with validation errors"
-        }), 400
+        return jsonify({"error": "Cannot save config with validation errors"}), 400
 
     # Validate size (double-check)
     max_size = user.limits["max_config_size_mb"] * 1024 * 1024
@@ -98,7 +98,9 @@ def update_config(user: User):
     # Delete the used validation token (one-time use)
     mongo.db.validation_tokens.delete_one({"user_id": ObjectId(user.id)})
 
-    current_app.logger.info(f"User {user.username} updated blocklist config (validated)")
+    current_app.logger.info(
+        f"User {user.username} updated blocklist config (validated)"
+    )
 
     return jsonify({"success": True})
 
@@ -159,9 +161,7 @@ def validate_config(user: User):
 
     # Upsert - one token per user (replace any existing)
     mongo.db.validation_tokens.update_one(
-        {"user_id": ObjectId(user.id)},
-        {"$set": token_doc},
-        upsert=True
+        {"user_id": ObjectId(user.id)}, {"$set": token_doc}, upsert=True
     )
 
     # Build response with validation token
@@ -178,10 +178,12 @@ def validate_config(user: User):
 @login_required
 def get_categories(user: User):
     """Get the list of valid categories."""
-    return jsonify({
-        "categories": sorted(VALID_CATEGORIES),
-        "nsfw_excluded_from_all_domains": True,
-    })
+    return jsonify(
+        {
+            "categories": sorted(VALID_CATEGORIES),
+            "nsfw_excluded_from_all_domains": True,
+        }
+    )
 
 
 @user_bp.route("/config/url-metadata", methods=["POST"])
@@ -220,13 +222,15 @@ def get_library(user: User):
     """Get blocklist library grouped by category for visual editor."""
     grouped = BlocklistLibrary.get_grouped_by_category()
 
-    return jsonify({
-        "library": {
-            category: [entry.to_dict() for entry in entries]
-            for category, entries in grouped.items()
-        },
-        "categories": sorted(VALID_CATEGORIES),
-    })
+    return jsonify(
+        {
+            "library": {
+                category: [entry.to_dict() for entry in entries]
+                for category, entries in grouped.items()
+            },
+            "categories": sorted(VALID_CATEGORIES),
+        }
+    )
 
 
 @user_bp.route("/whitelist", methods=["GET"])
@@ -334,7 +338,9 @@ def trigger_build(user: User):
         )
 
     # Check cooldown (5 minutes between manual builds)
-    cooldown_remaining = Job.get_cooldown_remaining(ObjectId(user.id), cooldown_minutes=5)
+    cooldown_remaining = Job.get_cooldown_remaining(
+        ObjectId(user.id), cooldown_minutes=5
+    )
     if cooldown_remaining > 0:
         minutes = cooldown_remaining // 60
         seconds = cooldown_remaining % 60
@@ -355,7 +361,9 @@ def trigger_build(user: User):
     job = JobQueue.queue_job(user, job_type=Job.TYPE_MANUAL)
     user.increment_manual_updates()
 
-    current_app.logger.info(f"User {user.username} triggered manual build: {job.job_id}")
+    current_app.logger.info(
+        f"User {user.username} triggered manual build: {job.job_id}"
+    )
 
     return jsonify(
         {
@@ -464,6 +472,7 @@ def copy_default_template(user: User):
 
 # Limit Request Endpoints
 
+
 @user_bp.route("/limit-request", methods=["POST"])
 @login_required
 def submit_limit_request(user: User):
@@ -476,7 +485,9 @@ def submit_limit_request(user: User):
     intended_use = data.get("intended_use", "personal")
 
     # Validate requested tier
-    domain_tiers = current_app.config.get("DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000])
+    domain_tiers = current_app.config.get(
+        "DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000]
+    )
     current_limit = user.limits.get("max_domains", domain_tiers[0])
 
     # Filter to tiers higher than current limit
@@ -486,24 +497,34 @@ def submit_limit_request(user: User):
         return jsonify({"error": "You are already at the maximum tier"}), 400
 
     if requested_tier not in available_tiers:
-        return jsonify({
-            "error": "Invalid tier requested",
-            "available_tiers": available_tiers
-        }), 400
+        return (
+            jsonify(
+                {"error": "Invalid tier requested", "available_tiers": available_tiers}
+            ),
+            400,
+        )
 
     # Validate reason
     if not reason or len(reason) < 10:
-        return jsonify({"error": "Please provide a reason (at least 10 characters)"}), 400
+        return (
+            jsonify({"error": "Please provide a reason (at least 10 characters)"}),
+            400,
+        )
 
     if len(reason) > 1000:
         return jsonify({"error": "Reason too long (max 1000 characters)"}), 400
 
     # Validate intended use
     if intended_use not in LimitRequest.INTENDED_USE_OPTIONS:
-        return jsonify({
-            "error": "Invalid intended use",
-            "options": LimitRequest.INTENDED_USE_OPTIONS
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": "Invalid intended use",
+                    "options": LimitRequest.INTENDED_USE_OPTIONS,
+                }
+            ),
+            400,
+        )
 
     # Check for existing pending request
     if LimitRequest.has_pending_request(user.id):
@@ -521,10 +542,15 @@ def submit_limit_request(user: User):
         f"User {user.username} submitted limit request for {requested_tier:,} domains"
     )
 
-    return jsonify({
-        "success": True,
-        "request": limit_request.to_dict(),
-    }), 201
+    return (
+        jsonify(
+            {
+                "success": True,
+                "request": limit_request.to_dict(),
+            }
+        ),
+        201,
+    )
 
 
 @user_bp.route("/limit-request", methods=["GET"])
@@ -536,21 +562,26 @@ def get_limit_requests(user: User):
     requests = LimitRequest.get_by_user(user.id)
 
     # Also get available tiers for the user
-    domain_tiers = current_app.config.get("DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000])
+    domain_tiers = current_app.config.get(
+        "DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000]
+    )
     current_limit = user.limits.get("max_domains", domain_tiers[0])
     available_tiers = [t for t in domain_tiers if t > current_limit]
     has_pending = LimitRequest.has_pending_request(user.id)
 
-    return jsonify({
-        "requests": [r.to_dict() for r in requests],
-        "current_limit": current_limit,
-        "available_tiers": available_tiers,
-        "has_pending": has_pending,
-        "max_limit": current_app.config.get("MAX_DOMAINS_LIMIT", 10_000_000),
-    })
+    return jsonify(
+        {
+            "requests": [r.to_dict() for r in requests],
+            "current_limit": current_limit,
+            "available_tiers": available_tiers,
+            "has_pending": has_pending,
+            "max_limit": current_app.config.get("MAX_DOMAINS_LIMIT", 10_000_000),
+        }
+    )
 
 
 # Notification Endpoints
+
 
 @user_bp.route("/notifications", methods=["GET"])
 @login_required
@@ -562,10 +593,12 @@ def get_notifications(user: User):
     # Get unread count
     unread_count = len(user.get_unread_notifications())
 
-    return jsonify({
-        "notifications": user._serialize_notifications(),
-        "unread_count": unread_count,
-    })
+    return jsonify(
+        {
+            "notifications": user._serialize_notifications(),
+            "unread_count": unread_count,
+        }
+    )
 
 
 @user_bp.route("/notifications/<notification_id>/read", methods=["POST"])

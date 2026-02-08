@@ -28,9 +28,7 @@ function sortSources(sources: SourceProgress[]): SourceProgress[] {
 export default function DownloadingStage({ progress, sources }: DownloadingStageProps) {
   const sortedSources = sortSources(sources);
   const overallPercent =
-    progress.total_sources > 0
-      ? (progress.processed_sources / progress.total_sources) * 100
-      : 0;
+    progress.total_sources > 0 ? (progress.processed_sources / progress.total_sources) * 100 : 0;
 
   // Count by status
   const statusCounts = sources.reduce(
@@ -38,7 +36,7 @@ export default function DownloadingStage({ progress, sources }: DownloadingStage
       acc[src.status] = (acc[src.status] || 0) + 1;
       return acc;
     },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
 
   const completedCount = statusCounts['completed'] || 0;
@@ -95,9 +93,7 @@ export default function DownloadingStage({ progress, sources }: DownloadingStage
       </div>
 
       {sortedSources.length === 0 && (
-        <div className="text-center py-8 text-pihole-text-muted">
-          Initializing sources...
-        </div>
+        <div className="text-center py-8 text-pihole-text-muted">Initializing sources...</div>
       )}
     </div>
   );

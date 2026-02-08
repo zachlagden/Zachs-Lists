@@ -29,7 +29,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
 );
 
 import type { LimitRequest } from '../types';
@@ -83,7 +83,15 @@ interface LibraryEntry {
   updated_at: string;
 }
 
-const VALID_TABS: TabType[] = ['overview', 'users', 'limits', 'default', 'featured', 'jobs', 'library'];
+const VALID_TABS: TabType[] = [
+  'overview',
+  'users',
+  'limits',
+  'default',
+  'featured',
+  'jobs',
+  'library',
+];
 
 const LIBRARY_CATEGORIES = [
   'comprehensive',
@@ -164,36 +172,23 @@ export default function AdminPage() {
   const [totalPages, setTotalPages] = useState(1);
 
   // Handle real-time job updates (admin sees all jobs)
-  const handleJobCreated = useCallback(
-    (job: Job) => {
-      setJobs((prev) => [job, ...prev.slice(0, 49)]); // Keep 50 most recent
-      // Auto-select newly created jobs
-      setSelectedJob(job);
-    },
-    []
-  );
+  const handleJobCreated = useCallback((job: Job) => {
+    setJobs((prev) => [job, ...prev.slice(0, 49)]); // Keep 50 most recent
+    // Auto-select newly created jobs
+    setSelectedJob(job);
+  }, []);
 
-  const handleJobProgress = useCallback(
-    (job: Job) => {
-      setJobs((prev) =>
-        prev.map((j) => (j.job_id === job.job_id ? job : j))
-      );
-      // Update selected job if it matches
-      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
-    },
-    []
-  );
+  const handleJobProgress = useCallback((job: Job) => {
+    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
+    // Update selected job if it matches
+    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
+  }, []);
 
-  const handleJobCompleted = useCallback(
-    (job: Job) => {
-      setJobs((prev) =>
-        prev.map((j) => (j.job_id === job.job_id ? job : j))
-      );
-      // Update selected job if it matches
-      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
-    },
-    []
-  );
+  const handleJobCompleted = useCallback((job: Job) => {
+    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
+    // Update selected job if it matches
+    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
+  }, []);
 
   // Subscribe to all jobs (admin view)
   useJobSocket({
@@ -335,7 +330,10 @@ export default function AdminPage() {
   const handleToggleAdmin = async (userId: string, isAdmin: boolean) => {
     try {
       await adminApi.setUserAdmin(userId, isAdmin);
-      setMessage({ type: 'success', text: `User ${isAdmin ? 'promoted to' : 'demoted from'} admin` });
+      setMessage({
+        type: 'success',
+        text: `User ${isAdmin ? 'promoted to' : 'demoted from'} admin`,
+      });
       fetchUsers(); // Refetch to update list based on filters
     } catch (error) {
       console.error('Failed to toggle admin status:', error);
@@ -387,7 +385,7 @@ export default function AdminPage() {
       const result = await adminApi.addFeaturedList(
         newFeatured.username,
         newFeatured.list_name,
-        newFeatured.description
+        newFeatured.description,
       );
       setFeatured([...featured, result]);
       setNewFeatured({ username: '', list_name: '', description: '' });
@@ -541,24 +539,26 @@ export default function AdminPage() {
       {/* Tabs */}
       <div className="border-b border-pihole-border">
         <div className="flex gap-4">
-          {(['overview', 'users', 'limits', 'default', 'featured', 'jobs'] as TabType[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors capitalize flex items-center gap-2 ${
-                activeTab === tab
-                  ? 'border-pihole-accent text-pihole-accent'
-                  : 'border-transparent text-pihole-text-muted hover:text-pihole-text'
-              }`}
-            >
-              {tab}
-              {tab === 'limits' && pendingRequestCount > 0 && (
-                <span className="px-1.5 py-0.5 bg-pihole-accent text-white text-xs rounded-full">
-                  {pendingRequestCount}
-                </span>
-              )}
-            </button>
-          ))}
+          {(['overview', 'users', 'limits', 'default', 'featured', 'jobs'] as TabType[]).map(
+            (tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors capitalize flex items-center gap-2 ${
+                  activeTab === tab
+                    ? 'border-pihole-accent text-pihole-accent'
+                    : 'border-transparent text-pihole-text-muted hover:text-pihole-text'
+                }`}
+              >
+                {tab}
+                {tab === 'limits' && pendingRequestCount > 0 && (
+                  <span className="px-1.5 py-0.5 bg-pihole-accent text-white text-xs rounded-full">
+                    {pendingRequestCount}
+                  </span>
+                )}
+              </button>
+            ),
+          )}
         </div>
       </div>
 
@@ -573,8 +573,18 @@ export default function AdminPage() {
               className="card hover:bg-pihole-darkest transition-colors text-left flex items-center gap-4"
             >
               <div className="w-12 h-12 bg-pihole-accent/20 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-pihole-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <svg
+                  className="w-6 h-6 text-pihole-accent"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
                 </svg>
               </div>
               <div>
@@ -589,15 +599,27 @@ export default function AdminPage() {
               className="card hover:bg-pihole-darkest transition-colors text-left flex items-center gap-4"
             >
               <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                <svg
+                  className="w-6 h-6 text-blue-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                  />
                 </svg>
               </div>
               <div>
                 <div className="font-semibold text-pihole-text">View All Jobs</div>
                 <div className="text-sm text-pihole-text-muted">
                   {jobs.filter((j) => j.status === 'failed').length > 0 ? (
-                    <span className="text-red-400">{jobs.filter((j) => j.status === 'failed').length} failed jobs</span>
+                    <span className="text-red-400">
+                      {jobs.filter((j) => j.status === 'failed').length} failed jobs
+                    </span>
                   ) : (
                     'Monitor job queue'
                   )}
@@ -609,13 +631,25 @@ export default function AdminPage() {
               className="card hover:bg-pihole-darkest transition-colors text-left flex items-center gap-4"
             >
               <div className="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                <svg
+                  className="w-6 h-6 text-green-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                  />
                 </svg>
               </div>
               <div>
                 <div className="font-semibold text-pihole-text">Manage Users</div>
-                <div className="text-sm text-pihole-text-muted">{stats?.total_users || 0} registered users</div>
+                <div className="text-sm text-pihole-text-muted">
+                  {stats?.total_users || 0} registered users
+                </div>
               </div>
             </button>
           </div>
@@ -780,7 +814,9 @@ export default function AdminPage() {
                       className="flex items-center justify-between p-3 bg-red-500/10 border border-red-500/20 rounded-lg cursor-pointer hover:bg-red-500/20 transition-colors"
                     >
                       <div>
-                        <span className="text-pihole-text font-medium">{job.username || 'default'}</span>
+                        <span className="text-pihole-text font-medium">
+                          {job.username || 'default'}
+                        </span>
                         <span className="text-pihole-text-muted text-sm ml-2">({job.type})</span>
                       </div>
                       <span className="text-sm text-pihole-text-muted">
@@ -888,11 +924,21 @@ export default function AdminPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-pihole-border">
-                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">User</th>
-                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Status</th>
-                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Domains</th>
-                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">Joined</th>
-                    <th className="text-right p-4 text-sm font-medium text-pihole-text-muted">Actions</th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">
+                      User
+                    </th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">
+                      Status
+                    </th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">
+                      Domains
+                    </th>
+                    <th className="text-left p-4 text-sm font-medium text-pihole-text-muted">
+                      Joined
+                    </th>
+                    <th className="text-right p-4 text-sm font-medium text-pihole-text-muted">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -912,97 +958,111 @@ export default function AdminPage() {
                     </tr>
                   ) : (
                     users.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="border-b border-pihole-border last:border-0 hover:bg-pihole-darkest cursor-pointer"
-                    onClick={() => navigate(`/admin/users/${user.id}`)}
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        {user.avatar_url ? (
-                          <img src={user.avatar_url} alt="" className="w-8 h-8 rounded-full" />
-                        ) : (
-                          <div className="w-8 h-8 bg-pihole-border rounded-full flex items-center justify-center">
-                            <span className="text-pihole-text text-sm">
-                              {user.username?.[0]?.toUpperCase()}
-                            </span>
-                          </div>
-                        )}
-                        <div>
-                          <div className="text-sm font-medium text-pihole-text">
-                            {user.username}
-                            {user.is_root ? (
-                              <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
-                                Root
-                              </span>
-                            ) : user.is_admin && (
-                              <span className="ml-2 px-1.5 py-0.5 bg-pihole-accent/20 text-pihole-accent text-xs rounded">
-                                Admin
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-pihole-text-muted">{user.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          user.is_enabled
-                            ? 'bg-green-500/20 text-green-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}
+                      <tr
+                        key={user.id}
+                        className="border-b border-pihole-border last:border-0 hover:bg-pihole-darkest cursor-pointer"
+                        onClick={() => navigate(`/admin/users/${user.id}`)}
                       >
-                        {user.is_enabled ? 'Active' : 'Disabled'}
-                      </span>
-                    </td>
-                    <td className="p-4 text-sm text-pihole-text-muted">
-                      {user.stats?.total_domains?.toLocaleString() || 0}
-                    </td>
-                    <td className="p-4 text-sm text-pihole-text-muted">
-                      {new Date(user.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center justify-end gap-2">
-                        {/* Root users cannot have any actions performed on them */}
-                        {user.is_root ? (
-                          <span className="text-xs text-pihole-text-muted">Protected</span>
-                        ) : (
-                          <>
-                            {/* Admin toggle - only root can do this */}
-                            {currentUser?.is_root && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleToggleAdmin(user.id, !user.is_admin); }}
-                                className={`btn btn-ghost text-xs ${user.is_admin ? 'text-amber-400' : 'text-green-400'}`}
-                              >
-                                {user.is_admin ? 'Revoke Admin' : 'Make Admin'}
-                              </button>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            {user.avatar_url ? (
+                              <img src={user.avatar_url} alt="" className="w-8 h-8 rounded-full" />
+                            ) : (
+                              <div className="w-8 h-8 bg-pihole-border rounded-full flex items-center justify-center">
+                                <span className="text-pihole-text text-sm">
+                                  {user.username?.[0]?.toUpperCase()}
+                                </span>
+                              </div>
                             )}
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleRebuildUser(user.id); }}
-                              className="btn btn-ghost text-xs"
-                            >
-                              Rebuild
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleToggleUser(user.id, !user.is_enabled); }}
-                              className="btn btn-ghost text-xs"
-                            >
-                              {user.is_enabled ? 'Disable' : 'Enable'}
-                            </button>
-                            {!user.is_admin && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id); }}
-                                className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                              >
-                                Delete
-                              </button>
+                            <div>
+                              <div className="text-sm font-medium text-pihole-text">
+                                {user.username}
+                                {user.is_root ? (
+                                  <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
+                                    Root
+                                  </span>
+                                ) : (
+                                  user.is_admin && (
+                                    <span className="ml-2 px-1.5 py-0.5 bg-pihole-accent/20 text-pihole-accent text-xs rounded">
+                                      Admin
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                              <div className="text-xs text-pihole-text-muted">{user.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              user.is_enabled
+                                ? 'bg-green-500/20 text-green-400'
+                                : 'bg-red-500/20 text-red-400'
+                            }`}
+                          >
+                            {user.is_enabled ? 'Active' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-sm text-pihole-text-muted">
+                          {user.stats?.total_domains?.toLocaleString() || 0}
+                        </td>
+                        <td className="p-4 text-sm text-pihole-text-muted">
+                          {new Date(user.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Root users cannot have any actions performed on them */}
+                            {user.is_root ? (
+                              <span className="text-xs text-pihole-text-muted">Protected</span>
+                            ) : (
+                              <>
+                                {/* Admin toggle - only root can do this */}
+                                {currentUser?.is_root && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleAdmin(user.id, !user.is_admin);
+                                    }}
+                                    className={`btn btn-ghost text-xs ${user.is_admin ? 'text-amber-400' : 'text-green-400'}`}
+                                  >
+                                    {user.is_admin ? 'Revoke Admin' : 'Make Admin'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRebuildUser(user.id);
+                                  }}
+                                  className="btn btn-ghost text-xs"
+                                >
+                                  Rebuild
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleUser(user.id, !user.is_enabled);
+                                  }}
+                                  className="btn btn-ghost text-xs"
+                                >
+                                  {user.is_enabled ? 'Disable' : 'Enable'}
+                                </button>
+                                {!user.is_admin && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteUser(user.id);
+                                    }}
+                                    className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </>
                             )}
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                          </div>
+                        </td>
+                      </tr>
                     ))
                   )}
                 </tbody>
@@ -1061,9 +1121,7 @@ export default function AdminPage() {
 
           {limitRequests.length === 0 ? (
             <div className="card">
-              <p className="text-pihole-text-muted text-center py-8">
-                No limit requests yet.
-              </p>
+              <p className="text-pihole-text-muted text-center py-8">No limit requests yet.</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -1224,76 +1282,75 @@ export default function AdminPage() {
       )}
 
       {/* Jobs Tab */}
-      {activeTab === 'jobs' && (() => {
-        // Get progress data from the selected job
-        const progressData = selectedJob?.progress;
-        const selectedJobSources: SourceProgress[] = progressData?.sources || [];
-        const selectedJobWhitelist: WhitelistProgress | null = progressData?.whitelist || null;
-        const selectedJobFormats: Record<string, FormatProgress> = {};
+      {activeTab === 'jobs' &&
+        (() => {
+          // Get progress data from the selected job
+          const progressData = selectedJob?.progress;
+          const selectedJobSources: SourceProgress[] = progressData?.sources || [];
+          const selectedJobWhitelist: WhitelistProgress | null = progressData?.whitelist || null;
+          const selectedJobFormats: Record<string, FormatProgress> = {};
 
-        // Convert formats array to record
-        if (progressData?.generation?.formats) {
-          for (const fmt of progressData.generation.formats) {
-            selectedJobFormats[fmt.format] = fmt;
+          // Convert formats array to record
+          if (progressData?.generation?.formats) {
+            for (const fmt of progressData.generation.formats) {
+              selectedJobFormats[fmt.format] = fmt;
+            }
           }
-        }
 
-        return (
-          <div className="grid md:grid-cols-3 gap-6">
-            {/* Job List Sidebar */}
-            <div className="md:col-span-1">
-              <div className="card max-h-[calc(100vh-200px)] overflow-hidden flex flex-col">
-                <h2 className="font-semibold text-pihole-text mb-4 flex-shrink-0">
-                  All Jobs
-                  {jobs.some((j) => j.status === 'processing' || j.status === 'queued') && (
-                    <span className="ml-2 inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-                  )}
-                </h2>
-                <div className="overflow-y-auto flex-1 -mr-2 pr-2">
-                  <JobList
-                    jobs={jobs}
-                    selectedJobId={selectedJob?.job_id || null}
-                    onSelectJob={setSelectedJob}
-                    showUsername={true}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Job Details */}
-            <div className="md:col-span-2">
-              {selectedJob ? (
-                <JobDetailView
-                  job={selectedJob}
-                  sources={selectedJobSources}
-                  whitelist={selectedJobWhitelist}
-                  formats={selectedJobFormats}
-                  showUsername={true}
-                />
-              ) : (
-                <div className="card text-center py-12">
-                  <svg
-                    className="w-16 h-16 mx-auto mb-4 text-pihole-border"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+          return (
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* Job List Sidebar */}
+              <div className="md:col-span-1">
+                <div className="card max-h-[calc(100vh-200px)] overflow-hidden flex flex-col">
+                  <h2 className="font-semibold text-pihole-text mb-4 flex-shrink-0">
+                    All Jobs
+                    {jobs.some((j) => j.status === 'processing' || j.status === 'queued') && (
+                      <span className="ml-2 inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                    )}
+                  </h2>
+                  <div className="overflow-y-auto flex-1 -mr-2 pr-2">
+                    <JobList
+                      jobs={jobs}
+                      selectedJobId={selectedJob?.job_id || null}
+                      onSelectJob={setSelectedJob}
+                      showUsername={true}
                     />
-                  </svg>
-                  <div className="text-pihole-text-muted">
-                    Select a job to view details
                   </div>
                 </div>
-              )}
+              </div>
+
+              {/* Job Details */}
+              <div className="md:col-span-2">
+                {selectedJob ? (
+                  <JobDetailView
+                    job={selectedJob}
+                    sources={selectedJobSources}
+                    whitelist={selectedJobWhitelist}
+                    formats={selectedJobFormats}
+                    showUsername={true}
+                  />
+                ) : (
+                  <div className="card text-center py-12">
+                    <svg
+                      className="w-16 h-16 mx-auto mb-4 text-pihole-border"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
+                    </svg>
+                    <div className="text-pihole-text-muted">Select a job to view details</div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
       {/* Library Tab */}
       {activeTab === 'library' && (
@@ -1325,7 +1382,9 @@ export default function AdminPage() {
               />
               <select
                 value={newLibraryEntry.category}
-                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, category: e.target.value })}
+                onChange={(e) =>
+                  setNewLibraryEntry({ ...newLibraryEntry, category: e.target.value })
+                }
                 className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
               >
                 {LIBRARY_CATEGORIES.map((cat) => (
@@ -1338,14 +1397,21 @@ export default function AdminPage() {
                 type="number"
                 placeholder="Domain count"
                 value={newLibraryEntry.domain_count || ''}
-                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, domain_count: parseInt(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setNewLibraryEntry({
+                    ...newLibraryEntry,
+                    domain_count: parseInt(e.target.value) || 0,
+                  })
+                }
                 className="bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
               />
               <input
                 type="text"
                 placeholder="Description"
                 value={newLibraryEntry.description}
-                onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, description: e.target.value })}
+                onChange={(e) =>
+                  setNewLibraryEntry({ ...newLibraryEntry, description: e.target.value })
+                }
                 className="md:col-span-2 bg-pihole-darkest border border-pihole-border rounded-lg px-4 py-2 text-sm text-pihole-text focus:outline-none focus:border-pihole-accent"
               />
               <div className="flex items-center gap-6">
@@ -1353,7 +1419,9 @@ export default function AdminPage() {
                   <input
                     type="checkbox"
                     checked={newLibraryEntry.recommended}
-                    onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, recommended: e.target.checked })}
+                    onChange={(e) =>
+                      setNewLibraryEntry({ ...newLibraryEntry, recommended: e.target.checked })
+                    }
                     className="rounded border-pihole-border bg-pihole-dark"
                   />
                   Recommended
@@ -1362,11 +1430,18 @@ export default function AdminPage() {
                   <span className="text-sm text-pihole-text-muted">Aggressiveness:</span>
                   <select
                     value={newLibraryEntry.aggressiveness}
-                    onChange={(e) => setNewLibraryEntry({ ...newLibraryEntry, aggressiveness: parseInt(e.target.value) })}
+                    onChange={(e) =>
+                      setNewLibraryEntry({
+                        ...newLibraryEntry,
+                        aggressiveness: parseInt(e.target.value),
+                      })
+                    }
                     className="bg-pihole-darkest border border-pihole-border rounded px-2 py-1 text-sm text-pihole-text"
                   >
                     {[1, 2, 3, 4, 5].map((n) => (
-                      <option key={n} value={n}>{n}</option>
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1403,37 +1478,52 @@ export default function AdminPage() {
                           <input
                             type="url"
                             value={editingEntry.url}
-                            onChange={(e) => setEditingEntry({ ...editingEntry, url: e.target.value })}
+                            onChange={(e) =>
+                              setEditingEntry({ ...editingEntry, url: e.target.value })
+                            }
                             className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
                             placeholder="URL"
                           />
                           <input
                             type="text"
                             value={editingEntry.name}
-                            onChange={(e) => setEditingEntry({ ...editingEntry, name: e.target.value })}
+                            onChange={(e) =>
+                              setEditingEntry({ ...editingEntry, name: e.target.value })
+                            }
                             className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
                             placeholder="Name"
                           />
                           <select
                             value={editingEntry.category}
-                            onChange={(e) => setEditingEntry({ ...editingEntry, category: e.target.value })}
+                            onChange={(e) =>
+                              setEditingEntry({ ...editingEntry, category: e.target.value })
+                            }
                             className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
                           >
                             {LIBRARY_CATEGORIES.map((cat) => (
-                              <option key={cat} value={cat}>{cat}</option>
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
                             ))}
                           </select>
                           <input
                             type="number"
                             value={editingEntry.domain_count || ''}
-                            onChange={(e) => setEditingEntry({ ...editingEntry, domain_count: parseInt(e.target.value) || 0 })}
+                            onChange={(e) =>
+                              setEditingEntry({
+                                ...editingEntry,
+                                domain_count: parseInt(e.target.value) || 0,
+                              })
+                            }
                             className="bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
                             placeholder="Domain count"
                           />
                           <input
                             type="text"
                             value={editingEntry.description}
-                            onChange={(e) => setEditingEntry({ ...editingEntry, description: e.target.value })}
+                            onChange={(e) =>
+                              setEditingEntry({ ...editingEntry, description: e.target.value })
+                            }
                             className="md:col-span-2 bg-pihole-dark border border-pihole-border rounded px-3 py-1.5 text-sm text-pihole-text"
                             placeholder="Description"
                           />
@@ -1442,26 +1532,44 @@ export default function AdminPage() {
                               <input
                                 type="checkbox"
                                 checked={editingEntry.recommended}
-                                onChange={(e) => setEditingEntry({ ...editingEntry, recommended: e.target.checked })}
+                                onChange={(e) =>
+                                  setEditingEntry({
+                                    ...editingEntry,
+                                    recommended: e.target.checked,
+                                  })
+                                }
                                 className="rounded"
                               />
                               Recommended
                             </label>
                             <select
                               value={editingEntry.aggressiveness}
-                              onChange={(e) => setEditingEntry({ ...editingEntry, aggressiveness: parseInt(e.target.value) })}
+                              onChange={(e) =>
+                                setEditingEntry({
+                                  ...editingEntry,
+                                  aggressiveness: parseInt(e.target.value),
+                                })
+                              }
                               className="bg-pihole-dark border border-pihole-border rounded px-2 py-1 text-sm text-pihole-text"
                             >
                               {[1, 2, 3, 4, 5].map((n) => (
-                                <option key={n} value={n}>Aggr: {n}</option>
+                                <option key={n} value={n}>
+                                  Aggr: {n}
+                                </option>
                               ))}
                             </select>
                           </div>
                           <div className="flex justify-end gap-2">
-                            <button onClick={() => setEditingEntry(null)} className="btn btn-ghost text-sm">
+                            <button
+                              onClick={() => setEditingEntry(null)}
+                              className="btn btn-ghost text-sm"
+                            >
                               Cancel
                             </button>
-                            <button onClick={handleUpdateLibraryEntry} className="btn btn-primary text-sm">
+                            <button
+                              onClick={handleUpdateLibraryEntry}
+                              className="btn btn-primary text-sm"
+                            >
                               Save
                             </button>
                           </div>
@@ -1485,7 +1593,9 @@ export default function AdminPage() {
                             </div>
                             <p className="text-sm text-pihole-text-muted truncate">{entry.url}</p>
                             {entry.description && (
-                              <p className="text-sm text-pihole-text-muted mt-1">{entry.description}</p>
+                              <p className="text-sm text-pihole-text-muted mt-1">
+                                {entry.description}
+                              </p>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
@@ -1550,8 +1660,8 @@ function LimitRequestCard({
         request.status === 'pending'
           ? 'bg-pihole-darkest border-pihole-border'
           : request.status === 'approved'
-          ? 'bg-green-500/5 border-green-500/20'
-          : 'bg-red-500/5 border-red-500/20'
+            ? 'bg-green-500/5 border-green-500/20'
+            : 'bg-red-500/5 border-red-500/20'
       }`}
     >
       <div className="flex items-start gap-4">
@@ -1560,9 +1670,7 @@ function LimitRequestCard({
           <img src={request.avatar_url} alt="" className="w-10 h-10 rounded-full" />
         ) : (
           <div className="w-10 h-10 bg-pihole-border rounded-full flex items-center justify-center">
-            <span className="text-pihole-text text-sm">
-              {request.username?.[0]?.toUpperCase()}
-            </span>
+            <span className="text-pihole-text text-sm">{request.username?.[0]?.toUpperCase()}</span>
           </div>
         )}
 
@@ -1575,8 +1683,8 @@ function LimitRequestCard({
                 request.status === 'pending'
                   ? 'bg-yellow-500/20 text-yellow-400'
                   : request.status === 'approved'
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-red-500/20 text-red-400'
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-red-500/20 text-red-400'
               }`}
             >
               {request.status}
@@ -1613,7 +1721,8 @@ function LimitRequestCard({
             <div className="text-sm text-pihole-text-muted">
               {request.status === 'approved' && request.approved_limit && (
                 <span>
-                  Approved for {formatDomains(request.approved_limit)} domains by {request.reviewed_by}
+                  Approved for {formatDomains(request.approved_limit)} domains by{' '}
+                  {request.reviewed_by}
                 </span>
               )}
               {request.status === 'denied' && (
@@ -1628,10 +1737,7 @@ function LimitRequestCard({
           {/* Actions for pending requests */}
           {!readOnly && request.status === 'pending' && (
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => onApprove(request.id)}
-                className="btn btn-primary text-sm"
-              >
+              <button onClick={() => onApprove(request.id)} className="btn btn-primary text-sm">
                 Approve ({formatDomains(request.requested_tier)})
               </button>
 

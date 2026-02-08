@@ -2,7 +2,7 @@
 export interface User {
   id: string;
   username: string;
-  name?: string;  // GitHub display name
+  name?: string; // GitHub display name
   email?: string;
   avatar_url?: string;
   is_admin: boolean;
@@ -59,7 +59,7 @@ export interface Job {
   type: 'manual' | 'scheduled' | 'admin';
   status: JobStatus;
   progress: EnhancedJobProgress;
-  queue_info?: QueueInfo;  // Present for queued jobs
+  queue_info?: QueueInfo; // Present for queued jobs
   result?: JobResult;
   started_at?: string;
   completed_at?: string;
@@ -96,7 +96,7 @@ export interface SourceProgress {
   domain_count: number | null;
   domain_change: number | null;
   format_breakdown?: FormatBreakdown;
-  detected_formats?: string[];  // e.g., ["hosts", "adblock"]
+  detected_formats?: string[]; // e.g., ["hosts", "adblock"]
   error: string | null;
   warnings?: string[];
   started_at: string | null;
@@ -140,7 +140,7 @@ export interface GenerationProgress {
 // Snapshot of a stage's final state
 export interface StageSnapshot {
   completed_at: string;
-  data: unknown;  // Stage-specific data
+  data: unknown; // Stage-specific data
 }
 
 // Enhanced job progress with all stages
@@ -183,7 +183,7 @@ export interface JobResult {
   categories?: Record<string, number>;
   errors: string[];
   skip_reason?: string;
-  copied_from?: string;  // Username whose build was copied (fingerprint match)
+  copied_from?: string; // Username whose build was copied (fingerprint match)
 }
 
 export interface OutputFile {

@@ -10,7 +10,8 @@ const steps = [
     subtitle: '30 seconds to protection',
     icon: <Copy className="w-6 h-6" />,
     color: 'electric-pink',
-    description: 'Copy a single URL. Paste it into your Pi-hole, AdGuard, or any DNS blocker. That\'s the entire setup.',
+    description:
+      "Copy a single URL. Paste it into your Pi-hole, AdGuard, or any DNS blocker. That's the entire setup.",
   },
   {
     number: '02',
@@ -18,7 +19,8 @@ const steps = [
     subtitle: 'Built for speed',
     icon: <Zap className="w-6 h-6" />,
     color: 'rust',
-    description: 'Our Rust worker aggregates, deduplicates, and validates millions of domains efficiently. Memory-safe, parallel processing.',
+    description:
+      'Our Rust worker aggregates, deduplicates, and validates millions of domains efficiently. Memory-safe, parallel processing.',
     isRust: true,
   },
   {
@@ -27,7 +29,8 @@ const steps = [
     subtitle: 'Set it and forget it',
     icon: <RefreshCw className="w-6 h-6" />,
     color: 'matrix',
-    description: 'Your lists update automatically every week. No maintenance, no manual downloads, no midnight gravity updates.',
+    description:
+      'Your lists update automatically every week. No maintenance, no manual downloads, no midnight gravity updates.',
   },
 ];
 
@@ -85,10 +88,14 @@ export default function SolutionJourney() {
             >
               {/* Connector line */}
               {index < steps.length - 1 && (
-                <div className={`hidden lg:block absolute top-[100px] w-px h-[calc(100%-20px)] bg-gradient-to-b from-steel-light to-transparent ${index % 2 === 0 ? 'left-[60px]' : 'right-[60px]'}`} />
+                <div
+                  className={`hidden lg:block absolute top-[100px] w-px h-[calc(100%-20px)] bg-gradient-to-b from-steel-light to-transparent ${index % 2 === 0 ? 'left-[60px]' : 'right-[60px]'}`}
+                />
               )}
 
-              <div className={`flex flex-col lg:flex-row gap-6 lg:gap-12 items-start ${index % 2 === 1 ? 'lg:flex-row-reverse' : ''}`}>
+              <div
+                className={`flex flex-col lg:flex-row gap-6 lg:gap-12 items-start ${index % 2 === 1 ? 'lg:flex-row-reverse' : ''}`}
+              >
                 {/* Step Number */}
                 <div className="shrink-0">
                   <motion.div
@@ -99,7 +106,9 @@ export default function SolutionJourney() {
                       border backdrop-blur-sm
                     `}
                   >
-                    <span className={`font-display text-5xl ${step.isRust ? 'text-rust' : `text-${step.color}`}`}>
+                    <span
+                      className={`font-display text-5xl ${step.isRust ? 'text-rust' : `text-${step.color}`}`}
+                    >
                       {step.number}
                     </span>
                   </motion.div>
@@ -109,22 +118,24 @@ export default function SolutionJourney() {
                 <div className="flex-1">
                   <div className="glass-card p-8 glass-card-hover">
                     <div className="flex items-start gap-4 mb-4">
-                      <div className={`p-3 rounded-xl ${step.isRust ? 'bg-rust/20 text-rust' : `bg-${step.color}/10 text-${step.color}`}`}>
+                      <div
+                        className={`p-3 rounded-xl ${step.isRust ? 'bg-rust/20 text-rust' : `bg-${step.color}/10 text-${step.color}`}`}
+                      >
                         {step.icon}
                       </div>
                       <div>
                         <h3 className="font-display text-2xl text-chrome-light mb-1">
                           {step.title}
                         </h3>
-                        <p className={`text-sm font-medium ${step.isRust ? 'text-rust-light' : `text-${step.color}`}`}>
+                        <p
+                          className={`text-sm font-medium ${step.isRust ? 'text-rust-light' : `text-${step.color}`}`}
+                        >
                           {step.subtitle}
                         </p>
                       </div>
                     </div>
 
-                    <p className="text-chrome mb-6">
-                      {step.description}
-                    </p>
+                    <p className="text-chrome mb-6">{step.description}</p>
 
                     {/* Step-specific content */}
                     {step.number === '01' && (
@@ -207,17 +218,16 @@ export default function SolutionJourney() {
                               <div
                                 key={i}
                                 className={`w-4 h-4 rounded ${
-                                  i % 7 === 0
-                                    ? 'bg-matrix/60'
-                                    : 'bg-steel'
+                                  i % 7 === 0 ? 'bg-matrix/60' : 'bg-steel'
                                 }`}
                               />
                             ))}
                           </div>
                           <div className="flex-1">
                             <p className="text-sm text-chrome">
-                              <span className="text-matrix font-medium">Every Sunday</span> at midnight,
-                              your lists are automatically refreshed with the latest blocklists.
+                              <span className="text-matrix font-medium">Every Sunday</span> at
+                              midnight, your lists are automatically refreshed with the latest
+                              blocklists.
                             </p>
                           </div>
                         </div>

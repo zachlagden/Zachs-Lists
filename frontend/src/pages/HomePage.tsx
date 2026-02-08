@@ -43,10 +43,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-void">
       {/* 1. Cinematic Hero - Full viewport with threat visualization */}
-      <CinematicHero
-        isAuthenticated={isAuthenticated}
-        totalDomains={stats?.total_domains || 0}
-      />
+      <CinematicHero isAuthenticated={isAuthenticated} totalDomains={stats?.total_domains || 0} />
 
       {/* 2. Problem Section - The chaos of the unprotected internet */}
       <ProblemSection />

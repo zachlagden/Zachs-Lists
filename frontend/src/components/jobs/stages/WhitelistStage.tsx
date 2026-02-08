@@ -42,9 +42,7 @@ export default function WhitelistStage({ whitelist }: WhitelistStageProps) {
   }
 
   const removalPercent =
-    whitelist.domains_before > 0
-      ? (whitelist.total_removed / whitelist.domains_before) * 100
-      : 0;
+    whitelist.domains_before > 0 ? (whitelist.total_removed / whitelist.domains_before) * 100 : 0;
 
   // Sort patterns by match count descending
   const sortedPatterns = [...whitelist.patterns].sort((a, b) => b.match_count - a.match_count);
@@ -86,12 +84,16 @@ export default function WhitelistStage({ whitelist }: WhitelistStageProps) {
       {sortedPatterns.length > 0 && (
         <div className="bg-pihole-darkest rounded-lg p-4">
           <h3 className="font-semibold text-pihole-text mb-3">
-            Pattern Breakdown ({sortedPatterns.length} pattern{sortedPatterns.length !== 1 ? 's' : ''})
+            Pattern Breakdown ({sortedPatterns.length} pattern
+            {sortedPatterns.length !== 1 ? 's' : ''})
           </h3>
 
           <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
             {sortedPatterns.map((pattern, idx) => (
-              <div key={idx} className="bg-pihole-darker rounded-lg p-3 border border-pihole-border/50">
+              <div
+                key={idx}
+                className="bg-pihole-darker rounded-lg p-3 border border-pihole-border/50"
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <code className="text-sm text-pihole-text font-mono bg-pihole-border/30 px-2 py-0.5 rounded">
@@ -121,7 +123,10 @@ export default function WhitelistStage({ whitelist }: WhitelistStageProps) {
                       </span>
                     ))}
                     {pattern.samples.length > 3 && (
-                      <span className="text-pihole-text-muted"> +{pattern.samples.length - 3} more</span>
+                      <span className="text-pihole-text-muted">
+                        {' '}
+                        +{pattern.samples.length - 3} more
+                      </span>
                     )}
                   </div>
                 )}

@@ -103,7 +103,10 @@ export default function AdminUserDetailPage() {
       await adminApi.updateUser(userId, { is_enabled: !user.is_enabled });
       const updatedUser = await adminApi.getUser(userId);
       setUser(updatedUser);
-      setMessage({ type: 'success', text: `User ${updatedUser.is_enabled ? 'enabled' : 'disabled'}` });
+      setMessage({
+        type: 'success',
+        text: `User ${updatedUser.is_enabled ? 'enabled' : 'disabled'}`,
+      });
     } catch (error) {
       console.error('Failed to toggle user:', error);
       setMessage({ type: 'error', text: 'Failed to update user' });
@@ -112,7 +115,8 @@ export default function AdminUserDetailPage() {
 
   const handleDeleteUser = async () => {
     if (!userId || !user) return;
-    if (!confirm(`Are you sure you want to delete ${user.username}? This cannot be undone.`)) return;
+    if (!confirm(`Are you sure you want to delete ${user.username}? This cannot be undone.`))
+      return;
 
     try {
       await adminApi.deleteUser(userId);
@@ -204,15 +208,23 @@ export default function AdminUserDetailPage() {
             <h1 className="text-2xl font-bold text-pihole-text flex items-center gap-2">
               {user.name || user.username}
               {user.is_root ? (
-                <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded">Root</span>
-              ) : user.is_admin && (
-                <span className="text-xs bg-pihole-accent/20 text-pihole-accent px-2 py-1 rounded">Admin</span>
+                <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded">
+                  Root
+                </span>
+              ) : (
+                user.is_admin && (
+                  <span className="text-xs bg-pihole-accent/20 text-pihole-accent px-2 py-1 rounded">
+                    Admin
+                  </span>
+                )
               )}
               {user.is_banned && (
                 <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">Banned</span>
               )}
               {!user.is_enabled && !user.is_banned && (
-                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">Disabled</span>
+                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">
+                  Disabled
+                </span>
               )}
             </h1>
             <p className="text-pihole-text-muted">@{user.username}</p>
@@ -231,7 +243,9 @@ export default function AdminUserDetailPage() {
       {message && (
         <div
           className={`px-4 py-3 rounded-lg ${
-            message.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+            message.type === 'success'
+              ? 'bg-green-500/10 text-green-400'
+              : 'bg-red-500/10 text-red-400'
           }`}
         >
           {message.text}
@@ -253,12 +267,16 @@ export default function AdminUserDetailPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-pihole-text-muted">Created</span>
-              <span className="text-pihole-text">{new Date(user.created_at).toLocaleDateString()}</span>
+              <span className="text-pihole-text">
+                {new Date(user.created_at).toLocaleDateString()}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-pihole-text-muted">Last Build</span>
               <span className="text-pihole-text">
-                {user.stats.last_build_at ? new Date(user.stats.last_build_at).toLocaleString() : 'Never'}
+                {user.stats.last_build_at
+                  ? new Date(user.stats.last_build_at).toLocaleString()
+                  : 'Never'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -267,7 +285,9 @@ export default function AdminUserDetailPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-pihole-text-muted">Output Size</span>
-              <span className="text-pihole-text">{formatBytes(user.stats.total_output_size_bytes)}</span>
+              <span className="text-pihole-text">
+                {formatBytes(user.stats.total_output_size_bytes)}
+              </span>
             </div>
           </div>
         </div>
@@ -280,11 +300,15 @@ export default function AdminUserDetailPage() {
           ) : (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-pihole-text-muted mb-1">Max Source Lists</label>
+                <label className="block text-sm text-pihole-text-muted mb-1">
+                  Max Source Lists
+                </label>
                 <input
                   type="number"
                   value={limits.max_source_lists}
-                  onChange={(e) => setLimits({ ...limits, max_source_lists: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setLimits({ ...limits, max_source_lists: parseInt(e.target.value) || 0 })
+                  }
                   className="input w-full"
                 />
               </div>
@@ -293,7 +317,9 @@ export default function AdminUserDetailPage() {
                 <input
                   type="number"
                   value={limits.max_domains}
-                  onChange={(e) => setLimits({ ...limits, max_domains: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setLimits({ ...limits, max_domains: parseInt(e.target.value) || 0 })
+                  }
                   className="input w-full"
                 />
                 <p className="text-xs text-pihole-text-muted mt-1">
@@ -301,24 +327,36 @@ export default function AdminUserDetailPage() {
                 </p>
               </div>
               <div>
-                <label className="block text-sm text-pihole-text-muted mb-1">Max Config Size (MB)</label>
+                <label className="block text-sm text-pihole-text-muted mb-1">
+                  Max Config Size (MB)
+                </label>
                 <input
                   type="number"
                   value={limits.max_config_size_mb}
-                  onChange={(e) => setLimits({ ...limits, max_config_size_mb: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setLimits({ ...limits, max_config_size_mb: parseInt(e.target.value) || 0 })
+                  }
                   className="input w-full"
                 />
               </div>
               <div>
-                <label className="block text-sm text-pihole-text-muted mb-1">Manual Updates Per Week</label>
+                <label className="block text-sm text-pihole-text-muted mb-1">
+                  Manual Updates Per Week
+                </label>
                 <input
                   type="number"
                   value={limits.manual_updates_per_week}
-                  onChange={(e) => setLimits({ ...limits, manual_updates_per_week: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setLimits({ ...limits, manual_updates_per_week: parseInt(e.target.value) || 0 })
+                  }
                   className="input w-full"
                 />
               </div>
-              <button onClick={handleSaveLimits} disabled={saving} className="btn btn-primary w-full">
+              <button
+                onClick={handleSaveLimits}
+                disabled={saving}
+                className="btn btn-primary w-full"
+              >
                 {saving ? 'Saving...' : 'Save Limits'}
               </button>
             </div>
@@ -327,17 +365,26 @@ export default function AdminUserDetailPage() {
 
         {/* User Lists */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-pihole-text mb-4">Lists ({user.lists.length})</h2>
+          <h2 className="text-lg font-semibold text-pihole-text mb-4">
+            Lists ({user.lists.length})
+          </h2>
           {user.lists.length === 0 ? (
             <p className="text-pihole-text-muted text-sm">No lists</p>
           ) : (
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {user.lists.map((list) => (
-                <div key={list.name} className="flex items-center justify-between bg-pihole-darkest p-2 rounded text-sm">
+                <div
+                  key={list.name}
+                  className="flex items-center justify-between bg-pihole-darkest p-2 rounded text-sm"
+                >
                   <span className="text-pihole-text">{list.name}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-pihole-text-muted">{list.domain_count.toLocaleString()}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${list.is_public ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                    <span className="text-pihole-text-muted">
+                      {list.domain_count.toLocaleString()}
+                    </span>
+                    <span
+                      className={`text-xs px-1.5 py-0.5 rounded ${list.is_public ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}
+                    >
                       {list.is_public ? 'Public' : 'Private'}
                     </span>
                   </div>
@@ -349,7 +396,9 @@ export default function AdminUserDetailPage() {
 
         {/* IP Log */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-pihole-text mb-4">IP Access Log ({user.ip_log.length})</h2>
+          <h2 className="text-lg font-semibold text-pihole-text mb-4">
+            IP Access Log ({user.ip_log.length})
+          </h2>
           {user.ip_log.length === 0 ? (
             <p className="text-pihole-text-muted text-sm">No IP access recorded</p>
           ) : (
@@ -361,7 +410,8 @@ export default function AdminUserDetailPage() {
                     <span className="text-pihole-text-muted">{entry.access_count}x</span>
                   </div>
                   <div className="text-xs text-pihole-text-muted mt-1">
-                    First: {new Date(entry.first_seen).toLocaleString()} | Last: {new Date(entry.last_seen).toLocaleString()}
+                    First: {new Date(entry.first_seen).toLocaleString()} | Last:{' '}
+                    {new Date(entry.last_seen).toLocaleString()}
                   </div>
                 </div>
               ))}
@@ -378,9 +428,13 @@ export default function AdminUserDetailPage() {
             <div className="space-y-4">
               <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-lg">
                 <p className="text-red-400 font-medium">User is currently banned</p>
-                {user.ban_reason && <p className="text-red-400/80 text-sm mt-1">Reason: {user.ban_reason}</p>}
+                {user.ban_reason && (
+                  <p className="text-red-400/80 text-sm mt-1">Reason: {user.ban_reason}</p>
+                )}
                 {user.banned_until && (
-                  <p className="text-red-400/80 text-sm mt-1">Until: {new Date(user.banned_until).toLocaleString()}</p>
+                  <p className="text-red-400/80 text-sm mt-1">
+                    Until: {new Date(user.banned_until).toLocaleString()}
+                  </p>
                 )}
               </div>
               <button onClick={handleUnban} className="btn btn-primary">
@@ -403,7 +457,9 @@ export default function AdminUserDetailPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-pihole-text-muted mb-1">Reason (optional)</label>
+                <label className="block text-sm text-pihole-text-muted mb-1">
+                  Reason (optional)
+                </label>
                 <input
                   type="text"
                   value={banReason}
@@ -422,7 +478,10 @@ export default function AdminUserDetailPage() {
               </div>
             </div>
           ) : (
-            <button onClick={() => setShowBanForm(true)} className="btn bg-red-600/20 text-red-400 hover:bg-red-600/30">
+            <button
+              onClick={() => setShowBanForm(true)}
+              className="btn bg-red-600/20 text-red-400 hover:bg-red-600/30"
+            >
               Ban User
             </button>
           )}
@@ -451,9 +510,14 @@ export default function AdminUserDetailPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-pihole-text">Delete Account</p>
-              <p className="text-pihole-text-muted text-sm">Permanently delete user and all their data</p>
+              <p className="text-pihole-text-muted text-sm">
+                Permanently delete user and all their data
+              </p>
             </div>
-            <button onClick={handleDeleteUser} className="btn bg-red-600 hover:bg-red-700 text-white">
+            <button
+              onClick={handleDeleteUser}
+              className="btn bg-red-600 hover:bg-red-700 text-white"
+            >
               Delete User
             </button>
           </div>

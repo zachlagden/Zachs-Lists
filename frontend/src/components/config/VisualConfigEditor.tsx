@@ -1,5 +1,12 @@
 import { useState, useMemo } from 'react';
-import { ConfigLine, CATEGORIES, parseConfig, serializeConfig, groupByCategory, CategoryValue } from './types';
+import {
+  ConfigLine,
+  CATEGORIES,
+  parseConfig,
+  serializeConfig,
+  groupByCategory,
+  CategoryValue,
+} from './types';
 import LibraryModal from './LibraryModal';
 import AddUrlForm from './AddUrlForm';
 
@@ -54,7 +61,9 @@ export default function VisualConfigEditor({
   };
 
   // Add multiple sources from library
-  const handleAddFromLibrary = (sources: Array<{ url: string; name: string; category: string }>) => {
+  const handleAddFromLibrary = (
+    sources: Array<{ url: string; name: string; category: string }>,
+  ) => {
     const existingUrls = new Set(parsedLines.map((l) => l.url));
     const newSources = sources.filter((s) => !existingUrls.has(s.url));
 
@@ -102,9 +111,7 @@ export default function VisualConfigEditor({
             {categoryCounts[cat.value] > 0 && (
               <span
                 className={`px-1.5 py-0.5 text-xs rounded-full ${
-                  activeCategory === cat.value
-                    ? 'bg-white/20'
-                    : 'bg-pihole-border'
+                  activeCategory === cat.value ? 'bg-white/20' : 'bg-pihole-border'
                 }`}
               >
                 {categoryCounts[cat.value]}
@@ -133,14 +140,16 @@ export default function VisualConfigEditor({
           className="btn btn-primary text-sm"
         >
           <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+            />
           </svg>
           Add from Library
         </button>
-        <button
-          onClick={() => setShowAddUrl(true)}
-          className="btn btn-ghost text-sm"
-        >
+        <button onClick={() => setShowAddUrl(true)} className="btn btn-ghost text-sm">
           <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
@@ -152,8 +161,18 @@ export default function VisualConfigEditor({
       <div className="space-y-2">
         {currentSources.length === 0 ? (
           <div className="text-center py-8 text-pihole-text-muted">
-            <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            <svg
+              className="w-12 h-12 mx-auto mb-3 opacity-50"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+              />
             </svg>
             <p>No sources in {CATEGORIES.find((c) => c.value === activeCategory)?.label}</p>
             <p className="text-sm mt-1">Add sources from the library or enter a custom URL</p>
@@ -165,12 +184,8 @@ export default function VisualConfigEditor({
               className="flex items-center justify-between p-3 bg-pihole-dark rounded-lg group"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-pihole-text truncate">
-                  {source.name}
-                </div>
-                <div className="text-sm text-pihole-text-muted truncate">
-                  {source.url}
-                </div>
+                <div className="font-medium text-pihole-text truncate">{source.name}</div>
+                <div className="text-sm text-pihole-text-muted truncate">{source.url}</div>
               </div>
               <button
                 onClick={() => handleRemoveSource(source.url)}
@@ -178,7 +193,12 @@ export default function VisualConfigEditor({
                 title="Remove source"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
                 </svg>
               </button>
             </div>

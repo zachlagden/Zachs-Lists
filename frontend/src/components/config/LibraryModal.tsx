@@ -20,7 +20,9 @@ export default function LibraryModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
-  const [activeCategory, setActiveCategory] = useState<CategoryValue>(defaultCategory || 'comprehensive');
+  const [activeCategory, setActiveCategory] = useState<CategoryValue>(
+    defaultCategory || 'comprehensive',
+  );
 
   // Fetch library data
   useEffect(() => {
@@ -135,7 +137,12 @@ export default function LibraryModal({
             className="p-2 text-pihole-text-muted hover:text-pihole-text rounded-lg hover:bg-pihole-dark"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -144,7 +151,9 @@ export default function LibraryModal({
         <div className="flex gap-1 p-2 border-b border-pihole-border overflow-x-auto">
           {CATEGORIES.map((cat) => {
             const count = library[cat.value]?.length || 0;
-            const selectedInCat = (library[cat.value] || []).filter((e) => selectedUrls.has(e.url)).length;
+            const selectedInCat = (library[cat.value] || []).filter((e) =>
+              selectedUrls.has(e.url),
+            ).length;
 
             return (
               <button
@@ -158,9 +167,11 @@ export default function LibraryModal({
               >
                 {cat.label}
                 {count > 0 && (
-                  <span className={`px-1.5 py-0.5 text-xs rounded-full ${
-                    activeCategory === cat.value ? 'bg-white/20' : 'bg-pihole-border'
-                  }`}>
+                  <span
+                    className={`px-1.5 py-0.5 text-xs rounded-full ${
+                      activeCategory === cat.value ? 'bg-white/20' : 'bg-pihole-border'
+                    }`}
+                  >
                     {selectedInCat > 0 ? `${selectedInCat}/${count}` : count}
                   </span>
                 )}
@@ -218,8 +229,8 @@ export default function LibraryModal({
                       isAlreadyAdded
                         ? 'bg-pihole-dark/50 opacity-60 cursor-not-allowed'
                         : isSelected
-                        ? 'bg-pihole-accent/20 border border-pihole-accent'
-                        : 'bg-pihole-dark hover:bg-pihole-darker border border-transparent'
+                          ? 'bg-pihole-accent/20 border border-pihole-accent'
+                          : 'bg-pihole-dark hover:bg-pihole-darker border border-transparent'
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -230,12 +241,16 @@ export default function LibraryModal({
                             isAlreadyAdded
                               ? 'border-pihole-border bg-pihole-border'
                               : isSelected
-                              ? 'border-pihole-accent bg-pihole-accent'
-                              : 'border-pihole-border'
+                                ? 'border-pihole-accent bg-pihole-accent'
+                                : 'border-pihole-border'
                           }`}
                         >
                           {(isSelected || isAlreadyAdded) && (
-                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <svg
+                              className="w-3 h-3 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
                               <path
                                 fillRule="evenodd"
                                 d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"

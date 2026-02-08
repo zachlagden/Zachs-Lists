@@ -161,7 +161,10 @@ def ban_user(admin: User, user_id: str):
     }
 
     if duration not in duration_map:
-        return jsonify({"error": "Invalid duration. Use: 1d, 7d, 30d, or permanent"}), 400
+        return (
+            jsonify({"error": "Invalid duration. Use: 1d, 7d, 30d, or permanent"}),
+            400,
+        )
 
     ban_until = datetime.utcnow() + duration_map[duration]
     target_user.ban(until=ban_until, reason=reason)
@@ -170,11 +173,13 @@ def ban_user(admin: User, user_id: str):
         f"Admin {admin.username} banned user {target_user.username} until {ban_until} (reason: {reason})"
     )
 
-    return jsonify({
-        "success": True,
-        "message": f"User {target_user.username} banned until {ban_until.isoformat()}",
-        "banned_until": ban_until.isoformat(),
-    })
+    return jsonify(
+        {
+            "success": True,
+            "message": f"User {target_user.username} banned until {ban_until.isoformat()}",
+            "banned_until": ban_until.isoformat(),
+        }
+    )
 
 
 @admin_bp.route("/users/<user_id>/unban", methods=["POST"])
@@ -190,9 +195,13 @@ def unban_user(admin: User, user_id: str):
 
     target_user.unban()
 
-    current_app.logger.info(f"Admin {admin.username} unbanned user {target_user.username}")
+    current_app.logger.info(
+        f"Admin {admin.username} unbanned user {target_user.username}"
+    )
 
-    return jsonify({"success": True, "message": f"User {target_user.username} unbanned"})
+    return jsonify(
+        {"success": True, "message": f"User {target_user.username} unbanned"}
+    )
 
 
 @admin_bp.route("/users/<user_id>/admin", methods=["PUT"])
@@ -238,25 +247,23 @@ def get_user_ips(admin: User, user_id: str):
         {
             "ip_hash": entry.get("ip_hash"),
             "first_seen": (
-                entry["first_seen"].isoformat()
-                if entry.get("first_seen")
-                else None
+                entry["first_seen"].isoformat() if entry.get("first_seen") else None
             ),
             "last_seen": (
-                entry["last_seen"].isoformat()
-                if entry.get("last_seen")
-                else None
+                entry["last_seen"].isoformat() if entry.get("last_seen") else None
             ),
             "access_count": entry.get("access_count", 0),
         }
         for entry in target_user.ip_log
     ]
 
-    return jsonify({
-        "username": target_user.username,
-        "ip_count": len(ip_log),
-        "ip_log": ip_log,
-    })
+    return jsonify(
+        {
+            "username": target_user.username,
+            "ip_count": len(ip_log),
+            "ip_log": ip_log,
+        }
+    )
 
 
 @admin_bp.route("/rebuild/<user_id>", methods=["POST"])
@@ -388,9 +395,7 @@ def get_jobs_per_day(admin: User):
         {"$match": {"created_at": {"$gte": start_date}}},
         {
             "$group": {
-                "_id": {
-                    "$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}
-                },
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
                 "count": {"$sum": 1},
                 "completed": {
                     "$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}
@@ -432,9 +437,7 @@ def get_user_growth(admin: User):
         {"$match": {"created_at": {"$gte": start_date}}},
         {
             "$group": {
-                "_id": {
-                    "$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}
-                },
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
                 "count": {"$sum": 1},
             }
         },
@@ -462,10 +465,12 @@ def get_user_growth(admin: User):
 def get_default_config(admin: User):
     """Get default lists configuration from MongoDB."""
     config_data = SystemConfig.get_default_config()
-    return jsonify({
-        "config": config_data["blocklists"],
-        "whitelist": config_data["whitelist"],
-    })
+    return jsonify(
+        {
+            "config": config_data["blocklists"],
+            "whitelist": config_data["whitelist"],
+        }
+    )
 
 
 @admin_bp.route("/default/config", methods=["PUT"])
@@ -476,7 +481,9 @@ def update_default_config(admin: User):
 
     if "config" in data:
         SystemConfig.update_default_blocklists(data["config"], admin.username)
-        current_app.logger.info(f"Admin {admin.username} updated default blocklist config")
+        current_app.logger.info(
+            f"Admin {admin.username} updated default blocklist config"
+        )
 
     if "whitelist" in data:
         SystemConfig.update_default_whitelist(data["whitelist"], admin.username)
@@ -564,7 +571,9 @@ def remove_featured_list(admin: User, featured_id: str):
     if result.deleted_count == 0:
         return jsonify({"error": "Featured list not found"}), 404
 
-    current_app.logger.info(f"Admin {admin.username} removed featured list: {featured_id}")
+    current_app.logger.info(
+        f"Admin {admin.username} removed featured list: {featured_id}"
+    )
 
     return jsonify({"success": True})
 
@@ -586,6 +595,7 @@ def get_directory_size(path: str) -> int:
 
 
 # Limit Request Management
+
 
 @admin_bp.route("/limit-requests", methods=["GET"])
 @admin_required
@@ -609,10 +619,12 @@ def get_limit_requests(admin: User):
 
     pending_count = LimitRequest.count_pending()
 
-    return jsonify({
-        "requests": [r.to_dict() for r in requests],
-        "pending_count": pending_count,
-    })
+    return jsonify(
+        {
+            "requests": [r.to_dict() for r in requests],
+            "pending_count": pending_count,
+        }
+    )
 
 
 @admin_bp.route("/limit-requests/<request_id>/approve", methods=["POST"])
@@ -636,7 +648,10 @@ def approve_limit_request(admin: User, request_id: str):
     if custom_limit is not None:
         max_limit = current_app.config.get("MAX_DOMAINS_LIMIT", 10_000_000)
         if custom_limit < limit_request.current_limit:
-            return jsonify({"error": "Custom limit cannot be lower than current limit"}), 400
+            return (
+                jsonify({"error": "Custom limit cannot be lower than current limit"}),
+                400,
+            )
         if custom_limit > max_limit:
             return jsonify({"error": f"Custom limit cannot exceed {max_limit:,}"}), 400
 
@@ -654,10 +669,12 @@ def approve_limit_request(admin: User, request_id: str):
 
     # Return updated request
     limit_request = LimitRequest.get_by_id(request_id)
-    return jsonify({
-        "success": True,
-        "request": limit_request.to_dict(),
-    })
+    return jsonify(
+        {
+            "success": True,
+            "request": limit_request.to_dict(),
+        }
+    )
 
 
 @admin_bp.route("/limit-requests/<request_id>/deny", methods=["POST"])
@@ -682,19 +699,20 @@ def deny_limit_request(admin: User, request_id: str):
         response=response_message,
     )
 
-    current_app.logger.info(
-        f"Admin {admin.username} denied limit request {request_id}"
-    )
+    current_app.logger.info(f"Admin {admin.username} denied limit request {request_id}")
 
     # Return updated request
     limit_request = LimitRequest.get_by_id(request_id)
-    return jsonify({
-        "success": True,
-        "request": limit_request.to_dict(),
-    })
+    return jsonify(
+        {
+            "success": True,
+            "request": limit_request.to_dict(),
+        }
+    )
 
 
 # Blocklist Library Management
+
 
 @admin_bp.route("/library", methods=["GET"])
 @admin_required
@@ -707,10 +725,12 @@ def get_library(admin: User):
     else:
         entries = BlocklistLibrary.get_all()
 
-    return jsonify({
-        "library": [e.to_dict() for e in entries],
-        "categories": sorted(BlocklistLibrary.VALID_CATEGORIES),
-    })
+    return jsonify(
+        {
+            "library": [e.to_dict() for e in entries],
+            "categories": sorted(BlocklistLibrary.VALID_CATEGORIES),
+        }
+    )
 
 
 @admin_bp.route("/library", methods=["POST"])
@@ -737,12 +757,18 @@ def add_library_entry(admin: User):
 
     # Validate category
     if category not in BlocklistLibrary.VALID_CATEGORIES:
-        return jsonify({
-            "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
+                }
+            ),
+            400,
+        )
 
     # Validate URL format
     from app.utils.validators import validate_url
+
     if not validate_url(url):
         return jsonify({"error": "Invalid or unsafe URL"}), 400
 
@@ -766,10 +792,15 @@ def add_library_entry(admin: User):
         f"Admin {admin.username} added library entry: {name} ({category})"
     )
 
-    return jsonify({
-        "success": True,
-        "entry": entry.to_dict(),
-    }), 201
+    return (
+        jsonify(
+            {
+                "success": True,
+                "entry": entry.to_dict(),
+            }
+        ),
+        201,
+    )
 
 
 @admin_bp.route("/library/<entry_id>", methods=["GET"])
@@ -795,13 +826,19 @@ def update_library_entry(admin: User, entry_id: str):
 
     # Validate category if provided
     if "category" in data and data["category"] not in BlocklistLibrary.VALID_CATEGORIES:
-        return jsonify({
-            "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
+                }
+            ),
+            400,
+        )
 
     # Validate URL if provided
     if "url" in data:
         from app.utils.validators import validate_url
+
         if not validate_url(data["url"]):
             return jsonify({"error": "Invalid or unsafe URL"}), 400
         # Check for duplicate URL (excluding current entry)
@@ -819,16 +856,16 @@ def update_library_entry(admin: User, entry_id: str):
         domain_count=data.get("domain_count"),
     )
 
-    current_app.logger.info(
-        f"Admin {admin.username} updated library entry: {entry_id}"
-    )
+    current_app.logger.info(f"Admin {admin.username} updated library entry: {entry_id}")
 
     # Return updated entry
     entry = BlocklistLibrary.get_by_id(entry_id)
-    return jsonify({
-        "success": True,
-        "entry": entry.to_dict(),
-    })
+    return jsonify(
+        {
+            "success": True,
+            "entry": entry.to_dict(),
+        }
+    )
 
 
 @admin_bp.route("/library/<entry_id>", methods=["DELETE"])

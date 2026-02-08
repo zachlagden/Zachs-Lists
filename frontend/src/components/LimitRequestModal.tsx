@@ -56,18 +56,21 @@ export default function LimitRequestModal({
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold text-pihole-text">Request Higher Limit</h2>
-            <button
-              onClick={onClose}
-              className="text-pihole-text-muted hover:text-pihole-text"
-            >
+            <button onClick={onClose} className="text-pihole-text-muted hover:text-pihole-text">
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
 
           <p className="text-pihole-text-muted text-sm mb-6">
-            Your current limit is <strong className="text-pihole-text">{formatDomains(currentLimit)}</strong> domains.
+            Your current limit is{' '}
+            <strong className="text-pihole-text">{formatDomains(currentLimit)}</strong> domains.
             Submit a request to increase your limit.
           </p>
 

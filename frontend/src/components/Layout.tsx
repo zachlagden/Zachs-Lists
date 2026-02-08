@@ -44,9 +44,7 @@ export default function Layout({ children }: LayoutProps) {
             </div>
             <div>
               <h1 className="font-bold text-pihole-text">Zach's Lists</h1>
-              <p className="text-xs text-pihole-text-muted">
-                {SITE_DOMAIN}
-              </p>
+              <p className="text-xs text-pihole-text-muted">{SITE_DOMAIN}</p>
             </div>
           </Link>
         </div>
@@ -66,7 +64,7 @@ export default function Layout({ children }: LayoutProps) {
                       'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors',
                       isActive
                         ? 'bg-pihole-accent text-white'
-                        : 'text-pihole-text-muted hover:text-pihole-text hover:bg-pihole-border'
+                        : 'text-pihole-text-muted hover:text-pihole-text hover:bg-pihole-border',
                     )}
                   >
                     <item.icon className="w-5 h-5" />
@@ -97,7 +95,7 @@ export default function Layout({ children }: LayoutProps) {
                           'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors',
                           isActive
                             ? 'bg-pihole-accent text-white'
-                            : 'text-pihole-text-muted hover:text-pihole-text hover:bg-pihole-border'
+                            : 'text-pihole-text-muted hover:text-pihole-text hover:bg-pihole-border',
                         )}
                       >
                         <item.icon className="w-5 h-5" />
@@ -115,11 +113,7 @@ export default function Layout({ children }: LayoutProps) {
         <div className="p-4 border-t border-pihole-border">
           <div className="flex items-center gap-3 mb-3">
             {user?.avatar_url ? (
-              <img
-                src={user.avatar_url}
-                alt={user.username}
-                className="w-10 h-10 rounded-full"
-              />
+              <img src={user.avatar_url} alt={user.username} className="w-10 h-10 rounded-full" />
             ) : (
               <div className="w-10 h-10 bg-pihole-border rounded-full flex items-center justify-center">
                 <span className="text-pihole-text font-medium">
@@ -128,18 +122,11 @@ export default function Layout({ children }: LayoutProps) {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-pihole-text truncate">
-                {user?.username}
-              </p>
-              <p className="text-xs text-pihole-text-muted truncate">
-                {user?.email}
-              </p>
+              <p className="font-medium text-pihole-text truncate">{user?.username}</p>
+              <p className="text-xs text-pihole-text-muted truncate">{user?.email}</p>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="w-full btn btn-ghost text-sm justify-center"
-          >
+          <button onClick={handleLogout} className="w-full btn btn-ghost text-sm justify-center">
             Sign Out
           </button>
         </div>
@@ -156,12 +143,7 @@ export default function Layout({ children }: LayoutProps) {
 // Icons
 function DashboardIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -174,12 +156,7 @@ function DashboardIcon({ className }: { className?: string }) {
 
 function ConfigIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -198,12 +175,7 @@ function ConfigIcon({ className }: { className?: string }) {
 
 function ListIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -216,12 +188,7 @@ function ListIcon({ className }: { className?: string }) {
 
 function JobsIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -234,12 +201,7 @@ function JobsIcon({ className }: { className?: string }) {
 
 function AdminIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"

@@ -1,6 +1,15 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { EditorState, Extension } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine } from '@codemirror/view';
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  drawSelection,
+  dropCursor,
+  highlightActiveLine,
+} from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
@@ -128,7 +137,7 @@ const darkTheme = EditorView.theme({
 // Custom highlight style with correct tags
 const customHighlightStyle = HighlightStyle.define([
   { tag: tags.comment, color: '#6a737d', fontStyle: 'italic' },
-  { tag: tags.meta, color: '#ffab70' },  // #OPTIONAL / #DISABLED lines
+  { tag: tags.meta, color: '#ffab70' }, // #OPTIONAL / #DISABLED lines
   { tag: tags.url, color: '#79b8ff' },
   { tag: tags.punctuation, color: '#6e7681' },
   { tag: tags.variableName, color: '#ffab70' },

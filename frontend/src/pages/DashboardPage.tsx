@@ -28,7 +28,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
 );
 
 interface UserAnalytics {
@@ -40,7 +40,16 @@ interface UserAnalytics {
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
-  const { lists, stats, limits, setLists, setStats, setLimits, remainingUpdates, setRemainingUpdates } = useUserDataStore();
+  const {
+    lists,
+    stats,
+    limits,
+    setLists,
+    setStats,
+    setLimits,
+    remainingUpdates,
+    setRemainingUpdates,
+  } = useUserDataStore();
   const { jobs, hasUnreadFailures, setJobs, updateJob, setHasUnreadFailures } = useJobsStore();
   const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,14 +64,14 @@ export default function DashboardPage() {
     (job: Job) => {
       setJobs([job, ...jobs.slice(0, 4)]); // Keep only 5 most recent
     },
-    [jobs, setJobs]
+    [jobs, setJobs],
   );
 
   const handleJobProgress = useCallback(
     (job: Job) => {
       updateJob(job);
     },
-    [updateJob]
+    [updateJob],
   );
 
   const handleJobCompleted = useCallback(
@@ -73,13 +82,16 @@ export default function DashboardPage() {
       }
       // Refresh lists data when job completes
       if (job.status === 'completed') {
-        userApi.getLists().then((listsData) => {
-          setLists(listsData.lists || []);
-          setStats(listsData.stats || null);
-        }).catch(() => {});
+        userApi
+          .getLists()
+          .then((listsData) => {
+            setLists(listsData.lists || []);
+            setStats(listsData.stats || null);
+          })
+          .catch(() => {});
       }
     },
-    [updateJob, setHasUnreadFailures, setLists, setStats]
+    [updateJob, setHasUnreadFailures, setLists, setStats],
   );
 
   // Subscribe to real-time updates
@@ -93,13 +105,14 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [listsData, jobsData, analyticsData, limitRequestData, notificationsData] = await Promise.all([
-          userApi.getLists(),
-          userApi.getJobs(5),
-          analyticsApi.getUserStats(30).catch(() => null),
-          userApi.getLimitRequests().catch(() => ({ available_tiers: [], has_pending: false })),
-          userApi.getNotifications().catch(() => ({ notifications: [] })),
-        ]);
+        const [listsData, jobsData, analyticsData, limitRequestData, notificationsData] =
+          await Promise.all([
+            userApi.getLists(),
+            userApi.getJobs(5),
+            analyticsApi.getUserStats(30).catch(() => null),
+            userApi.getLimitRequests().catch(() => ({ available_tiers: [], has_pending: false })),
+            userApi.getNotifications().catch(() => ({ notifications: [] })),
+          ]);
 
         setLists(listsData.lists || []);
         setStats(listsData.stats || null);
@@ -109,7 +122,7 @@ export default function DashboardPage() {
 
         // Check for unread failures
         const hasFailures = (jobsData.jobs || []).some(
-          (job: { status: string; read: boolean }) => job.status === 'failed' && !job.read
+          (job: { status: string; read: boolean }) => job.status === 'failed' && !job.read,
         );
         setHasUnreadFailures(hasFailures);
 
@@ -270,7 +283,9 @@ export default function DashboardPage() {
             <h2 className="text-lg font-semibold text-pihole-text">
               Usage Limits
               {user?.is_admin && (
-                <span className="ml-2 text-xs bg-pihole-accent/20 text-pihole-accent px-2 py-1 rounded">Admin - Unlimited</span>
+                <span className="ml-2 text-xs bg-pihole-accent/20 text-pihole-accent px-2 py-1 rounded">
+                  Admin - Unlimited
+                </span>
               )}
             </h2>
             {!user?.is_admin && availableTiers.length > 0 && !hasPendingRequest && (
@@ -291,7 +306,8 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-pihole-text-muted">Domains</span>
                   <span className="text-pihole-text">
-                    {formatDomains(stats?.total_domains || 0)} / <span className="text-green-400">Unlimited</span>
+                    {formatDomains(stats?.total_domains || 0)} /{' '}
+                    <span className="text-green-400">Unlimited</span>
                   </span>
                 </div>
                 <div className="w-full bg-pihole-border rounded-full h-2">
@@ -304,7 +320,9 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-pihole-text-muted">Source Lists</span>
-                  <span className="text-pihole-text">— / <span className="text-green-400">Unlimited</span></span>
+                  <span className="text-pihole-text">
+                    — / <span className="text-green-400">Unlimited</span>
+                  </span>
                 </div>
                 <div className="w-full bg-pihole-border rounded-full h-2">
                   <div className="bg-green-500 h-2 rounded-full" style={{ width: '0%' }} />
@@ -313,7 +331,9 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-pihole-text-muted">Manual Updates</span>
-                  <span className="text-pihole-text">— / <span className="text-green-400">Unlimited</span></span>
+                  <span className="text-pihole-text">
+                    — / <span className="text-green-400">Unlimited</span>
+                  </span>
                 </div>
                 <div className="w-full bg-pihole-border rounded-full h-2">
                   <div className="bg-green-500 h-2 rounded-full" style={{ width: '0%' }} />
@@ -335,8 +355,8 @@ export default function DashboardPage() {
                       (stats?.total_domains || 0) / limits.max_domains > 0.9
                         ? 'bg-red-500'
                         : (stats?.total_domains || 0) / limits.max_domains > 0.7
-                        ? 'bg-yellow-500'
-                        : 'bg-pihole-accent'
+                          ? 'bg-yellow-500'
+                          : 'bg-pihole-accent'
                     }`}
                     style={{
                       width: `${Math.min(((stats?.total_domains || 0) / limits.max_domains) * 100, 100)}%`,
@@ -357,7 +377,8 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-pihole-text-muted">Manual Updates</span>
                   <span className="text-pihole-text">
-                    {limits.manual_updates_per_week - remainingUpdates} / {limits.manual_updates_per_week}
+                    {limits.manual_updates_per_week - remainingUpdates} /{' '}
+                    {limits.manual_updates_per_week}
                   </span>
                 </div>
                 <div className="w-full bg-pihole-border rounded-full h-2">
@@ -450,15 +471,11 @@ export default function DashboardPage() {
         </Link>
         <Link to="/lists" className="card hover:border-pihole-accent transition-colors">
           <h3 className="font-semibold text-pihole-text mb-2">My Lists</h3>
-          <p className="text-sm text-pihole-text-muted">
-            View and manage your generated lists
-          </p>
+          <p className="text-sm text-pihole-text-muted">View and manage your generated lists</p>
         </Link>
         <Link to="/browse" className="card hover:border-pihole-accent transition-colors">
           <h3 className="font-semibold text-pihole-text mb-2">Browse Lists</h3>
-          <p className="text-sm text-pihole-text-muted">
-            Discover community and featured lists
-          </p>
+          <p className="text-sm text-pihole-text-muted">Discover community and featured lists</p>
         </Link>
       </div>
     </div>

@@ -189,9 +189,7 @@ class CacheMetadata:
     @classmethod
     def get_total_size(cls) -> int:
         """Get total size of all cached content."""
-        pipeline = [
-            {"$group": {"_id": None, "total": {"$sum": "$stats.size_bytes"}}}
-        ]
+        pipeline = [{"$group": {"_id": None, "total": {"$sum": "$stats.size_bytes"}}}]
         result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
         return result[0]["total"] if result else 0
 

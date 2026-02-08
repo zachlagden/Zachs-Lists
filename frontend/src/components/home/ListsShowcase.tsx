@@ -57,7 +57,8 @@ function ListCard({ list, delay = 0, isFeatured = false }: ListCardProps) {
                 {list.name.toUpperCase().replace(/_/g, ' ')}
               </h3>
               <p className="text-chrome mb-4">
-                {list.description || 'Complete aggregated blocklist with all sources combined. The only URL you need.'}
+                {list.description ||
+                  'Complete aggregated blocklist with all sources combined. The only URL you need.'}
               </p>
               <div className="flex flex-wrap items-center gap-4 text-sm">
                 <div className="flex items-center gap-2 text-chrome-light">
@@ -134,9 +135,7 @@ function ListCard({ list, delay = 0, isFeatured = false }: ListCardProps) {
             {list.name}
           </h3>
           {list.description && (
-            <p className="text-sm text-chrome mt-1 line-clamp-2">
-              {list.description}
-            </p>
+            <p className="text-sm text-chrome mt-1 line-clamp-2">{list.description}</p>
           )}
         </div>
         {isRecent && (
@@ -197,8 +196,12 @@ interface ListsShowcaseProps {
 
 export default function ListsShowcase({ lists, loading }: ListsShowcaseProps) {
   // Find the "all_domains" list for featuring
-  const featuredList = lists.find((l) => l.name === 'all_domains' || l.name === 'all_domains_hosts');
-  const otherLists = lists.filter((l) => l.name !== 'all_domains' && l.name !== 'all_domains_hosts');
+  const featuredList = lists.find(
+    (l) => l.name === 'all_domains' || l.name === 'all_domains_hosts',
+  );
+  const otherLists = lists.filter(
+    (l) => l.name !== 'all_domains' && l.name !== 'all_domains_hosts',
+  );
 
   return (
     <section className="py-24 lg:py-32 bg-void relative overflow-hidden">
@@ -231,9 +234,7 @@ export default function ListsShowcase({ lists, loading }: ListsShowcaseProps) {
         ) : (
           <>
             {/* Featured List */}
-            {featuredList && (
-              <ListCard list={featuredList} isFeatured />
-            )}
+            {featuredList && <ListCard list={featuredList} isFeatured />}
 
             {/* Other Lists Grid */}
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">

@@ -37,6 +37,7 @@ def create_job(user: User, job_type: str = Job.TYPE_MANUAL) -> Job:
     # Emit Socket.IO event
     try:
         from app.socketio import emit_job_created
+
         emit_job_created(job.to_dict(), user.id)
     except Exception:
         pass  # Silently fail if Socket.IO not available
@@ -66,6 +67,7 @@ def create_default_job(job_type: str = Job.TYPE_SCHEDULED) -> Job:
     # Emit Socket.IO event
     try:
         from app.socketio import emit_job_created
+
         emit_job_created(job.to_dict(), None)
     except Exception:
         pass  # Silently fail if Socket.IO not available

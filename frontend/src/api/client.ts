@@ -26,7 +26,7 @@ api.interceptors.response.use(
       }
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 // Auth API
@@ -217,7 +217,7 @@ export const adminApi = {
 
   updateUser: async (
     userId: string,
-    data: { is_enabled?: boolean; limits?: Record<string, number> }
+    data: { is_enabled?: boolean; limits?: Record<string, number> },
   ) => {
     const response = await api.put(`/api/admin/users/${userId}`, data);
     return response.data;
@@ -285,11 +285,7 @@ export const adminApi = {
     return response.data;
   },
 
-  addFeaturedList: async (
-    username: string,
-    listName: string,
-    description = ''
-  ) => {
+  addFeaturedList: async (username: string, listName: string, description = '') => {
     const response = await api.post('/api/admin/featured', {
       username,
       list_name: listName,
@@ -387,7 +383,7 @@ export const adminApi = {
       recommended?: boolean;
       aggressiveness?: number;
       domain_count?: number;
-    }
+    },
   ) => {
     const response = await api.put(`/api/admin/library/${entryId}`, data);
     return response.data;

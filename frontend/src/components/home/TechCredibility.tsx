@@ -94,9 +94,13 @@ export default function TechCredibility() {
                   transition={{ delay: index * 0.1 }}
                   className="glass-card p-5 flex items-center gap-4 glass-card-hover"
                 >
-                  <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${
-                    tech.highlight ? 'bg-rust/20 border border-rust/40' : 'bg-steel border border-steel-light'
-                  }`}>
+                  <div
+                    className={`w-14 h-14 rounded-xl flex items-center justify-center ${
+                      tech.highlight
+                        ? 'bg-rust/20 border border-rust/40'
+                        : 'bg-steel border border-steel-light'
+                    }`}
+                  >
                     {tech.isImage ? (
                       <img src={tech.icon as string} alt={tech.name} className="w-8 h-8" />
                     ) : (
@@ -104,7 +108,9 @@ export default function TechCredibility() {
                     )}
                   </div>
                   <div>
-                    <h4 className={`font-semibold ${tech.highlight ? 'text-rust-light' : 'text-chrome-light'}`}>
+                    <h4
+                      className={`font-semibold ${tech.highlight ? 'text-rust-light' : 'text-chrome-light'}`}
+                    >
                       {tech.name}
                     </h4>
                     <p className="text-sm text-chrome">{tech.description}</p>
@@ -172,9 +178,10 @@ export default function TechCredibility() {
                   transition={{ delay: index * 0.05 }}
                   className={`
                     inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm
-                    ${item.verified
-                      ? 'bg-matrix/10 border border-matrix/30 text-matrix'
-                      : 'bg-steel/50 border border-steel-light text-chrome'
+                    ${
+                      item.verified
+                        ? 'bg-matrix/10 border border-matrix/30 text-matrix'
+                        : 'bg-steel/50 border border-steel-light text-chrome'
                     }
                   `}
                 >
@@ -197,14 +204,14 @@ export default function TechCredibility() {
           <div className="glass-card p-8 border-rust/30 text-center">
             <div className="flex items-center justify-center gap-4 mb-4">
               <img src="/assets/rust-logo.png" alt="Rust" className="w-10 h-10" />
-              <h3 className="font-display text-2xl text-rust-light">
-                WHY RUST?
-              </h3>
+              <h3 className="font-display text-2xl text-rust-light">WHY RUST?</h3>
             </div>
             <p className="text-chrome max-w-2xl mx-auto">
-              Our worker processes <span className="text-chrome-light font-semibold">millions of domains</span> with zero-copy parsing and parallel deduplication.
-              Rust's zero-cost abstractions and memory safety mean reliable, fast list generation
-              without the overhead of garbage collection or runtime errors.
+              Our worker processes{' '}
+              <span className="text-chrome-light font-semibold">millions of domains</span> with
+              zero-copy parsing and parallel deduplication. Rust's zero-cost abstractions and memory
+              safety mean reliable, fast list generation without the overhead of garbage collection
+              or runtime errors.
             </p>
             <div className="mt-6 flex items-center justify-center gap-8 text-sm">
               <div className="text-center">

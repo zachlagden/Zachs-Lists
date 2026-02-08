@@ -16,14 +16,16 @@ class BlocklistLibrary:
     COLLECTION = "blocklist_library"
 
     # Valid categories (must match VALID_CATEGORIES in validators.py)
-    VALID_CATEGORIES = frozenset({
-        'comprehensive',
-        'malicious',
-        'advertising',
-        'tracking',
-        'suspicious',
-        'nsfw',
-    })
+    VALID_CATEGORIES = frozenset(
+        {
+            "comprehensive",
+            "malicious",
+            "advertising",
+            "tracking",
+            "suspicious",
+            "nsfw",
+        }
+    )
 
     # Aggressiveness levels (1-5)
     MIN_AGGRESSIVENESS = 1
@@ -115,11 +117,17 @@ class BlocklistLibrary:
         if category:
             query["category"] = category
 
-        entries = cls.get_collection().find(query).sort([
-            ("category", 1),
-            ("recommended", -1),
-            ("name", 1),
-        ])
+        entries = (
+            cls.get_collection()
+            .find(query)
+            .sort(
+                [
+                    ("category", 1),
+                    ("recommended", -1),
+                    ("name", 1),
+                ]
+            )
+        )
         return [cls(data) for data in entries]
 
     @classmethod
@@ -153,7 +161,9 @@ class BlocklistLibrary:
             "category": category,
             "description": description,
             "recommended": recommended,
-            "aggressiveness": max(cls.MIN_AGGRESSIVENESS, min(cls.MAX_AGGRESSIVENESS, aggressiveness)),
+            "aggressiveness": max(
+                cls.MIN_AGGRESSIVENESS, min(cls.MAX_AGGRESSIVENESS, aggressiveness)
+            ),
             "domain_count": domain_count,
             "added_by": added_by,
             "created_at": now,
@@ -188,15 +198,13 @@ class BlocklistLibrary:
             update_data["recommended"] = recommended
         if aggressiveness is not None:
             update_data["aggressiveness"] = max(
-                self.MIN_AGGRESSIVENESS,
-                min(self.MAX_AGGRESSIVENESS, aggressiveness)
+                self.MIN_AGGRESSIVENESS, min(self.MAX_AGGRESSIVENESS, aggressiveness)
             )
         if domain_count is not None:
             update_data["domain_count"] = domain_count
 
         result = self.get_collection().update_one(
-            {"_id": self._id},
-            {"$set": update_data}
+            {"_id": self._id}, {"$set": update_data}
         )
         return result.modified_count > 0
 

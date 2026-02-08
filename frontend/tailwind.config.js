@@ -1,9 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
@@ -71,12 +68,12 @@ export default {
         'display-md': ['clamp(2rem, 5vw, 3rem)', { lineHeight: '1.1', letterSpacing: '0.01em' }],
       },
       animation: {
-        'float': 'float 6s ease-in-out infinite',
+        float: 'float 6s ease-in-out infinite',
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'glow': 'glow 2s ease-in-out infinite',
-        'scan': 'scan 8s linear infinite',
+        glow: 'glow 2s ease-in-out infinite',
+        scan: 'scan 8s linear infinite',
         'threat-float': 'threatFloat 4s linear forwards',
-        'vaporize': 'vaporize 0.5s ease-out forwards',
+        vaporize: 'vaporize 0.5s ease-out forwards',
         'counter-roll': 'counterRoll 0.3s ease-out',
         'shield-pulse': 'shieldPulse 2s ease-in-out infinite',
         'matrix-rain': 'matrixRain 20s linear infinite',
@@ -111,10 +108,12 @@ export default {
         },
         shieldPulse: {
           '0%, 100%': {
-            boxShadow: '0 0 30px rgba(206, 66, 43, 0.3), 0 0 60px rgba(233, 69, 96, 0.2), inset 0 0 30px rgba(206, 66, 43, 0.1)'
+            boxShadow:
+              '0 0 30px rgba(206, 66, 43, 0.3), 0 0 60px rgba(233, 69, 96, 0.2), inset 0 0 30px rgba(206, 66, 43, 0.1)',
           },
           '50%': {
-            boxShadow: '0 0 50px rgba(206, 66, 43, 0.5), 0 0 100px rgba(233, 69, 96, 0.3), inset 0 0 50px rgba(206, 66, 43, 0.2)'
+            boxShadow:
+              '0 0 50px rgba(206, 66, 43, 0.5), 0 0 100px rgba(233, 69, 96, 0.3), inset 0 0 50px rgba(206, 66, 43, 0.2)',
           },
         },
         matrixRain: {
@@ -125,26 +124,27 @@ export default {
       backgroundImage: {
         'gradient-rust': 'linear-gradient(135deg, #e94560 0%, #CE422B 100%)',
         'gradient-void': 'linear-gradient(180deg, #0a0a0f 0%, #06060a 100%)',
-        'gradient-radial-rust': 'radial-gradient(ellipse at center, rgba(206, 66, 43, 0.15) 0%, transparent 70%)',
+        'gradient-radial-rust':
+          'radial-gradient(ellipse at center, rgba(206, 66, 43, 0.15) 0%, transparent 70%)',
         'grid-pattern': `linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
                          linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)`,
         'scan-line': 'linear-gradient(transparent 50%, rgba(0, 0, 0, 0.1) 50%)',
       },
       backgroundSize: {
-        'grid': '60px 60px',
-        'scan': '100% 4px',
+        grid: '60px 60px',
+        scan: '100% 4px',
       },
       backdropBlur: {
-        'xs': '2px',
+        xs: '2px',
       },
       boxShadow: {
         'rust-glow': '0 0 30px rgba(206, 66, 43, 0.4), 0 0 60px rgba(206, 66, 43, 0.2)',
         'pink-glow': '0 0 30px rgba(233, 69, 96, 0.4), 0 0 60px rgba(233, 69, 96, 0.2)',
         'matrix-glow': '0 0 20px rgba(0, 255, 65, 0.4)',
-        'glass': '0 8px 32px rgba(0, 0, 0, 0.3)',
+        glass: '0 8px 32px rgba(0, 0, 0, 0.3)',
         'glass-hover': '0 12px 48px rgba(0, 0, 0, 0.4)',
       },
     },
   },
   plugins: [],
-}
+};

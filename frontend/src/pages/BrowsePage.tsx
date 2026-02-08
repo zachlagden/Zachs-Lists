@@ -35,7 +35,10 @@ export default function BrowsePage() {
       try {
         const [defaultData, featuredData] = await Promise.all([
           listsApi.getDefaultLists().catch(() => []),
-          api.get('/api/browse/featured').then((r) => r.data).catch(() => []),
+          api
+            .get('/api/browse/featured')
+            .then((r) => r.data)
+            .catch(() => []),
         ]);
         setDefaultLists(defaultData);
         setFeaturedLists(featuredData);
@@ -180,10 +183,7 @@ export default function BrowsePage() {
             ) : (
               <div className="grid md:grid-cols-2 gap-6">
                 {featuredLists.map((list) => (
-                  <div
-                    key={list.id}
-                    className="glass-card p-6 border-rust/30"
-                  >
+                  <div key={list.id} className="glass-card p-6 border-rust/30">
                     <div className="flex items-start justify-between mb-4">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
@@ -205,7 +205,9 @@ export default function BrowsePage() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => copyToClipboard(getUserListUrl(list.username, list.list_name))}
+                        onClick={() =>
+                          copyToClipboard(getUserListUrl(list.username, list.list_name))
+                        }
                         className="btn btn-primary flex-1 text-sm"
                       >
                         {copiedUrl === getUserListUrl(list.username, list.list_name) ? (
@@ -241,21 +243,27 @@ export default function BrowsePage() {
           <h2 className="font-display text-xl text-chrome-light mb-6">HOW TO USE THESE LISTS</h2>
           <div className="grid md:grid-cols-3 gap-6 text-sm">
             <div>
-              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">1</div>
+              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">
+                1
+              </div>
               <h3 className="font-medium text-chrome-light mb-2">Copy the URL</h3>
               <p className="text-chrome">
                 Click "Copy URL" on any list to copy its address to your clipboard.
               </p>
             </div>
             <div>
-              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">2</div>
+              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">
+                2
+              </div>
               <h3 className="font-medium text-chrome-light mb-2">Add to Pi-hole</h3>
               <p className="text-chrome">
                 In Pi-hole, go to Group Management &rarr; Adlists and paste the URL.
               </p>
             </div>
             <div>
-              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">3</div>
+              <div className="w-8 h-8 rounded-lg bg-rust/20 text-rust flex items-center justify-center font-display text-lg mb-3">
+                3
+              </div>
               <h3 className="font-medium text-chrome-light mb-2">Update Gravity</h3>
               <p className="text-chrome">
                 Run "Update Gravity" in Pi-hole to fetch and activate the list.

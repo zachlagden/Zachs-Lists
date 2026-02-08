@@ -65,9 +65,7 @@ class HTTPClient:
             Tuple of (content, new_etag, new_last_modified, was_modified)
             If not modified, content will be None and was_modified will be False
         """
-        headers = {
-            "User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"
-        }
+        headers = {"User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"}
 
         # Add conditional headers if available
         if etag:
@@ -76,9 +74,7 @@ class HTTPClient:
             headers["If-Modified-Since"] = last_modified
 
         try:
-            response = self.session.get(
-                url, headers=headers, timeout=self.timeout
-            )
+            response = self.session.get(url, headers=headers, timeout=self.timeout)
 
             # 304 Not Modified
             if response.status_code == 304:
@@ -91,9 +87,7 @@ class HTTPClient:
             new_etag = response.headers.get("ETag")
             new_last_modified = response.headers.get("Last-Modified")
 
-            logger.debug(
-                f"Downloaded {url}: {len(response.content)} bytes"
-            )
+            logger.debug(f"Downloaded {url}: {len(response.content)} bytes")
 
             return response.content, new_etag, new_last_modified, True
 
@@ -125,9 +119,7 @@ class HTTPClient:
             Tuple of (content, new_etag, new_last_modified, was_modified)
             If not modified, content will be None and was_modified will be False
         """
-        headers = {
-            "User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"
-        }
+        headers = {"User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"}
 
         # Add conditional headers if available
         if etag:
@@ -192,14 +184,10 @@ class HTTPClient:
         Returns:
             Dictionary of response headers
         """
-        headers = {
-            "User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"
-        }
+        headers = {"User-Agent": "Pi-hole Blocklist Service/1.0 (lists.zachlagden.uk)"}
 
         try:
-            response = self.session.head(
-                url, headers=headers, timeout=self.timeout
-            )
+            response = self.session.head(url, headers=headers, timeout=self.timeout)
             response.raise_for_status()
             return dict(response.headers)
         except requests.exceptions.RequestException as e:

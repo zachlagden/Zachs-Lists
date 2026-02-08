@@ -6,7 +6,10 @@ interface GenerationStageProps {
   formats: Record<string, FormatProgress>;
 }
 
-const formatConfig: Record<string, { label: string; description: string; color: 'blue' | 'green' | 'yellow' }> = {
+const formatConfig: Record<
+  string,
+  { label: string; description: string; color: 'blue' | 'green' | 'yellow' }
+> = {
   hosts: {
     label: 'Hosts',
     description: '0.0.0.0 domain.com',
@@ -93,8 +96,8 @@ export default function GenerationStage({ generation, formats }: GenerationStage
                 isActive
                   ? 'border-pihole-accent/50'
                   : isComplete
-                  ? 'border-green-500/30'
-                  : 'border-pihole-border/50'
+                    ? 'border-green-500/30'
+                    : 'border-pihole-border/50'
               }`}
             >
               <div className="flex items-center justify-between mb-2">
@@ -109,8 +112,18 @@ export default function GenerationStage({ generation, formats }: GenerationStage
                     <div className="w-4 h-4 border-2 border-pihole-accent border-t-transparent rounded-full animate-spin" />
                   )}
                   {isComplete && (
-                    <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-5 h-5 text-green-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   )}
                   <span
@@ -118,8 +131,8 @@ export default function GenerationStage({ generation, formats }: GenerationStage
                       isComplete
                         ? 'text-green-400'
                         : isActive
-                        ? 'text-pihole-accent'
-                        : 'text-pihole-text-muted'
+                          ? 'text-pihole-accent'
+                          : 'text-pihole-text-muted'
                     }`}
                   >
                     {statusLabels[format.status] || format.status}
@@ -138,7 +151,8 @@ export default function GenerationStage({ generation, formats }: GenerationStage
                   />
                   <div className="flex justify-between text-xs text-pihole-text-muted mt-1">
                     <span>
-                      {format.domains_written.toLocaleString()} / {format.total_domains.toLocaleString()} domains
+                      {format.domains_written.toLocaleString()} /{' '}
+                      {format.total_domains.toLocaleString()} domains
                     </span>
                     <span>{Math.round(format.percent)}%</span>
                   </div>
@@ -150,12 +164,14 @@ export default function GenerationStage({ generation, formats }: GenerationStage
                 <div className="flex gap-4 text-xs text-pihole-text-muted">
                   {format.file_size && (
                     <span>
-                      Size: <span className="text-pihole-text">{formatBytes(format.file_size)}</span>
+                      Size:{' '}
+                      <span className="text-pihole-text">{formatBytes(format.file_size)}</span>
                     </span>
                   )}
                   {format.gz_size && (
                     <span>
-                      Gzipped: <span className="text-pihole-text">{formatBytes(format.gz_size)}</span>
+                      Gzipped:{' '}
+                      <span className="text-pihole-text">{formatBytes(format.gz_size)}</span>
                     </span>
                   )}
                 </div>

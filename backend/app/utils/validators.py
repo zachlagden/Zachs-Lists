@@ -20,18 +20,21 @@ MAX_DOMAIN_LENGTH = 253
 MAX_SOURCE_SIZE_BYTES = 100 * 1024 * 1024  # 100MB max per source
 
 # Valid categories for blocklist configuration
-VALID_CATEGORIES = frozenset({
-    'comprehensive',
-    'malicious',
-    'advertising',
-    'tracking',
-    'suspicious',
-    'nsfw',
-})
+VALID_CATEGORIES = frozenset(
+    {
+        "comprehensive",
+        "malicious",
+        "advertising",
+        "tracking",
+        "suspicious",
+        "nsfw",
+    }
+)
 
 
 class ValidationSeverity(Enum):
     """Severity levels for validation results."""
+
     ERROR = "error"
     WARNING = "warning"
 
@@ -39,6 +42,7 @@ class ValidationSeverity(Enum):
 @dataclass
 class ValidationIssue:
     """A single validation issue (error or warning)."""
+
     severity: ValidationSeverity
     message: str
     line: Optional[int] = None
@@ -48,6 +52,7 @@ class ValidationIssue:
 @dataclass
 class ValidationResult:
     """Result of config validation."""
+
     issues: List[ValidationIssue] = field(default_factory=list)
     validated_count: int = 0
 
@@ -70,11 +75,22 @@ class ValidationResult:
     def to_dict(self) -> dict:
         return {
             "issues": [
-                {"severity": i.severity.value, "message": i.message, "line": i.line, "url": i.url}
+                {
+                    "severity": i.severity.value,
+                    "message": i.message,
+                    "line": i.line,
+                    "url": i.url,
+                }
                 for i in self.issues
             ],
-            "errors": [{"message": i.message, "line": i.line, "url": i.url} for i in self.errors],
-            "warnings": [{"message": i.message, "line": i.line, "url": i.url} for i in self.warnings],
+            "errors": [
+                {"message": i.message, "line": i.line, "url": i.url}
+                for i in self.errors
+            ],
+            "warnings": [
+                {"message": i.message, "line": i.line, "url": i.url}
+                for i in self.warnings
+            ],
             "validated_count": self.validated_count,
             "error_count": len(self.errors),
             "warning_count": len(self.warnings),
@@ -86,11 +102,13 @@ class ValidationResult:
 @dataclass
 class ParsedConfigLine:
     """A parsed line from the blocklist config."""
+
     line_num: int
     url: str
     name: str
     category: str
     raw: str
+
 
 # Pre-compiled regex patterns (from pihole_downloader.py)
 DOMAIN_PATTERN = re.compile(
@@ -382,13 +400,15 @@ def parse_config_lines(config: str) -> List[ParsedConfigLine]:
             continue
 
         url, name, category = [p.strip() for p in parts]
-        lines.append(ParsedConfigLine(
-            line_num=line_num,
-            url=url,
-            name=name,
-            category=category,
-            raw=raw,
-        ))
+        lines.append(
+            ParsedConfigLine(
+                line_num=line_num,
+                url=url,
+                name=name,
+                category=category,
+                raw=raw,
+            )
+        )
 
     return lines
 
@@ -423,53 +443,63 @@ def validate_config_urls(
 
     # Check source count first
     if len(parsed_lines) > max_sources:
-        result.issues.append(ValidationIssue(
-            severity=ValidationSeverity.ERROR,
-            message=f"Too many sources ({len(parsed_lines)}). Maximum allowed: {max_sources}",
-        ))
+        result.issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.ERROR,
+                message=f"Too many sources ({len(parsed_lines)}). Maximum allowed: {max_sources}",
+            )
+        )
 
     # First pass: validate format (synchronous)
     lines_to_validate = []
     for line in parsed_lines:
         # Validate URL format
         if not validate_url(line.url):
-            result.issues.append(ValidationIssue(
-                severity=ValidationSeverity.ERROR,
-                message=f"Invalid or unsafe URL",
-                line=line.line_num,
-                url=line.url,
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Invalid or unsafe URL",
+                    line=line.line_num,
+                    url=line.url,
+                )
+            )
             continue
 
         # Validate name
         if not re.match(r"^[\w\-]+$", line.name):
-            result.issues.append(ValidationIssue(
-                severity=ValidationSeverity.ERROR,
-                message=f"Invalid name '{line.name}'. Use alphanumeric, dashes, underscores only.",
-                line=line.line_num,
-                url=line.url,
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Invalid name '{line.name}'. Use alphanumeric, dashes, underscores only.",
+                    line=line.line_num,
+                    url=line.url,
+                )
+            )
             continue
 
         # Check for duplicate names
         if line.name.lower() in seen_names:
-            result.issues.append(ValidationIssue(
-                severity=ValidationSeverity.ERROR,
-                message=f"Duplicate name '{line.name}'",
-                line=line.line_num,
-                url=line.url,
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Duplicate name '{line.name}'",
+                    line=line.line_num,
+                    url=line.url,
+                )
+            )
             continue
         seen_names.add(line.name.lower())
 
         # Validate category (strict enforcement)
         if line.category not in VALID_CATEGORIES:
-            result.issues.append(ValidationIssue(
-                severity=ValidationSeverity.ERROR,
-                message=f"Invalid category '{line.category}'. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}",
-                line=line.line_num,
-                url=line.url,
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Invalid category '{line.category}'. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}",
+                    line=line.line_num,
+                    url=line.url,
+                )
+            )
             continue
 
         lines_to_validate.append(line)
@@ -482,12 +512,14 @@ def validate_config_urls(
         """Validate a single URL with HEAD request."""
         if emit_progress:
             validated_count[0] += 1
-            emit_progress({
-                "current": validated_count[0],
-                "total": total,
-                "url": line.url,
-                "status": "validating",
-            })
+            emit_progress(
+                {
+                    "current": validated_count[0],
+                    "total": total,
+                    "url": line.url,
+                    "status": "validating",
+                }
+            )
 
         try:
             resp = requests.head(
@@ -523,7 +555,11 @@ def validate_config_urls(
 
             # Check content-type (warning only, not blocking)
             content_type = resp.headers.get("content-type", "").lower()
-            if content_type and "text" not in content_type and "octet-stream" not in content_type:
+            if (
+                content_type
+                and "text" not in content_type
+                and "octet-stream" not in content_type
+            ):
                 return ValidationIssue(
                     severity=ValidationSeverity.WARNING,
                     message=f"Unexpected content-type: {content_type}",
@@ -534,7 +570,11 @@ def validate_config_urls(
             return None  # No issue
 
         except requests.exceptions.HTTPError as e:
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 405:
+            if (
+                hasattr(e, "response")
+                and e.response is not None
+                and e.response.status_code == 405
+            ):
                 return ValidationIssue(
                     severity=ValidationSeverity.WARNING,
                     message="HEAD request not supported by server",
@@ -581,12 +621,14 @@ def validate_config_urls(
     result.validated_count = len(lines_to_validate)
 
     if emit_progress:
-        emit_progress({
-            "current": total,
-            "total": total,
-            "url": "",
-            "status": "complete",
-        })
+        emit_progress(
+            {
+                "current": total,
+                "total": total,
+                "url": "",
+                "status": "complete",
+            }
+        )
 
     return result
 

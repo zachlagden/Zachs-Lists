@@ -156,13 +156,7 @@ class Analytics:
                     "username": username,
                     "date": today,
                 },
-                [
-                    {
-                        "$set": {
-                            "unique_ips": {"$size": {"$ifNull": ["$ip_hashes", []]}}
-                        }
-                    }
-                ],
+                [{"$set": {"unique_ips": {"$size": {"$ifNull": ["$ip_hashes", []]}}}}],
             )
 
         # Track referrers (update top 10)
