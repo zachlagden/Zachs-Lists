@@ -1,0 +1,28 @@
+services:
+  zachs-lists:
+    build:
+      context: .
+      args:
+        - VITE_SITE_URL=${VITE_SITE_URL}
+    container_name: zachs-lists-web
+    restart: unless-stopped
+    ports:
+      - "8080:5000"
+    # This automatically imports every variable from your .env file
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:4.4
+    container_name: zachs-lists-db
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+
+volumes:
+  mongo_data:
