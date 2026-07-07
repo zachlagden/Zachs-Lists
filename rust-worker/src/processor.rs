@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
-use crate::db::job::{Job, JobRepository};
+use crate::db::job::{Job, JobRepository, JobType};
 use crate::db::progress::{
     JobProgress, JobResult, JobStage, OutputFile, SourceProgress,
     SourceStatus, StageSnapshot,
@@ -258,7 +258,7 @@ impl JobProcessor {
 
         // Check for "no changes" optimization
         // Skip if: config hash unchanged AND all sources would be cache hits
-        if !job.force_rebuild {
+        if job.job_type != JobType::Scheduled && !job.force_rebuild {
             if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
                 if stored_hash == current_config_hash {
                     // Config unchanged, check if all sources are cached
@@ -281,7 +281,7 @@ impl JobProcessor {
         }
 
         // Check for matching config fingerprint in other users (copy-on-match optimization)
-        if !job.force_rebuild {
+        if job.job_type != JobType::Scheduled && !job.force_rebuild {
         if let Ok(Some(matched)) = self
             .user_repo
             .find_user_by_fingerprint(&config_fingerprint, &job.username)
