@@ -4,10 +4,20 @@ Authentication blueprint - GitHub OAuth.
 
 import secrets
 from functools import wraps
-from flask import Blueprint, redirect, request, session, jsonify, current_app, url_for
+from flask import (
+    Blueprint,
+    Response,
+    redirect,
+    request,
+    session,
+    jsonify,
+    current_app,
+    url_for,
+)
 import requests
 
 from app.models.user import User
+from app.utils.client_ip import get_client_ip
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -186,13 +196,9 @@ def logout():
 
 @auth_bp.route("/me")
 @login_required
-def get_current_user(user):
-    """Get current authenticated user info."""
-    # Log IP access for security tracking
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if ip:
-        # Take first IP if multiple (X-Forwarded-For can be comma-separated)
-        ip = ip.split(",")[0].strip()
+def get_current_user(user: User) -> Response:
+    ip = get_client_ip()
+    if ip != "unknown":
         user.log_ip_access(ip)
 
     return jsonify(user.to_dict())

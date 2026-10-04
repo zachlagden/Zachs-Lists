@@ -58,6 +58,11 @@ class Config:
     # Rate limiting
     RATELIMIT_DEFAULT = "100/hour"
     RATELIMIT_STORAGE_URL = os.environ.get("REDIS_URL", "memory://")
+    TRUSTED_PROXY_HOSTS = tuple(
+        host.strip()
+        for host in os.environ.get("TRUSTED_PROXY_HOSTS", "").split(",")
+        if host.strip()
+    )
 
     # Analytics
     GEOIP_DATABASE_PATH = os.environ.get("GEOIP_DATABASE_PATH", "")

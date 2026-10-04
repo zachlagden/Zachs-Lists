@@ -7,10 +7,11 @@ import gzip
 import hashlib
 from io import BytesIO
 from datetime import datetime
-from flask import Blueprint, send_file, request, abort, jsonify, current_app
+from flask import Blueprint, Response, send_file, request, abort, jsonify, current_app
 
 from app.models.user import User
 from app.models.analytics import Analytics
+from app.utils.client_ip import get_client_ip
 
 # Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
 lists_public_bp = Blueprint(
@@ -19,20 +20,6 @@ lists_public_bp = Blueprint(
 lists_api_bp = Blueprint(
     "lists_api", __name__
 )  # Handles /api/lists and /api/browse metadata
-
-
-def get_client_ip() -> str:
-    """Get client IP address, prioritizing Cloudflare headers."""
-    # Cloudflare's connecting IP (most reliable when behind CF)
-    if request.headers.get("CF-Connecting-IP"):
-        return request.headers.get("CF-Connecting-IP")
-    # Fallback to X-Forwarded-For
-    if request.headers.get("X-Forwarded-For"):
-        return request.headers.get("X-Forwarded-For").split(",")[0].strip()
-    # Fallback to X-Real-IP (nginx)
-    if request.headers.get("X-Real-IP"):
-        return request.headers.get("X-Real-IP")
-    return request.remote_addr or "unknown"
 
 
 def hash_ip(ip: str) -> str:
@@ -61,7 +48,7 @@ def get_geo_data(ip: str) -> tuple:
 def record_analytics(
     list_type: str,
     list_name: str,
-    username: str,
+    username: str | None,
     format_type: str,
     file_size: int,
 ) -> None:
@@ -87,7 +74,7 @@ def record_analytics(
         current_app.logger.error(f"Failed to record analytics: {e}")
 
 
-def serve_list_file(output_path: str) -> object:
+def serve_list_file(output_path: str) -> Response:
     """
     Serve a list file with gzip support.
 
