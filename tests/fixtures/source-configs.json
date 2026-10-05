@@ -1,0 +1,21 @@
+[
+  { "config": "https://example.com/one", "valid": true, "sources": 1 },
+  { "config": "https://example.com/one|First", "valid": true, "sources": 1 },
+  { "config": "https://example.com/one|First|advertising", "valid": true, "sources": 1 },
+  {
+    "config": "# Example comment\nhttps://example.com/one\nhttps://example.com/two",
+    "valid": true,
+    "sources": 2
+  },
+  { "config": "https://example.com/one||advertising", "valid": false },
+  { "config": "https://example.com/one|First|", "valid": false },
+  { "config": "https://example.com/one|First|unknown", "valid": false },
+  { "config": "https://example.com/one|First|tracking|extra", "valid": false },
+  { "config": "https://example.com/one|First name|tracking", "valid": false },
+  { "config": "https://example.com/one|First\nhttps://example.com/two|first", "valid": false },
+  { "config": "http://127.0.0.1/private", "valid": false },
+  { "config": "http://[::1]/private", "valid": false },
+  { "config": "http://mongo:27017/private", "valid": false },
+  { "config": "http://user:password@example.com/private", "valid": false },
+  { "config": "https://example.com/one#fragment", "valid": false }
+]

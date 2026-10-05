@@ -4,6 +4,7 @@ User blueprint - config, whitelist, lists, jobs, build.
 
 import os
 import hashlib
+import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
 import gevent
@@ -22,6 +23,7 @@ from app.utils.validators import (
 from app.socketio import emit_validation_progress, emit_validation_complete
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.cache import CacheMetadata
+from app.utils.config_revision import ConfigRevisionConflict
 
 user_bp = Blueprint("user", __name__)
 
@@ -36,7 +38,7 @@ def _generate_config_hash(config: str) -> str:
 def get_config(user: User):
     """Get user's blocklist configuration."""
     config = user.get_config("blocklists.conf")
-    return jsonify({"config": config or ""})
+    return jsonify({"config": config or "", "revision": user.config_revision})
 
 
 @user_bp.route("/config", methods=["PUT"])
@@ -55,12 +57,16 @@ def update_config(user: User):
     validation_token = data.get("validation_token")
 
     # Require validation token
-    if not validation_token:
+    if not isinstance(validation_token, str) or not 1 <= len(validation_token) <= 128:
         return jsonify({"error": "Validation required before saving"}), 400
 
     # Look up the validation token
     token_doc = mongo.db.validation_tokens.find_one(
-        {"user_id": ObjectId(user.id), "expires_at": {"$gt": datetime.utcnow()}}
+        {
+            "_id": validation_token,
+            "user_id": ObjectId(user.id),
+            "expires_at": {"$gt": datetime.utcnow()},
+        }
     )
 
     if not token_doc:
@@ -92,11 +98,34 @@ def update_config(user: User):
             400,
         )
 
-    # Save config
-    user.save_config("blocklists.conf", config)
-
-    # Delete the used validation token (one-time use)
-    mongo.db.validation_tokens.delete_one({"user_id": ObjectId(user.id)})
+    consumed = mongo.db.validation_tokens.find_one_and_delete(
+        {
+            "_id": validation_token,
+            "user_id": ObjectId(user.id),
+            "config_hash": config_hash,
+            "has_errors": False,
+            "expires_at": {"$gt": datetime.utcnow()},
+        }
+    )
+    if not consumed:
+        return (
+            jsonify({"error": "Validation expired or already used; re-validate"}),
+            400,
+        )
+    try:
+        user.save_config(
+            "blocklists.conf", config, expected_revision=consumed["revision"]
+        )
+    except ConfigRevisionConflict:
+        return (
+            jsonify(
+                {
+                    "error": "Configuration changed; reload and re-validate",
+                    "code": "config_conflict",
+                }
+            ),
+            409,
+        )
 
     current_app.logger.info(
         f"User {user.username} updated blocklist config (validated)"
@@ -136,8 +165,10 @@ def validate_config(user: User):
         )
 
     # Progress callback that emits Socket.IO events
+    validation_id = secrets.token_urlsafe(32)
+
     def emit_progress(progress):
-        emit_validation_progress(user.id, progress)
+        emit_validation_progress(user.id, {**progress, "validation_id": validation_id})
 
     # Run validation with HEAD requests
     result = validate_config_urls(
@@ -152,24 +183,27 @@ def validate_config(user: User):
     now = datetime.utcnow()
 
     token_doc = {
+        "_id": validation_id,
         "user_id": ObjectId(user.id),
+        "revision": user.config_revision,
         "config_hash": config_hash,
         "has_errors": result.has_errors,
         "created_at": now,
         "expires_at": now + timedelta(minutes=10),
     }
 
-    # Upsert - one token per user (replace any existing)
-    mongo.db.validation_tokens.update_one(
-        {"user_id": ObjectId(user.id)}, {"$set": token_doc}, upsert=True
-    )
+    if not result.has_errors:
+        mongo.db.validation_tokens.insert_one(token_doc)
 
     # Build response with validation token
     response_data = result.to_dict()
-    response_data["validation_token"] = config_hash  # Use hash as token for simplicity
+    response_data["validation_token"] = validation_id if not result.has_errors else None
+    response_data["validation_id"] = validation_id
 
     # Emit completion event (without token for socket listeners)
-    emit_validation_complete(user.id, result.to_dict())
+    emit_validation_complete(
+        user.id, {**result.to_dict(), "validation_id": validation_id}
+    )
 
     return jsonify(response_data)
 
@@ -276,8 +310,10 @@ def update_whitelist(user: User):
 @login_required
 def get_lists(user: User):
     """Get user's output lists with stats."""
-    # Get fresh user data
-    user = User.get_by_id(user.id)
+    refreshed = User.get_by_id(user.id)
+    if refreshed is None:
+        return jsonify({"error": "Account no longer exists"}), 401
+    user = refreshed
 
     return jsonify(
         {
@@ -587,8 +623,10 @@ def get_limit_requests(user: User):
 @login_required
 def get_notifications(user: User):
     """Get user's notifications."""
-    # Refresh user data
-    user = User.get_by_id(user.id)
+    refreshed = User.get_by_id(user.id)
+    if refreshed is None:
+        return jsonify({"error": "Account no longer exists"}), 401
+    user = refreshed
 
     # Get unread count
     unread_count = len(user.get_unread_notifications())

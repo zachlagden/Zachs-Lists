@@ -1,0 +1,2 @@
+class ConfigRevisionConflict(ValueError):
+    pass

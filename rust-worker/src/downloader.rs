@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
 use mongodb::Database;
-use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -9,6 +8,7 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::db::cache::CacheRepository;
 use crate::db::progress::{SourceProgress, SourceStatus};
+use crate::safe_http::{get_source, parse_source_url};
 
 /// Maximum allowed size for a single source file (100MB)
 const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
@@ -39,7 +39,6 @@ pub struct DownloadResult {
 
 /// Downloader for fetching blocklist sources
 pub struct Downloader {
-    client: Client,
     config: Config,
     cache_repo: CacheRepository,
 }
@@ -47,15 +46,9 @@ pub struct Downloader {
 impl Downloader {
     /// Create a new downloader
     pub fn new(config: Config, db: &Database) -> Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.http_timeout_secs))
-            .gzip(true)
-            .user_agent("BlocklistWorker/1.0 (lists.zachlagden.uk)")
-            .build()?;
-
         let cache_repo = CacheRepository::new(db);
 
-        Ok(Self { client, config, cache_repo })
+        Ok(Self { config, cache_repo })
     }
 
     /// Hash a URL to get cache key
@@ -100,7 +93,7 @@ impl Downloader {
         }
 
         // Download fresh
-        debug!("Downloading {} from {}", source.name, source.url);
+        debug!("Downloading source {}", source.name);
 
         let result = self.fetch_and_cache(source, &url_hash).await;
 
@@ -142,17 +135,12 @@ impl Downloader {
         let mut warnings = Vec::new();
 
         // Make request
-        let response = self
-            .client
-            .get(&source.url)
-            .send()
-            .await
-            .with_context(|| format!("Failed to fetch {}", source.url))?;
+        let response = get_source(&source.url, Duration::from_secs(self.config.http_timeout_secs)).await?;
 
         // Check status
         let status = response.status();
         if !status.is_success() {
-            anyhow::bail!("HTTP {} for {}", status, source.url);
+            anyhow::bail!("Source returned HTTP {}", status);
         }
 
         // Get headers for metadata
@@ -297,9 +285,13 @@ impl Downloader {
     /// Parse sources from config file content
     /// Format: url|name|category or url|name or just url
     /// Deduplicates by URL (first occurrence wins)
-    pub fn parse_config(content: &str) -> Vec<Source> {
+    pub fn parse_config(content: &str) -> Result<Vec<Source>> {
         let mut sources = Vec::new();
         let mut seen_urls = std::collections::HashSet::new();
+        let mut seen_names = std::collections::HashSet::new();
+        if content.lines().filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#')).count() > 1000 {
+            anyhow::bail!("Source configuration exceeds the safety limit");
+        }
 
         for line in content.lines() {
             let line = line.trim();
@@ -314,25 +306,18 @@ impl Downloader {
 
             let url = parts[0].trim();
 
-            // Validate URL first
-            if url::Url::parse(url).is_err() {
-                continue;
+            let parsed = parse_source_url(url)?;
+            if parts.len() > 3 || parts.iter().any(|part| part.trim().is_empty()) {
+                anyhow::bail!("Invalid source configuration fields");
             }
-
-            // Skip duplicate URLs
-            if seen_urls.contains(url) {
-                continue;
-            }
-            seen_urls.insert(url.to_string());
 
             let name = if parts.len() > 1 {
                 parts[1].trim().to_string()
             } else {
                 // Use URL domain as name
-                url::Url::parse(url)
-                    .ok()
-                    .and_then(|u| u.host_str().map(String::from))
-                    .unwrap_or_else(|| "Unknown".to_string())
+                parsed.host_str().unwrap_or("source").chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                    .collect()
             };
 
             let category = if parts.len() > 2 {
@@ -341,14 +326,23 @@ impl Downloader {
                 None
             };
 
-            sources.push(Source {
-                name,
-                url: url.to_string(),
-                category,
-            });
+            if name.len() > 100 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                anyhow::bail!("Invalid source name");
+            }
+            if parts.len() > 1 && !seen_names.insert(name.to_lowercase()) {
+                anyhow::bail!("Duplicate source name");
+            }
+            if let Some(value) = &category {
+                if !matches!(value.as_str(), "comprehensive" | "malicious" | "advertising" | "tracking" | "suspicious" | "nsfw") {
+                    anyhow::bail!("Invalid source category");
+                }
+            }
+            if seen_urls.insert(url.to_string()) {
+                sources.push(Source { name, url: url.to_string(), category });
+            }
         }
 
-        sources
+        Ok(sources)
     }
 
     /// Update domain count in cache after extraction

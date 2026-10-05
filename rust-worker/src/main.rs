@@ -4,6 +4,9 @@ mod downloader;
 mod extractor;
 mod generator;
 mod processor;
+mod safe_http;
+#[cfg(test)]
+mod source_contract_tests;
 mod whitelist;
 mod worker;
 
@@ -105,7 +108,7 @@ async fn ping_database(config: &Config) -> Result<Database> {
 }
 
 async fn connect_with_retry(config: &Config) -> Result<Database> {
-    info!("Connecting to MongoDB at {}", config.mongo_uri);
+    info!("Connecting to MongoDB");
 
     let deadline = Instant::now() + Duration::from_secs(config.mongo_connect_timeout_secs);
     let max_backoff = Duration::from_secs(15);
@@ -117,11 +120,8 @@ async fn connect_with_retry(config: &Config) -> Result<Database> {
                 info!("Connected to MongoDB database: {}", config.database_name);
                 return Ok(db);
             }
-            Err(e) if Instant::now() + backoff < deadline => {
-                warn!(
-                    "MongoDB not reachable yet ({}), retrying in {:?}",
-                    e, backoff
-                );
+            Err(_) if Instant::now() + backoff < deadline => {
+                warn!("MongoDB not reachable yet, retrying in {:?}", backoff);
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
             }

@@ -1,0 +1,5 @@
+-r requirements.txt
+mongomock==4.3.0
+mypy==2.4.0
+types-requests==2.33.0.20260906
+types-Flask-Cors==6.0.3.20260712

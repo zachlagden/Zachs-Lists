@@ -9,6 +9,7 @@ from bson import ObjectId
 from flask import current_app
 
 from app.extensions import mongo
+from app.utils.config_revision import ConfigRevisionConflict
 
 
 class User:
@@ -23,15 +24,23 @@ class User:
     @property
     def id(self) -> str:
         """Get user ID as string."""
-        return str(self._id) if self._id else None
+        if self._id is None:
+            raise ValueError("User identifier is missing")
+        return str(self._id)
 
     @property
     def github_id(self) -> int:
-        return self._data.get("github_id")
+        value = self._data.get("github_id")
+        if not isinstance(value, int):
+            raise ValueError("GitHub identifier is missing")
+        return value
 
     @property
     def username(self) -> str:
-        return self._data.get("username")
+        value = self._data.get("username")
+        if not isinstance(value, str) or not value:
+            raise ValueError("Username is missing")
+        return value
 
     @property
     def email(self) -> Optional[str]:
@@ -182,26 +191,48 @@ class User:
         """Get user config object from MongoDB."""
         return self._data.get("config", {})
 
-    def save_config(self, filename: str, content: str) -> None:
+    @property
+    def config_revision(self) -> int:
+        return self._data.get("config", {}).get("revision", 0)
+
+    def save_config(
+        self, filename: str, content: str, expected_revision: int | None = None
+    ) -> None:
         """Save config to MongoDB."""
         field = self._CONFIG_FIELD_MAP.get(filename)
         if not field:
             raise ValueError(f"Unknown config file: {filename}")
 
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
+        query: Dict[str, Any] = {"_id": self._id}
+        if expected_revision == 0:
+            query["$or"] = [
+                {"config.revision": 0},
+                {"config.revision": {"$exists": False}},
+            ]
+        elif expected_revision is not None:
+            query["config.revision"] = expected_revision
+        result = mongo.db[self.COLLECTION].update_one(
+            query,
             {
                 "$set": {
                     f"config.{field}": content,
                     "config.version": self.CONFIG_SCHEMA_VERSION,
                     "updated_at": datetime.utcnow(),
-                }
+                },
+                "$inc": {"config.revision": 1},
             },
         )
+        if result.matched_count != 1:
+            raise ConfigRevisionConflict(
+                "Configuration changed; validate the current version"
+            )
         # Update local cache
         if "config" not in self._data:
             self._data["config"] = {}
         self._data["config"][field] = content
+        self._data["config"]["revision"] = (
+            expected_revision if expected_revision is not None else self.config_revision
+        ) + 1
 
         # Ensure output directory still exists for generated files
         os.makedirs(self.get_output_dir(), mode=0o755, exist_ok=True)
@@ -235,7 +266,7 @@ class User:
         self, total_domains: int = None, total_output_size_bytes: int = None
     ) -> None:
         """Update user statistics."""
-        update = {"updated_at": datetime.utcnow()}
+        update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if total_domains is not None:
             update["stats.total_domains"] = total_domains
         if total_output_size_bytes is not None:
@@ -572,7 +603,10 @@ class User:
                     }
                 },
             )
-            return cls.get_by_github_id(github_id)
+            updated = cls.get_by_github_id(github_id)
+            if updated is None:
+                raise RuntimeError("Account disappeared while updating login")
+            return updated
 
         # Create new user
         user_data = {
@@ -627,7 +661,7 @@ class User:
         exclude_user_id: ObjectId = None,
     ) -> Tuple[List["User"], int]:
         """Get users with filtering, sorting, and pagination."""
-        conditions = []
+        conditions: List[Dict[str, Any]] = []
 
         # Exclude current user
         if exclude_user_id:
@@ -645,7 +679,7 @@ class User:
             )
 
         # Build role/status filter
-        role_conditions = []
+        role_conditions: List[Dict[str, Any]] = []
 
         # Admins (including root users)
         if show_admins:
@@ -672,7 +706,10 @@ class User:
 
         # Regular users (not admin, not root)
         if show_regular:
-            regular_base = {"is_admin": {"$ne": True}, "is_root": {"$ne": True}}
+            regular_base: Dict[str, Any] = {
+                "is_admin": {"$ne": True},
+                "is_root": {"$ne": True},
+            }
             if show_enabled and show_disabled:
                 role_conditions.append(regular_base)
             elif show_enabled:

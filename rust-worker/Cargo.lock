@@ -148,6 +148,7 @@ dependencies = [
  "dotenvy",
  "flate2",
  "futures",
+ "ipnet",
  "mongodb",
  "rayon",
  "regex",

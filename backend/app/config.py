@@ -15,6 +15,7 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
+    MAX_CONTENT_LENGTH = 12 * 1024 * 1024
 
     # MongoDB
     MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/pihole_lists")

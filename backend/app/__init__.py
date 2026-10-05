@@ -23,6 +23,10 @@ def create_app(config_name: str = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
+    from app.utils.api_input import register_input_checks
+
+    register_input_checks(app)
+
     # Configure logging
     configure_logging(app)
 
@@ -44,9 +48,9 @@ def create_app(config_name: str = None) -> Flask:
     if os.path.isdir(frontend_dist):
         from whitenoise import WhiteNoise
 
-        app.wsgi_app = WhiteNoise(app.wsgi_app, root=frontend_dist, prefix="/")
-        # Immutable caching for Vite's hashed assets
-        app.wsgi_app.add_files(os.path.join(frontend_dist, "assets"), prefix="assets/")
+        static_app = WhiteNoise(app.wsgi_app, root=frontend_dist, prefix="/")
+        static_app.add_files(os.path.join(frontend_dist, "assets"), prefix="assets/")
+        setattr(app, "wsgi_app", static_app)
 
     # Initialize scheduler (not in testing)
     if not app.config.get("TESTING"):

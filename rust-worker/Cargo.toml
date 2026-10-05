@@ -33,6 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
+ipnet = "2"
 
 # Logging
 tracing = "0.1"

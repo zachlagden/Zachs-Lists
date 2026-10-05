@@ -105,9 +105,9 @@ impl JobProcessor {
     ///
     /// Creates a fingerprint from sorted, normalized sources and whitelist patterns.
     /// Two configs with same sources and whitelist (regardless of comments/order) → same fingerprint.
-    fn compute_config_fingerprint(blocklists: &str, whitelist: &str) -> String {
+    fn compute_config_fingerprint(blocklists: &str, whitelist: &str) -> Result<String> {
         // Parse and sort sources by URL
-        let mut sources = Downloader::parse_config(blocklists);
+        let mut sources = Downloader::parse_config(blocklists)?;
         sources.sort_by(|a, b| a.url.cmp(&b.url));
 
         // Create normalized string representation of sources
@@ -131,7 +131,7 @@ impl JobProcessor {
         let combined = format!("{}\n---\n{}", sources_str.join("\n"), patterns.join("\n"));
         let mut hasher = Sha256::new();
         hasher.update(combined.as_bytes());
-        format!("{:x}", hasher.finalize())
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     /// Copy output files from a matching user to the target user
@@ -247,10 +247,10 @@ impl JobProcessor {
         let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
 
         // Compute normalized fingerprint for cross-user matching
-        let config_fingerprint = Self::compute_config_fingerprint(&config_content, &whitelist_content);
+        let config_fingerprint = Self::compute_config_fingerprint(&config_content, &whitelist_content)?;
 
         // Parse sources
-        let sources = Downloader::parse_config(&config_content);
+        let sources = Downloader::parse_config(&config_content)?;
         if sources.is_empty() {
             self.job_repo
                 .fail(&job.id, vec!["No valid sources in config".to_string()])
