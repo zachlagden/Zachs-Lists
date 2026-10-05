@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import { useAuthStore, useJobsStore } from '../store';
 import { authApi, userApi } from '../api/client';
 import { SITE_DOMAIN } from '../config/site';
+import { disconnectSocket } from '../hooks/useSocket';
 import AnnouncementBanner from './AnnouncementBanner';
 import type { Announcement } from '../types';
 
@@ -45,6 +46,7 @@ export default function Layout({ children }: LayoutProps) {
   const handleLogout = async () => {
     try {
       await authApi.logout();
+      disconnectSocket();
       logout();
       window.location.href = '/';
     } catch (error) {

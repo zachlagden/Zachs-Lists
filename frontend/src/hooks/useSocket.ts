@@ -6,6 +6,12 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || '';
 
 // Singleton socket instance
 let socket: Socket | null = null;
+
+export function disconnectSocket(): void {
+  socket?.disconnect();
+  socket = null;
+  connectionAttempts = 0;
+}
 let connectionAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 

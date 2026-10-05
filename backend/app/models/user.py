@@ -87,6 +87,9 @@ class User:
             {"_id": self._id}, {"$set": {"is_admin": value}}
         )
         self._data["is_admin"] = value
+        from app.socketio import disconnect_user
+
+        disconnect_user(self.id)
 
     @property
     def limits(self) -> Dict[str, int]:
@@ -289,6 +292,10 @@ class User:
             {"_id": self._id},
             {"$set": {"is_enabled": enabled, "updated_at": datetime.utcnow()}},
         )
+        if not enabled:
+            from app.socketio import disconnect_user
+
+            disconnect_user(self.id)
 
     def set_limits(self, limits: Dict[str, int]) -> None:
         """Set custom limits for user."""
@@ -309,6 +316,9 @@ class User:
                 }
             },
         )
+        from app.socketio import disconnect_user
+
+        disconnect_user(self.id)
 
     def unban(self) -> None:
         """Remove ban from user."""
@@ -429,6 +439,9 @@ class User:
 
         # Delete from database
         mongo.db[self.COLLECTION].delete_one({"_id": self._id})
+        from app.socketio import disconnect_user
+
+        disconnect_user(self.id)
 
     # Serialization
     def _serialize_notifications(

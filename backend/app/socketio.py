@@ -4,7 +4,9 @@ Socket.IO initialization and event handlers.
 
 import logging
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from flask import request
+from flask import session
+
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -12,90 +14,111 @@ logger = logging.getLogger(__name__)
 # async_mode="gevent" for production with gunicorn gevent workers
 # Falls back gracefully in development
 socketio = SocketIO(
-    cors_allowed_origins="*",
+    cors_allowed_origins=[],
     async_mode="gevent",
-    logger=True,
-    engineio_logger=True,
+    logger=False,
+    engineio_logger=False,
     ping_timeout=60,
     ping_interval=25,
+    max_http_buffer_size=65536,
 )
 
 
 def init_socketio(app):
     """Initialize Socket.IO with Flask app."""
-    socketio.init_app(app)
+    socketio.init_app(app, cors_allowed_origins=[app.config["FRONTEND_URL"]])
     register_handlers()
     logger.info("Socket.IO initialized")
     return socketio
 
 
-def register_handlers():
-    """Register Socket.IO event handlers."""
+def _current_user() -> User | None:
+    user_id = session.get("user_id")
+    if not isinstance(user_id, str):
+        return None
+    try:
+        user = User.get_by_id(user_id)
+    except (ValueError, TypeError):
+        return None
+    if not user or not user.is_enabled or user.is_banned:
+        return None
+    return user
 
+
+def _allowed_room(data: object, kind: str) -> str | None:
+    user = _current_user()
+    if user is None or not isinstance(data, dict) or len(data) != 1:
+        return None
+    if kind == "jobs" and data.get("all") is True and user.is_admin:
+        return "jobs:all"
+    if data.get("user_id") == user.id:
+        return f"{kind}:{user.id}"
+    return None
+
+
+def disconnect_user(user_id: str) -> None:
+    """Disconnect every socket for an account whose access or role changed."""
+    room = f"account:{user_id}"
+    for sid, _ in list(socketio.server.manager.get_participants("/", room)):
+        socketio.server.disconnect(sid, namespace="/")
+
+
+def register_handlers():
     @socketio.on("connect")
     def handle_connect():
-        """Handle client connection."""
-        logger.debug(f"Client connected: {request.sid}")
+        user = _current_user()
+        if user is None:
+            return False
+        join_room(f"account:{user.id}")
         emit("connected", {"status": "ok"})
-
-    @socketio.on("disconnect")
-    def handle_disconnect():
-        """Handle client disconnection."""
-        logger.debug(f"Client disconnected: {request.sid}")
 
     @socketio.on("subscribe:jobs")
     def handle_subscribe_jobs(data):
-        """
-        Subscribe to job updates.
-
-        Args:
-            data: {"user_id": str} for user-specific jobs, or {"all": true} for all jobs (admin)
-        """
-        if data.get("all"):
-            join_room("jobs:all")
-            logger.debug(f"Client {request.sid} subscribed to all jobs")
-        elif data.get("user_id"):
-            room = f"jobs:{data['user_id']}"
-            join_room(room)
-            logger.debug(f"Client {request.sid} subscribed to {room}")
+        room = _allowed_room(data, "jobs")
+        if room is None:
+            return {"error": "Access denied"}
+        join_room(room)
+        return {"success": True}
 
     @socketio.on("unsubscribe:jobs")
     def handle_unsubscribe_jobs(data):
-        """Unsubscribe from job updates."""
-        if data.get("all"):
-            leave_room("jobs:all")
-        elif data.get("user_id"):
-            leave_room(f"jobs:{data['user_id']}")
+        room = _allowed_room(data, "jobs")
+        if room is None:
+            return {"error": "Access denied"}
+        leave_room(room)
+        return {"success": True}
 
     @socketio.on("subscribe:stats")
-    def handle_subscribe_stats():
-        """Subscribe to stats updates (admin only)."""
+    def handle_subscribe_stats(data=None):
+        user = _current_user()
+        if user is None or not user.is_admin:
+            return {"error": "Access denied"}
         join_room("stats:admin")
-        logger.debug(f"Client {request.sid} subscribed to admin stats")
+        return {"success": True}
 
     @socketio.on("unsubscribe:stats")
-    def handle_unsubscribe_stats():
-        """Unsubscribe from stats updates."""
+    def handle_unsubscribe_stats(data=None):
+        user = _current_user()
+        if user is None or not user.is_admin:
+            return {"error": "Access denied"}
         leave_room("stats:admin")
+        return {"success": True}
 
     @socketio.on("subscribe:validation")
     def handle_subscribe_validation(data):
-        """
-        Subscribe to config validation progress updates.
-
-        Args:
-            data: {"user_id": str}
-        """
-        if data.get("user_id"):
-            room = f"validation:{data['user_id']}"
-            join_room(room)
-            logger.debug(f"Client {request.sid} subscribed to {room}")
+        room = _allowed_room(data, "validation")
+        if room is None:
+            return {"error": "Access denied"}
+        join_room(room)
+        return {"success": True}
 
     @socketio.on("unsubscribe:validation")
     def handle_unsubscribe_validation(data):
-        """Unsubscribe from config validation updates."""
-        if data.get("user_id"):
-            leave_room(f"validation:{data['user_id']}")
+        room = _allowed_room(data, "validation")
+        if room is None:
+            return {"error": "Access denied"}
+        leave_room(room)
+        return {"success": True}
 
 
 # Event emitters

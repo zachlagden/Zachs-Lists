@@ -190,6 +190,11 @@ def github_callback():
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     """Clear user session."""
+    from app.socketio import disconnect_user
+
+    user_id = session.get("user_id")
+    if isinstance(user_id, str):
+        disconnect_user(user_id)
     session.clear()
     return jsonify({"success": True})
 
