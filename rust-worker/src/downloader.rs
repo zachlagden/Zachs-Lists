@@ -1,19 +1,21 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use bson::DateTime as BsonDateTime;
 use futures::stream::{self, StreamExt};
 use mongodb::Database;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, LazyLock, Mutex, Weak,
+};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::config::Config;
-use crate::db::cache::CacheRepository;
+use crate::db::cache::{content_hash, CacheEntry, CacheRepository, MAX_SOURCE_SIZE_BYTES};
 use crate::db::progress::{SourceProgress, SourceStatus};
-use crate::safe_http::{get_source, parse_source_url};
+use crate::safe_http::{get_source_conditional, parse_source_url, SourceValidators};
 
-/// Maximum allowed size for a single source file (100MB)
-const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
-
-/// Source definition from config file
 #[derive(Debug, Clone)]
 pub struct Source {
     pub name: String,
@@ -21,129 +23,193 @@ pub struct Source {
     pub category: Option<String>,
 }
 
-/// Result of downloading a source
 #[derive(Debug)]
 pub struct DownloadResult {
     pub source: Source,
     pub url_hash: String,
-    /// Content bytes (loaded in memory)
     pub content: Option<Vec<u8>>,
+    pub content_hash: Option<String>,
+    pub last_checked_at: Option<BsonDateTime>,
+    pub stale_fallback: bool,
     pub cache_hit: bool,
     pub bytes_downloaded: u64,
     pub download_time_ms: u64,
     pub error: Option<String>,
     pub warnings: Vec<String>,
-    /// Previous domain count from cache (for calculating domain_change)
     pub previous_domain_count: Option<u64>,
 }
 
-/// Downloader for fetching blocklist sources
+#[derive(Default)]
+struct SourceCheckGate {
+    lock: AsyncMutex<()>,
+    successful_checks: AtomicU64,
+}
+
+static SOURCE_CHECKS: LazyLock<Mutex<HashMap<String, Weak<SourceCheckGate>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn source_check_gate(key: String) -> Arc<SourceCheckGate> {
+    let mut gates = SOURCE_CHECKS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(SourceCheckGate::default());
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
+}
+
 pub struct Downloader {
     config: Config,
     cache_repo: CacheRepository,
+    #[cfg(test)]
+    test_address: Option<std::net::SocketAddr>,
 }
 
 impl Downloader {
-    /// Create a new downloader
     pub fn new(config: Config, db: &Database) -> Result<Self> {
-        let cache_repo = CacheRepository::new(db);
-
-        Ok(Self { config, cache_repo })
+        Ok(Self {
+            config,
+            cache_repo: CacheRepository::new(db),
+            #[cfg(test)]
+            test_address: None,
+        })
     }
 
-    /// Hash a URL to get cache key
     pub fn hash_url(url: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(url.as_bytes());
         format!("{:x}", hasher.finalize())
     }
 
-    /// Download a single source
-    pub async fn download_source(&self, source: &Source, force: bool) -> DownloadResult {
+    pub async fn download_source(&self, source: &Source, _force: bool) -> DownloadResult {
         let url_hash = Self::hash_url(&source.url);
         let start = Instant::now();
-        let mut warnings = Vec::new();
-
-        // Check cache first (skip when force rebuild is requested)
-        if !force {
-            match self.cache_repo.get_content(&url_hash).await {
-                Ok(Some(content)) => {
-                    debug!("Cache hit for {} ({} bytes)", source.name, content.len());
-                    return DownloadResult {
-                        source: source.clone(),
-                        url_hash,
-                        content: Some(content),
-                        cache_hit: true,
-                        bytes_downloaded: 0,
-                        download_time_ms: start.elapsed().as_millis() as u64,
-                        error: None,
-                        warnings,
-                        previous_domain_count: None, // TODO: Get from cache stats
-                    };
-                }
-                Ok(None) => {
-                    debug!("Cache miss for {}", source.name);
-                }
-                Err(e) => {
-                    warn!("Cache read error for {}: {}", source.name, e);
-                }
+        let mut result = DownloadResult {
+            source: source.clone(),
+            url_hash: url_hash.clone(),
+            content: None,
+            content_hash: None,
+            last_checked_at: None,
+            stale_fallback: false,
+            cache_hit: false,
+            bytes_downloaded: 0,
+            download_time_ms: 0,
+            error: None,
+            warnings: Vec::new(),
+            previous_domain_count: None,
+        };
+        let gate = source_check_gate(format!(
+            "{}:{}:{}",
+            Self::hash_url(&self.config.mongo_uri),
+            self.cache_repo.namespace(),
+            url_hash,
+        ));
+        let observed_checks = gate.successful_checks.load(Ordering::SeqCst);
+        let _guard = gate.lock.lock().await;
+        let coalesced = gate.successful_checks.load(Ordering::SeqCst) != observed_checks;
+        match self
+            .check_source(source, &url_hash, coalesced, &mut result)
+            .await
+        {
+            Ok(true) => {
+                gate.successful_checks.fetch_add(1, Ordering::SeqCst);
             }
-        } else {
-            debug!("Force rebuild: skipping cache for {}", source.name);
+            Ok(false) => {}
+            Err(error) => result.error = Some(error.to_string()),
         }
-
-        // Download fresh
-        debug!("Downloading source {}", source.name);
-
-        let result = self.fetch_and_cache(source, &url_hash).await;
-
-        match result {
-            Ok((content, new_warnings)) => {
-                warnings.extend(new_warnings);
-                let bytes_downloaded = content.len() as u64;
-                DownloadResult {
-                    source: source.clone(),
-                    url_hash,
-                    content: Some(content),
-                    cache_hit: false,
-                    bytes_downloaded,
-                    download_time_ms: start.elapsed().as_millis() as u64,
-                    error: None,
-                    warnings,
-                    previous_domain_count: None,
-                }
-            }
-            Err(e) => {
-                warn!("Failed to download {}: {}", source.name, e);
-                DownloadResult {
-                    source: source.clone(),
-                    url_hash,
-                    content: None,
-                    cache_hit: false,
-                    bytes_downloaded: 0,
-                    download_time_ms: start.elapsed().as_millis() as u64,
-                    error: Some(e.to_string()),
-                    warnings,
-                    previous_domain_count: None,
-                }
-            }
-        }
+        result.download_time_ms = start.elapsed().as_millis() as u64;
+        result
     }
 
-    /// Fetch URL and cache the result in MongoDB
-    async fn fetch_and_cache(&self, source: &Source, url_hash: &str) -> Result<(Vec<u8>, Vec<String>)> {
-        let mut warnings = Vec::new();
-
-        // Make request
-        let response = get_source(&source.url, Duration::from_secs(self.config.http_timeout_secs)).await?;
-
-        // Check status
-        let status = response.status();
-        if !status.is_success() {
-            anyhow::bail!("Source returned HTTP {}", status);
+    async fn check_source(
+        &self,
+        source: &Source,
+        url_hash: &str,
+        coalesced: bool,
+        result: &mut DownloadResult,
+    ) -> Result<bool> {
+        parse_source_url(&source.url)?;
+        let entry = match self.cache_repo.get_entry(url_hash).await {
+            Ok(entry) => entry,
+            Err(_) => {
+                result.warnings.push(
+                    "Source cache metadata could not be read; checking upstream without validators"
+                        .into(),
+                );
+                None
+            }
+        };
+        let mut cached_content = None;
+        if let Some(entry) = &entry {
+            result.previous_domain_count = u64::try_from(entry.stats.domain_count).ok();
+            if entry.url.as_deref() == Some(source.url.as_str()) {
+                match self.cache_repo.get_verified_content(entry).await {
+                    Ok(content) => cached_content = Some(content),
+                    Err(error) => result
+                        .warnings
+                        .push(format!("Source cache unusable: {}", error)),
+                }
+            } else {
+                result
+                    .warnings
+                    .push("Source cache URL does not match the requested source".into());
+            }
         }
-
-        // Get headers for metadata
+        if coalesced {
+            if let (Some(entry), Some(content)) = (&entry, cached_content.as_ref()) {
+                if entry.allows_fallback_at(BsonDateTime::now()) {
+                    result.content_hash = Some(content_hash(content));
+                    result.content = cached_content;
+                    result.cache_hit = true;
+                    result.last_checked_at = entry.last_checked_at;
+                    return Ok(false);
+                }
+            }
+        }
+        let validators = entry
+            .as_ref()
+            .filter(|_| cached_content.is_some())
+            .and_then(|entry| {
+                let final_url = entry.final_url.clone()?;
+                if entry.etag.is_none() && entry.last_modified.is_none() {
+                    return None;
+                }
+                let validators = SourceValidators {
+                    final_url,
+                    etag: entry.etag.clone(),
+                    last_modified: entry.last_modified.clone(),
+                };
+                if validators.validate().is_err() {
+                    result.warnings.push(
+                        "Invalid cached source validators; checking upstream without validators"
+                            .into(),
+                    );
+                    return None;
+                }
+                Some(validators)
+            });
+        let timeout = Duration::from_secs(self.config.http_timeout_secs);
+        let fetch = async {
+            #[cfg(test)]
+            if let Some(address) = self.test_address {
+                return crate::safe_http::get_source_for_test(
+                    &source.url,
+                    timeout,
+                    validators.as_ref(),
+                    address,
+                )
+                .await;
+            }
+            get_source_conditional(&source.url, timeout, validators.as_ref()).await
+        }
+        .await;
+        let response = match fetch {
+            Ok(response) => response,
+            Err(error) => return Self::fallback(entry.as_ref(), cached_content, error, result),
+        };
         let etag = response
             .headers()
             .get("etag")
@@ -154,68 +220,123 @@ impl Downloader {
             .get("last-modified")
             .and_then(|v| v.to_str().ok())
             .map(String::from);
-
-        // Check Content-Length if available
-        let content_length = response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok());
-
-        if let Some(len) = content_length {
-            if len > MAX_SOURCE_SIZE_BYTES {
-                anyhow::bail!(
-                    "Source file too large: {} bytes (max {} bytes)",
-                    len,
-                    MAX_SOURCE_SIZE_BYTES
-                );
+        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            let validators = validators.as_ref().ok_or_else(|| {
+                anyhow!("Source returned 304 without a verified conditional cache body")
+            })?;
+            if parse_source_url(&validators.final_url)? != *response.url() {
+                bail!("Source returned 304 for a different cached destination");
             }
+            let content = cached_content
+                .ok_or_else(|| anyhow!("Source returned 304 but its cached body is missing"))?;
+            let entry = entry
+                .as_ref()
+                .ok_or_else(|| anyhow!("Source returned 304 but its cache metadata is missing"))?;
+            let checked_at = self
+                .cache_repo
+                .confirm_not_modified(entry, etag.as_deref(), last_modified.as_deref())
+                .await
+                .context("Could not persist the upstream source check")?;
+            result.content_hash = Some(content_hash(&content));
+            result.content = Some(content);
+            result.cache_hit = true;
+            result.last_checked_at = Some(checked_at);
+            return Ok(true);
         }
-
-        // Download content to memory with size limit enforcement
-        let mut content = Vec::new();
-        let mut stream = response.bytes_stream();
-
-        use futures::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.with_context(|| "Error reading response chunk")?;
-            content.extend_from_slice(&chunk);
-
-            // Check size limit during streaming
-            if content.len() as u64 > MAX_SOURCE_SIZE_BYTES {
-                anyhow::bail!(
-                    "Source file exceeds size limit during download (max {} bytes)",
-                    MAX_SOURCE_SIZE_BYTES
-                );
+        if response.status() != reqwest::StatusCode::OK {
+            return Self::fallback(
+                entry.as_ref(),
+                cached_content,
+                anyhow!("Source returned HTTP {}", response.status()),
+                result,
+            );
+        }
+        let final_url = response.url().to_string();
+        drop(cached_content);
+        let content = match Self::read_response(response).await {
+            Ok(content) => content,
+            Err(error) => {
+                let fallback_content = if let Some(entry) = entry
+                    .as_ref()
+                    .filter(|entry| entry.url.as_deref() == Some(source.url.as_str()))
+                {
+                    match self.cache_repo.get_verified_content(entry).await {
+                        Ok(content) => Some(content),
+                        Err(error) => {
+                            result
+                                .warnings
+                                .push(format!("Source cache unusable: {}", error));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                return Self::fallback(entry.as_ref(), fallback_content, error, result);
             }
-        }
-
-        // Validate content
+        };
         if content.is_empty() {
-            warnings.push("Downloaded empty file".to_string());
+            result.warnings.push("Downloaded empty file".into());
         }
-
-        // Estimate domain count from newlines
         let domain_count = content.iter().filter(|&&b| b == b'\n').count() as i64;
-
-        // Store in MongoDB cache
-        self.cache_repo
-            .store(
+        let checked_at = self
+            .cache_repo
+            .store_checked(
                 url_hash,
                 &source.url,
+                &final_url,
                 &content,
                 etag.as_deref(),
                 last_modified.as_deref(),
                 domain_count,
             )
-            .await?;
+            .await
+            .context("Could not persist the downloaded source body")?;
+        result.bytes_downloaded = content.len() as u64;
+        result.content_hash = Some(content_hash(&content));
+        result.content = Some(content);
+        result.last_checked_at = Some(checked_at);
+        Ok(true)
+    }
 
-        info!(
-            "Downloaded {} ({} bytes) and cached in MongoDB",
-            source.name, content.len()
-        );
+    async fn read_response(response: reqwest::Response) -> Result<Vec<u8>> {
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_SOURCE_SIZE_BYTES)
+        {
+            bail!("Source body exceeds the size limit");
+        }
+        let mut content = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Error reading source response body")?;
+            if chunk.len() as u64 > MAX_SOURCE_SIZE_BYTES - content.len() as u64 {
+                bail!("Source body exceeds the size limit");
+            }
+            content.extend_from_slice(&chunk);
+        }
+        Ok(content)
+    }
 
-        Ok((content, warnings))
+    fn fallback(
+        entry: Option<&CacheEntry>,
+        content: Option<Vec<u8>>,
+        error: anyhow::Error,
+        result: &mut DownloadResult,
+    ) -> Result<bool> {
+        if let (Some(entry), Some(content)) = (entry, content) {
+            if entry.verify_body(&content).is_ok() && entry.allows_fallback_at(BsonDateTime::now())
+            {
+                result.warnings.push(format!("Stale source: upstream check failed ({}); using a verified cache body checked within seven days", error));
+                result.content_hash = Some(content_hash(&content));
+                result.content = Some(content);
+                result.last_checked_at = entry.last_checked_at;
+                result.cache_hit = true;
+                result.stale_fallback = true;
+                return Ok(false);
+            }
+        }
+        Err(anyhow!("Source check failed ({}); no verified cache body checked within seven days is available", error))
     }
 
     /// Download multiple sources in parallel
@@ -225,7 +346,7 @@ impl Downloader {
         force: bool,
         progress_callback: impl Fn(usize, &SourceProgress) + Send + Sync,
     ) -> Vec<DownloadResult> {
-        let max_concurrent = self.config.max_concurrent_downloads;
+        let max_concurrent = self.config.max_concurrent_downloads.max(1);
 
         let results: Vec<DownloadResult> = stream::iter(sources.into_iter().enumerate())
             .map(|(idx, source)| {
@@ -248,7 +369,11 @@ impl Downloader {
                         detected_formats: Vec::new(),
                         error: None,
                         warnings: Vec::new(),
-                        started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+                        started_at: Some(
+                            chrono::Utc::now()
+                                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                                .to_string(),
+                        ),
                         completed_at: None,
                     };
 
@@ -266,7 +391,11 @@ impl Downloader {
                     progress.download_time_ms = Some(result.download_time_ms);
                     progress.error = result.error.clone();
                     progress.warnings = result.warnings.clone();
-                    progress.completed_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+                    progress.completed_at = Some(
+                        chrono::Utc::now()
+                            .format("%Y-%m-%dT%H:%M:%S%.6f")
+                            .to_string(),
+                    );
 
                     (idx, result, progress)
                 }
@@ -289,7 +418,12 @@ impl Downloader {
         let mut sources = Vec::new();
         let mut seen_urls = std::collections::HashSet::new();
         let mut seen_names = std::collections::HashSet::new();
-        if content.lines().filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#')).count() > 1000 {
+        if content
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
+            .count()
+            > 1000
+        {
             anyhow::bail!("Source configuration exceeds the safety limit");
         }
 
@@ -315,8 +449,17 @@ impl Downloader {
                 parts[1].trim().to_string()
             } else {
                 // Use URL domain as name
-                parsed.host_str().unwrap_or("source").chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                parsed
+                    .host_str()
+                    .unwrap_or("source")
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
                     .collect()
             };
 
@@ -326,19 +469,35 @@ impl Downloader {
                 None
             };
 
-            if name.len() > 100 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            if name.len() > 100
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
                 anyhow::bail!("Invalid source name");
             }
             if parts.len() > 1 && !seen_names.insert(name.to_lowercase()) {
                 anyhow::bail!("Duplicate source name");
             }
             if let Some(value) = &category {
-                if !matches!(value.as_str(), "comprehensive" | "malicious" | "advertising" | "tracking" | "suspicious" | "nsfw") {
+                if !matches!(
+                    value.as_str(),
+                    "comprehensive"
+                        | "malicious"
+                        | "advertising"
+                        | "tracking"
+                        | "suspicious"
+                        | "nsfw"
+                ) {
                     anyhow::bail!("Invalid source category");
                 }
             }
             if seen_urls.insert(url.to_string()) {
-                sources.push(Source { name, url: url.to_string(), category });
+                sources.push(Source {
+                    name,
+                    url: url.to_string(),
+                    category,
+                });
             }
         }
 
@@ -359,22 +518,11 @@ impl Downloader {
             .await
     }
 
-    /// Check if all sources would be cache hits (for "no changes" detection)
-    pub async fn check_all_cached(&self, sources: &[Source]) -> bool {
-        for source in sources {
-            let url_hash = Self::hash_url(&source.url);
-            match self.cache_repo.has_valid_cache(&url_hash).await {
-                Ok(true) => continue,
-                Ok(false) => {
-                    debug!("Source {} not cached or cache expired", source.name);
-                    return false;
-                }
-                Err(e) => {
-                    warn!("Cache check error for {}: {}", source.name, e);
-                    return false;
-                }
-            }
-        }
-        true
+    pub async fn check_all_cached(&self, _sources: &[Source]) -> bool {
+        false
     }
 }
+
+#[cfg(test)]
+#[path = "source_cache_tests.rs"]
+mod tests;
