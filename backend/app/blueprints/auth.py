@@ -3,6 +3,8 @@ Authentication blueprint - GitHub OAuth.
 """
 
 import secrets
+import re
+from urllib.parse import urlencode
 from functools import wraps
 from flask import (
     Blueprint,
@@ -35,6 +37,10 @@ def login_required(f):
         if not user:
             session.clear()
             return jsonify({"error": "User not found"}), 401
+
+        if session.get("auth_version", 0) != user.auth_version:
+            session.clear()
+            return jsonify({"error": "Session expired; sign in again"}), 401
 
         if not user.is_enabled:
             session.clear()
@@ -81,7 +87,7 @@ def github_login():
         "state": state,
     }
 
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    query_string = urlencode(params)
     auth_url = f"{current_app.config['GITHUB_AUTHORIZE_URL']}?{query_string}"
 
     return redirect(auth_url)
@@ -92,8 +98,10 @@ def github_callback():
     """Handle GitHub OAuth callback."""
     error = request.args.get("error")
     if error:
-        current_app.logger.error(f"GitHub OAuth error: {error}")
-        return redirect(f"{current_app.config['FRONTEND_URL']}/login?error={error}")
+        current_app.logger.warning("GitHub declined OAuth authorisation")
+        return redirect(
+            f"{current_app.config['FRONTEND_URL']}/login?error=oauth_declined"
+        )
 
     code = request.args.get("code")
     state = request.args.get("state")
@@ -123,16 +131,21 @@ def github_callback():
             headers={"Accept": "application/json"},
             timeout=10,
         )
+        token_response.raise_for_status()
         token_data = token_response.json()
+        if not isinstance(token_data, dict):
+            return redirect(
+                f"{current_app.config['FRONTEND_URL']}/login?error=api_error"
+            )
 
         if "error" in token_data:
-            current_app.logger.error(f"Token exchange error: {token_data}")
+            current_app.logger.warning("GitHub token exchange was declined")
             return redirect(
                 f"{current_app.config['FRONTEND_URL']}/login?error=token_exchange_failed"
             )
 
         access_token = token_data.get("access_token")
-        if not access_token:
+        if not isinstance(access_token, str) or not access_token:
             return redirect(
                 f"{current_app.config['FRONTEND_URL']}/login?error=no_access_token"
             )
@@ -146,7 +159,23 @@ def github_callback():
             },
             timeout=10,
         )
+        user_response.raise_for_status()
         user_data = user_response.json()
+        if (
+            not isinstance(user_data, dict)
+            or type(user_data.get("id")) is not int
+            or user_data["id"] <= 0
+        ):
+            return redirect(
+                f"{current_app.config['FRONTEND_URL']}/login?error=invalid_profile"
+            )
+        login = user_data.get("login")
+        if not isinstance(login, str) or not re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", login
+        ):
+            return redirect(
+                f"{current_app.config['FRONTEND_URL']}/login?error=invalid_profile"
+            )
 
         # Get user email if not public
         email = user_data.get("email")
@@ -159,9 +188,14 @@ def github_callback():
                 },
                 timeout=10,
             )
+            emails_response.raise_for_status()
             emails = emails_response.json()
+            if not isinstance(emails, list):
+                return redirect(
+                    f"{current_app.config['FRONTEND_URL']}/login?error=api_error"
+                )
             for e in emails:
-                if e.get("primary"):
+                if isinstance(e, dict) and e.get("primary"):
                     email = e.get("email")
                     break
 
@@ -171,30 +205,30 @@ def github_callback():
             username=user_data["login"],
             email=email,
             avatar_url=user_data.get("avatar_url"),
-            access_token=access_token,
             name=user_data.get("name"),  # GitHub display name
         )
 
         # Set session
         session.permanent = True
         session["user_id"] = str(user.id)
+        session["auth_version"] = user.auth_version
 
         current_app.logger.info(f"User {user.username} logged in")
         return redirect(f"{current_app.config['FRONTEND_URL']}/dashboard")
 
     except requests.RequestException as e:
-        current_app.logger.error(f"GitHub API error: {e}")
+        current_app.logger.warning("GitHub login request failed")
         return redirect(f"{current_app.config['FRONTEND_URL']}/login?error=api_error")
 
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     """Clear user session."""
-    from app.socketio import disconnect_user
-
     user_id = session.get("user_id")
     if isinstance(user_id, str):
-        disconnect_user(user_id)
+        user = User.get_by_id(user_id)
+        if user is not None and session.get("auth_version", 0) == user.auth_version:
+            user.revoke_sessions()
     session.clear()
     return jsonify({"success": True})
 

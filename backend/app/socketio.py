@@ -3,12 +3,28 @@ Socket.IO initialization and event handlers.
 """
 
 import logging
+import time
+from dataclasses import dataclass
+
+from itsdangerous import BadSignature
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from flask import session
+from flask import Flask, current_app, request, session
+from flask.sessions import SecureCookieSessionInterface
 
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SocketAccount:
+    user_id: str
+    auth_version: int
+    expires_at: float
+
+
+_connections: dict[str, SocketAccount] = {}
+_socket_app: Flask | None = None
 
 # Create Socket.IO instance
 # async_mode="gevent" for production with gunicorn gevent workers
@@ -26,8 +42,13 @@ socketio = SocketIO(
 
 def init_socketio(app):
     """Initialize Socket.IO with Flask app."""
+    global _socket_app
+    _socket_app = app
+    _connections.clear()
     socketio.init_app(app, cors_allowed_origins=[app.config["FRONTEND_URL"]])
     register_handlers()
+    if not app.config.get("TESTING"):
+        socketio.start_background_task(_monitor_connections, app)
     logger.info("Socket.IO initialized")
     return socketio
 
@@ -40,7 +61,12 @@ def _current_user() -> User | None:
         user = User.get_by_id(user_id)
     except (ValueError, TypeError):
         return None
-    if not user or not user.is_enabled or user.is_banned:
+    if (
+        not user
+        or not user.is_enabled
+        or user.is_banned
+        or session.get("auth_version", 0) != user.auth_version
+    ):
         return None
     return user
 
@@ -56,6 +82,61 @@ def _allowed_room(data: object, kind: str) -> str | None:
     return None
 
 
+def _session_expiry() -> float:
+    interface = current_app.session_interface
+    if not isinstance(interface, SecureCookieSessionInterface):
+        return 0
+    serializer = interface.get_signing_serializer(current_app)
+    cookie = request.cookies.get(current_app.config["SESSION_COOKIE_NAME"])
+    if serializer is None or not cookie:
+        return 0
+    try:
+        _, signed_at = serializer.loads(cookie, return_timestamp=True)
+    except BadSignature:
+        return 0
+    return (
+        signed_at.timestamp() + current_app.permanent_session_lifetime.total_seconds()
+    )
+
+
+def _prune_connections(room: str | None = None) -> None:
+    participants = (
+        list(socketio.server.manager.get_participants("/", room))
+        if room
+        else [(sid, None) for sid in list(_connections)]
+    )
+    for sid, _ in participants:
+        account = _connections.get(sid)
+        user = User.get_by_id(account.user_id) if account else None
+        allowed = bool(
+            account
+            and user
+            and user.is_enabled
+            and not user.is_banned
+            and account.auth_version == user.auth_version
+            and account.expires_at > time.time()
+        )
+        if allowed and room in ("jobs:all", "stats:admin"):
+            allowed = bool(user and user.is_admin)
+        if not allowed:
+            socketio.server.disconnect(sid, namespace="/")
+
+
+def _monitor_connections(app: Flask) -> None:
+    while _socket_app is app:
+        with app.app_context():
+            _prune_connections()
+        socketio.sleep(15)
+
+
+def _emit(event: str, data: dict, room: str) -> None:
+    if _socket_app is None:
+        raise RuntimeError("Realtime service is not initialised")
+    with _socket_app.app_context():
+        _prune_connections(room)
+        socketio.emit(event, data, room=room)
+
+
 def disconnect_user(user_id: str) -> None:
     """Disconnect every socket for an account whose access or role changed."""
     room = f"account:{user_id}"
@@ -69,8 +150,18 @@ def register_handlers():
         user = _current_user()
         if user is None:
             return False
+        expires_at = _session_expiry()
+        if expires_at <= time.time():
+            return False
+        _connections[request.sid] = SocketAccount(
+            user.id, user.auth_version, expires_at
+        )
         join_room(f"account:{user.id}")
         emit("connected", {"status": "ok"})
+
+    @socketio.on("disconnect")
+    def handle_disconnect(reason=None):
+        _connections.pop(request.sid, None)
 
     @socketio.on("subscribe:jobs")
     def handle_subscribe_jobs(data):
@@ -133,11 +224,11 @@ def emit_job_created(job_data: dict, user_id: str = None):
         user_id: User ID for user-specific room
     """
     # Emit to all jobs room (for admin)
-    socketio.emit("job:created", job_data, room="jobs:all")
+    _emit("job:created", job_data, "jobs:all")
 
     # Emit to user-specific room
     if user_id:
-        socketio.emit("job:created", job_data, room=f"jobs:{user_id}")
+        _emit("job:created", job_data, f"jobs:{user_id}")
 
 
 def emit_job_updated(job_data: dict, user_id: str = None):
@@ -149,11 +240,11 @@ def emit_job_updated(job_data: dict, user_id: str = None):
         user_id: User ID for user-specific room
     """
     # Emit to all jobs room (for admin)
-    socketio.emit("job:updated", job_data, room="jobs:all")
+    _emit("job:updated", job_data, "jobs:all")
 
     # Emit to user-specific room
     if user_id:
-        socketio.emit("job:updated", job_data, room=f"jobs:{user_id}")
+        _emit("job:updated", job_data, f"jobs:{user_id}")
 
 
 def emit_job_completed(job_data: dict, user_id: str = None):
@@ -165,11 +256,11 @@ def emit_job_completed(job_data: dict, user_id: str = None):
         user_id: User ID for user-specific room
     """
     # Emit to all jobs room (for admin)
-    socketio.emit("job:completed", job_data, room="jobs:all")
+    _emit("job:completed", job_data, "jobs:all")
 
     # Emit to user-specific room
     if user_id:
-        socketio.emit("job:completed", job_data, room=f"jobs:{user_id}")
+        _emit("job:completed", job_data, f"jobs:{user_id}")
 
     # Also emit stats update for admin dashboard
     emit_stats_updated()
@@ -203,16 +294,16 @@ def emit_job_progress(job):
         }
 
     # Emit to all jobs room (for admin)
-    socketio.emit("job:progress", job_data, room="jobs:all")
+    _emit("job:progress", job_data, "jobs:all")
 
     # Emit to user-specific room
     if user_id:
-        socketio.emit("job:progress", job_data, room=f"jobs:{user_id}")
+        _emit("job:progress", job_data, f"jobs:{user_id}")
 
 
 def emit_stats_updated():
     """Emit stats:updated event to admin stats room."""
-    socketio.emit("stats:updated", {}, room="stats:admin")
+    _emit("stats:updated", {}, "stats:admin")
 
 
 # Enhanced progress event emitters
@@ -229,9 +320,9 @@ def emit_stage_changed(job_id: str, stage: str, progress: dict, user_id: str = N
         user_id: User ID for user-specific room
     """
     data = {"job_id": job_id, "stage": stage, "progress": progress}
-    socketio.emit("job:stage_changed", data, room="jobs:all")
+    _emit("job:stage_changed", data, "jobs:all")
     if user_id:
-        socketio.emit("job:stage_changed", data, room=f"jobs:{user_id}")
+        _emit("job:stage_changed", data, f"jobs:{user_id}")
 
 
 def emit_source_update(job_id: str, source_progress: dict, user_id: str = None):
@@ -244,9 +335,9 @@ def emit_source_update(job_id: str, source_progress: dict, user_id: str = None):
         user_id: User ID for user-specific room
     """
     data = {"job_id": job_id, "source": source_progress}
-    socketio.emit("job:source_update", data, room="jobs:all")
+    _emit("job:source_update", data, "jobs:all")
     if user_id:
-        socketio.emit("job:source_update", data, room=f"jobs:{user_id}")
+        _emit("job:source_update", data, f"jobs:{user_id}")
 
 
 def emit_download_progress(
@@ -272,9 +363,9 @@ def emit_download_progress(
         "bytes_downloaded": bytes_downloaded,
         "bytes_total": bytes_total,
     }
-    socketio.emit("job:download_progress", data, room="jobs:all")
+    _emit("job:download_progress", data, "jobs:all")
     if user_id:
-        socketio.emit("job:download_progress", data, room=f"jobs:{user_id}")
+        _emit("job:download_progress", data, f"jobs:{user_id}")
 
 
 def emit_whitelist_update(job_id: str, whitelist_progress: dict, user_id: str = None):
@@ -287,9 +378,9 @@ def emit_whitelist_update(job_id: str, whitelist_progress: dict, user_id: str = 
         user_id: User ID for user-specific room
     """
     data = {"job_id": job_id, "whitelist": whitelist_progress}
-    socketio.emit("job:whitelist_update", data, room="jobs:all")
+    _emit("job:whitelist_update", data, "jobs:all")
     if user_id:
-        socketio.emit("job:whitelist_update", data, room=f"jobs:{user_id}")
+        _emit("job:whitelist_update", data, f"jobs:{user_id}")
 
 
 def emit_format_update(job_id: str, format_progress: dict, user_id: str = None):
@@ -302,9 +393,9 @@ def emit_format_update(job_id: str, format_progress: dict, user_id: str = None):
         user_id: User ID for user-specific room
     """
     data = {"job_id": job_id, "format": format_progress}
-    socketio.emit("job:format_update", data, room="jobs:all")
+    _emit("job:format_update", data, "jobs:all")
     if user_id:
-        socketio.emit("job:format_update", data, room=f"jobs:{user_id}")
+        _emit("job:format_update", data, f"jobs:{user_id}")
 
 
 def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
@@ -317,9 +408,9 @@ def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
         user_id: User ID for user-specific room
     """
     data = {"job_id": job_id, "reason": reason}
-    socketio.emit("job:skipped", data, room="jobs:all")
+    _emit("job:skipped", data, "jobs:all")
     if user_id:
-        socketio.emit("job:skipped", data, room=f"jobs:{user_id}")
+        _emit("job:skipped", data, f"jobs:{user_id}")
     # Also emit stats update for admin dashboard
     emit_stats_updated()
 
@@ -336,7 +427,7 @@ def emit_validation_progress(user_id: str, progress: dict):
         progress: Progress dictionary with current, total, url, status
     """
     room = f"validation:{user_id}"
-    socketio.emit("config:validation_progress", progress, room=room)
+    _emit("config:validation_progress", progress, room)
 
 
 def emit_validation_complete(user_id: str, result: dict):
@@ -348,4 +439,4 @@ def emit_validation_complete(user_id: str, result: dict):
         result: Validation result dictionary
     """
     room = f"validation:{user_id}"
-    socketio.emit("config:validation_complete", result, room=room)
+    _emit("config:validation_complete", result, room)
