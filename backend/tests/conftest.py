@@ -65,6 +65,7 @@ def user(monkeypatch: pytest.MonkeyPatch) -> Mock:
     account.id = "000000000000000000000001"
     account.username = "sam"
     account.is_enabled = True
+    account.auth_version = 0
     account.is_banned = False
     account.to_dict.return_value = {"id": account.id, "username": account.username}
     account.get_list.return_value = {"domain_count": 1}

@@ -24,7 +24,9 @@ def create_app(config_name: str = None) -> Flask:
     app.config.from_object(config[config_name])
 
     from app.utils.api_input import register_input_checks
+    from app.utils.runtime_config import validate_runtime_config
 
+    validate_runtime_config(app)
     register_input_checks(app)
 
     # Configure logging
@@ -71,6 +73,9 @@ def configure_logging(app: Flask) -> None:
             logging.StreamHandler(),
         ],
     )
+    from app.utils.log_redaction import install_redaction
+
+    install_redaction()
 
 
 def init_extensions(app: Flask) -> None:

@@ -50,6 +50,26 @@ def test_malformed_and_oversized_json_returns_safe_errors(guarded_app: Flask) ->
     assert response.is_json
 
 
+@pytest.mark.parametrize("headers", [{}, {"Content-Type": "application/json"}])
+def test_gunicorn_empty_action_request_stays_supported(
+    guarded_app: Flask, headers: dict[str, str]
+) -> None:
+    response = guarded_app.test_client().post(
+        "/api/build", headers=headers, environ_overrides={"wsgi.input_terminated": True}
+    )
+    assert response.status_code == 200
+
+
+def test_terminated_stream_is_still_validated(guarded_app: Flask) -> None:
+    response = guarded_app.test_client().post(
+        "/api/config",
+        data='{"config":42}',
+        content_type="application/json",
+        environ_overrides={"wsgi.input_terminated": True, "CONTENT_LENGTH": ""},
+    )
+    assert response.status_code == 400
+
+
 def test_empty_action_request_stays_supported(guarded_app: Flask) -> None:
     client = guarded_app.test_client()
     assert client.post("/api/build").status_code == 200
