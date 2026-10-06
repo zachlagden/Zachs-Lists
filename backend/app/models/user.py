@@ -4,9 +4,11 @@ User model for MongoDB.
 
 import os
 import re
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from flask import current_app
 
 from app.extensions import mongo
@@ -636,14 +638,9 @@ class User:
                 raise RuntimeError("Account disappeared while updating login")
             return updated
 
-        list_username = username
-        if cls.get_by_username(list_username) is not None:
-            list_username = f"{username}-{github_id}"
-        if cls.get_by_username(list_username) is not None:
-            raise ValueError("Public list identifier is already reserved")
         user_data = {
             "github_id": github_id,
-            "username": list_username,
+            "username": username,
             "github_username": username,
             "name": name,
             "email": email,
@@ -662,10 +659,26 @@ class User:
             "updated_at": datetime.utcnow(),
         }
 
-        result = mongo.db[cls.COLLECTION].insert_one(user_data)
-        user_data["_id"] = result.inserted_id
-
-        return cls(user_data)
+        for attempt in range(8):
+            if attempt == 0:
+                candidate = username
+            elif attempt == 1:
+                candidate = f"{username}-{github_id}"
+            else:
+                candidate = f"u{github_id}-{secrets.token_hex(8)}"
+            if cls.get_by_username(candidate) is not None:
+                continue
+            user_data["username"] = candidate
+            try:
+                result = mongo.db[cls.COLLECTION].insert_one(user_data)
+            except DuplicateKeyError:
+                existing = cls.get_by_github_id(github_id)
+                if existing is not None:
+                    return existing
+                continue
+            user_data["_id"] = result.inserted_id
+            return cls(user_data)
+        raise ValueError("Could not reserve a public list identifier; retry sign-in")
 
     @classmethod
     def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:

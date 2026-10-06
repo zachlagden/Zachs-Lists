@@ -216,9 +216,14 @@ def github_callback():
         current_app.logger.info(f"User {user.username} logged in")
         return redirect(f"{current_app.config['FRONTEND_URL']}/dashboard")
 
-    except requests.RequestException as e:
+    except requests.RequestException:
         current_app.logger.warning("GitHub login request failed")
         return redirect(f"{current_app.config['FRONTEND_URL']}/login?error=api_error")
+    except ValueError:
+        current_app.logger.warning("GitHub account setup needs a retry")
+        return redirect(
+            f"{current_app.config['FRONTEND_URL']}/login?error=account_setup_retry"
+        )
 
 
 @auth_bp.route("/logout", methods=["POST"])

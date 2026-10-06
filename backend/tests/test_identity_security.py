@@ -1,10 +1,13 @@
 from pathlib import Path
+from unittest.mock import Mock
+from typing import Any
 
 import mongomock
 import pytest
 from flask import Flask
 
 from app.config import TestingConfig
+from app.blueprints.auth import auth_bp
 from app.extensions import mongo
 from app.models.user import User
 from app.utils.runtime_config import validate_runtime_config
@@ -41,6 +44,56 @@ def test_rename_preserves_list_identifier_and_path(identity_app: Flask) -> None:
         assert renamed.get_output_dir() == path
         lookup = User.get_by_username("alex")
         assert lookup is not None and lookup.github_id == 1002
+
+
+def test_double_reserved_slug_still_allows_oauth_completion(
+    identity_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with identity_app.app_context():
+        User.find_or_create_from_github(1001, "sam")
+        User.find_or_create_from_github(1002, "sam-1003")
+    identity_app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    token = Mock()
+    token.json.return_value = {"access_token": "example-provider-token"}
+    profile = Mock()
+    profile.json.return_value = {"id": 1003, "login": "sam", "email": "sam@example.com"}
+    monkeypatch.setattr("app.blueprints.auth.requests.post", Mock(return_value=token))
+    monkeypatch.setattr("app.blueprints.auth.requests.get", Mock(return_value=profile))
+    client = identity_app.test_client()
+    with client.session_transaction() as session:
+        session["oauth_state"] = "example-state"
+    response = client.get("/api/auth/callback?state=example-state&code=example-code")
+    assert response.status_code == 302 and response.headers["Location"].endswith(
+        "/dashboard"
+    )
+    with identity_app.app_context():
+        account = User.get_by_github_id(1003)
+        assert account is not None and account.username not in {"sam", "sam-1003"}
+        assert not account.is_root
+
+
+def test_indexed_concurrent_login_rereads_existing_provider(
+    identity_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with identity_app.app_context():
+        mongo.db.users.create_index("github_id", unique=True)
+        mongo.db.users.create_index("username", unique=True)
+        collection = mongo.db.users
+        insert = collection.insert_one
+        raced = False
+
+        def racing_insert(document: dict[str, Any]) -> Any:
+            nonlocal raced
+            if not raced:
+                raced = True
+                inserted = dict(document)
+                insert(inserted)
+            return insert(document)
+
+        monkeypatch.setattr(collection, "insert_one", racing_insert)
+        account = User.find_or_create_from_github(1002, "alex")
+        assert account.github_id == 1002
+        assert collection.count_documents({"github_id": 1002}) == 1
 
 
 def test_oauth_token_is_not_persisted(identity_app: Flask) -> None:

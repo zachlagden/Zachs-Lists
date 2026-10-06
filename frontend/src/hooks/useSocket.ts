@@ -1,49 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import type { Job } from '../types';
-
-const SOCKET_URL = import.meta.env.VITE_API_URL || '';
-
-// Singleton socket instance
-let socket: Socket | null = null;
-
-export function disconnectSocket(): void {
-  socket?.disconnect();
-  socket = null;
-  connectionAttempts = 0;
-}
-let connectionAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-
-function getSocket(): Socket {
-  if (!socket) {
-    socket = io(SOCKET_URL, {
-      withCredentials: true,
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    });
-
-    socket.on('connect', () => {
-      connectionAttempts = 0;
-      console.log('[Socket] Connected');
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
-    });
-
-    socket.on('connect_error', (error) => {
-      connectionAttempts++;
-      console.log('[Socket] Connection error:', error.message);
-      if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.log('[Socket] Max reconnection attempts reached');
-      }
-    });
-  }
-  return socket;
-}
+import { getSocket, socket } from './socketConnection';
+export { disconnectSocket } from './socketConnection';
 
 interface JobSkippedData {
   job_id: string;
@@ -101,7 +60,7 @@ export function useJobSocket({
     const s = getSocket();
     socketRef.current = s;
 
-    if (subscribedRef.current) return;
+    if (subscribedRef.current || !s.connected) return;
 
     // Subscribe to appropriate room
     if (isAdmin) {
@@ -152,9 +111,12 @@ export function useJobSocket({
     s.on('job:progress', handleJobProgress);
     s.on('job:completed', handleJobCompleted);
     s.on('job:skipped', handleJobSkipped);
-
-    // Subscribe on mount
-    subscribe();
+    const handleConnect = () => {
+      subscribedRef.current = false;
+      subscribe();
+    };
+    s.on('connect', handleConnect);
+    if (s.connected) handleConnect();
 
     // Cleanup on unmount
     return () => {
@@ -162,6 +124,7 @@ export function useJobSocket({
       s.off('job:progress', handleJobProgress);
       s.off('job:completed', handleJobCompleted);
       s.off('job:skipped', handleJobSkipped);
+      s.off('connect', handleConnect);
       unsubscribe();
     };
   }, [subscribe, unsubscribe]);
@@ -225,7 +188,7 @@ export function useValidationSocket({
     const s = getSocket();
     socketRef.current = s;
 
-    if (subscribedRef.current) return;
+    if (subscribedRef.current || !s.connected) return;
 
     s.emit('subscribe:validation', { user_id: userId });
     subscribedRef.current = true;
@@ -257,13 +220,17 @@ export function useValidationSocket({
 
     s.on('config:validation_progress', handleProgress);
     s.on('config:validation_complete', handleComplete);
-
-    // Subscribe on mount
-    subscribe();
+    const handleConnect = () => {
+      subscribedRef.current = false;
+      subscribe();
+    };
+    s.on('connect', handleConnect);
+    if (s.connected) handleConnect();
 
     return () => {
       s.off('config:validation_progress', handleProgress);
       s.off('config:validation_complete', handleComplete);
+      s.off('connect', handleConnect);
       unsubscribe();
     };
   }, [userId, subscribe, unsubscribe]);
@@ -302,15 +269,16 @@ export function useStatsSocket({ onStatsUpdated }: UseStatsSocketOptions) {
     };
 
     s.on('stats:updated', handleStatsUpdated);
-
-    // Subscribe
-    if (!subscribedRef.current) {
+    const handleConnect = () => {
       s.emit('subscribe:stats');
       subscribedRef.current = true;
-    }
+    };
+    s.on('connect', handleConnect);
+    if (s.connected) handleConnect();
 
     return () => {
       s.off('stats:updated', handleStatsUpdated);
+      s.off('connect', handleConnect);
       if (subscribedRef.current) {
         s.emit('unsubscribe:stats');
         subscribedRef.current = false;
