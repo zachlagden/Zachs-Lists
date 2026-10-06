@@ -1,9 +1,106 @@
 use rayon::prelude::*;
-use regex::RegexSet;
+use regex::{Regex, RegexSet};
+use serde::Serialize;
 use std::collections::HashSet;
 use tracing::{debug, info, warn};
 
 use crate::db::progress::{WhitelistPatternMatch, WhitelistProgress};
+
+pub const MAX_WHITELIST_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WhitelistErrorCode {
+    InputTooLarge,
+    InvalidUtf8,
+    InputReadFailed,
+    InvalidDomain,
+    InvalidWildcard,
+    MalformedRegex,
+    InvalidRegex,
+    RegexCompileLimit,
+    RegexSetCompileFailed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WhitelistValidationError {
+    pub line: Option<usize>,
+    pub code: WhitelistErrorCode,
+    pub message: String,
+}
+
+impl WhitelistValidationError {
+    pub fn new(line: Option<usize>, code: WhitelistErrorCode) -> Self {
+        let message = match code {
+            WhitelistErrorCode::InputTooLarge => "Whitelist exceeds the 10 MiB input limit",
+            WhitelistErrorCode::InvalidUtf8 => "Whitelist must be valid UTF-8",
+            WhitelistErrorCode::InputReadFailed => "Could not read whitelist input",
+            WhitelistErrorCode::InvalidDomain => "Invalid domain pattern",
+            WhitelistErrorCode::InvalidWildcard => "Invalid wildcard pattern",
+            WhitelistErrorCode::MalformedRegex => "Regex must be nonempty and enclosed in slashes",
+            WhitelistErrorCode::InvalidRegex => "Invalid or unsupported Rust regex syntax",
+            WhitelistErrorCode::RegexCompileLimit => {
+                "Regex exceeds the Rust regex compilation limit"
+            }
+            WhitelistErrorCode::RegexSetCompileFailed => {
+                "Patterns exceed the Rust regex set compilation limit"
+            }
+        };
+        Self {
+            line,
+            code,
+            message: message.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WhitelistValidationFailure {
+    pub validated_count: usize,
+    pub errors: Vec<WhitelistValidationError>,
+}
+
+impl std::fmt::Display for WhitelistValidationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Whitelist validation failed with {} error(s)",
+            self.errors.len()
+        )
+    }
+}
+
+impl std::error::Error for WhitelistValidationFailure {}
+
+fn valid_domain(domain: &str) -> bool {
+    if domain.len() > 253 || !domain.contains('.') {
+        return false;
+    }
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label.as_bytes()[0].is_ascii_alphanumeric()
+            && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    })
+}
+
+fn valid_wildcard(pattern: &str) -> bool {
+    pattern.split('.').all(|label| {
+        !label.is_empty()
+            && label.as_bytes()[0] != b'-'
+            && label.as_bytes()[label.len() - 1] != b'-'
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'*')
+    })
+}
+
+fn wildcard_regex(pattern: &str) -> String {
+    format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"))
+}
 
 /// Pattern type for whitelist entries
 #[derive(Debug, Clone, PartialEq)]
@@ -55,7 +152,129 @@ impl WhitelistManager {
         }
     }
 
+    pub fn try_from_content(content: &str) -> Result<Self, WhitelistValidationFailure> {
+        if content.len() > MAX_WHITELIST_BYTES {
+            return Err(WhitelistValidationFailure {
+                validated_count: 0,
+                errors: vec![WhitelistValidationError::new(
+                    None,
+                    WhitelistErrorCode::InputTooLarge,
+                )],
+            });
+        }
+
+        let mut manager = Self::new();
+        let mut regex_strings = Vec::new();
+        let mut regex_lines = Vec::new();
+        let mut errors = Vec::new();
+        let mut validated_count = 0;
+
+        for (index, line) in content.lines().enumerate() {
+            let pattern = line.split('#').next().unwrap_or_default().trim();
+            if pattern.is_empty() {
+                continue;
+            }
+            validated_count += 1;
+            let line_number = index + 1;
+            let (pattern_type, regex_string) = if pattern.starts_with('/') || pattern.ends_with('/')
+            {
+                if pattern.len() <= 2 || !pattern.starts_with('/') || !pattern.ends_with('/') {
+                    errors.push(WhitelistValidationError::new(
+                        Some(line_number),
+                        WhitelistErrorCode::MalformedRegex,
+                    ));
+                    continue;
+                }
+                (
+                    PatternType::Regex,
+                    Some(pattern[1..pattern.len() - 1].to_string()),
+                )
+            } else if let Some(domain) = pattern.strip_prefix("@@") {
+                if !valid_domain(domain) {
+                    errors.push(WhitelistValidationError::new(
+                        Some(line_number),
+                        WhitelistErrorCode::InvalidDomain,
+                    ));
+                    continue;
+                }
+                let domain = domain.to_ascii_lowercase();
+                manager
+                    .subdomain_patterns
+                    .push((domain.clone(), format!(".{}", domain)));
+                (PatternType::Subdomain, None)
+            } else if pattern.contains('*') {
+                if !valid_wildcard(pattern) {
+                    errors.push(WhitelistValidationError::new(
+                        Some(line_number),
+                        WhitelistErrorCode::InvalidWildcard,
+                    ));
+                    continue;
+                }
+                (PatternType::Wildcard, Some(wildcard_regex(pattern)))
+            } else {
+                if !valid_domain(pattern) {
+                    errors.push(WhitelistValidationError::new(
+                        Some(line_number),
+                        WhitelistErrorCode::InvalidDomain,
+                    ));
+                    continue;
+                }
+                manager.exact_patterns.insert(pattern.to_ascii_lowercase());
+                (PatternType::Exact, None)
+            };
+
+            if let Some(regex_string) = regex_string {
+                if let Err(error) = Regex::new(&regex_string) {
+                    let code = match error {
+                        regex::Error::CompiledTooBig(_) => WhitelistErrorCode::RegexCompileLimit,
+                        _ => WhitelistErrorCode::InvalidRegex,
+                    };
+                    errors.push(WhitelistValidationError::new(Some(line_number), code));
+                    continue;
+                }
+                regex_strings.push(regex_string);
+                regex_lines.push(line_number);
+            }
+            manager.all_patterns.push(PatternInfo {
+                original: pattern.to_string(),
+                pattern_type,
+            });
+        }
+
+        if !errors.is_empty() {
+            return Err(WhitelistValidationFailure {
+                validated_count,
+                errors,
+            });
+        }
+        if !regex_strings.is_empty() {
+            match RegexSet::new(&regex_strings) {
+                Ok(set) => manager.regex_set = Some(set),
+                Err(_) => {
+                    return Err(WhitelistValidationFailure {
+                        validated_count,
+                        errors: regex_lines
+                            .into_iter()
+                            .map(|line| {
+                                WhitelistValidationError::new(
+                                    Some(line),
+                                    WhitelistErrorCode::RegexSetCompileFailed,
+                                )
+                            })
+                            .collect(),
+                    });
+                }
+            }
+        }
+        Ok(manager)
+    }
+
+    pub fn pattern_count(&self) -> usize {
+        self.all_patterns.len()
+    }
+
     /// Load whitelist from content string (optimized structure)
+    #[deprecated(note = "Use try_from_content for validation, execution and fingerprinting")]
     pub fn from_content(content: &str) -> Self {
         let mut exact_patterns = HashSet::new();
         let mut subdomain_patterns = Vec::new();
@@ -94,10 +313,7 @@ impl WhitelistManager {
             }
             // Wildcard pattern: *.domain.com
             else if pattern.contains('*') {
-                let regex_str = format!(
-                    "^{}$",
-                    regex::escape(pattern).replace(r"\*", ".*")
-                );
+                let regex_str = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
                 regex_strings.push(regex_str);
                 all_patterns.push(PatternInfo {
                     original: pattern.to_string(),
@@ -171,9 +387,7 @@ impl WhitelistManager {
     /// Check if domain matches a specific pattern
     fn matches_pattern(&self, domain: &str, pattern: &PatternInfo) -> bool {
         match pattern.pattern_type {
-            PatternType::Exact => {
-                pattern.original.to_lowercase() == domain
-            }
+            PatternType::Exact => pattern.original.to_lowercase() == domain,
             PatternType::Subdomain => {
                 let suffix = pattern.original.trim_start_matches("@@").to_lowercase();
                 let dotted = format!(".{}", suffix);
@@ -216,9 +430,8 @@ impl WhitelistManager {
         let total = domains.len();
 
         // Partition into remaining and removed
-        let (remaining, removed_domains): (HashSet<String>, Vec<String>) = domains
-            .into_par_iter()
-            .partition_map(|domain| {
+        let (remaining, removed_domains): (HashSet<String>, Vec<String>) =
+            domains.into_par_iter().partition_map(|domain| {
                 if self.is_whitelisted(&domain) {
                     rayon::iter::Either::Right(domain)
                 } else {
@@ -254,12 +467,14 @@ impl WhitelistManager {
 
         let mut pattern_matches: Vec<WhitelistPatternMatch> = pattern_counts
             .into_iter()
-            .map(|(pattern, (pattern_type, match_count))| WhitelistPatternMatch {
-                pattern,
-                pattern_type,
-                match_count,
-                samples: Vec::new(),
-            })
+            .map(
+                |(pattern, (pattern_type, match_count))| WhitelistPatternMatch {
+                    pattern,
+                    pattern_type,
+                    match_count,
+                    samples: Vec::new(),
+                },
+            )
             .collect();
 
         // Sort by match count descending
@@ -310,12 +525,14 @@ impl WhitelistManager {
 
         let mut pattern_matches: Vec<WhitelistPatternMatch> = pattern_counts
             .into_iter()
-            .map(|(pattern, (pattern_type, match_count))| WhitelistPatternMatch {
-                pattern,
-                pattern_type,
-                match_count,
-                samples: Vec::new(),
-            })
+            .map(
+                |(pattern, (pattern_type, match_count))| WhitelistPatternMatch {
+                    pattern,
+                    pattern_type,
+                    match_count,
+                    samples: Vec::new(),
+                },
+            )
             .collect();
 
         pattern_matches.sort_by(|a, b| b.match_count.cmp(&a.match_count));
@@ -346,9 +563,9 @@ impl WhitelistManager {
         let mut patterns: Vec<String> = self
             .all_patterns
             .iter()
-            .map(|p| {
-                // Normalize pattern to lowercase for consistent fingerprinting
-                p.original.to_lowercase()
+            .map(|p| match p.pattern_type {
+                PatternType::Exact | PatternType::Subdomain => p.original.to_ascii_lowercase(),
+                PatternType::Wildcard | PatternType::Regex => p.original.clone(),
             })
             .collect();
         patterns.sort();
@@ -406,7 +623,9 @@ mod tests {
     #[test]
     fn test_comments() {
         // Test full line comment, inline comment, and whitespace
-        let manager = WhitelistManager::from_content("# full line comment\nexample.com # inline comment\ntest.com\n\n  ");
+        let manager = WhitelistManager::from_content(
+            "# full line comment\nexample.com # inline comment\ntest.com\n\n  ",
+        );
         assert!(manager.is_whitelisted("example.com"));
         assert!(manager.is_whitelisted("test.com"));
         assert_eq!(manager.all_patterns.len(), 2);
