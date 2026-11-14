@@ -6,9 +6,15 @@ Handles user requests for higher domain limits.
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from app.extensions import mongo
 from app.utils.time import utc_iso
+
+
+class PendingRequestExists(Exception):
+    pass
 
 
 class LimitRequest:
@@ -20,6 +26,7 @@ class LimitRequest:
     STATUS_PENDING = "pending"
     STATUS_APPROVED = "approved"
     STATUS_DENIED = "denied"
+    STATUS_SUPERSEDED = "superseded"
 
     # Intended use options
     INTENDED_USE_OPTIONS = ["personal", "family", "organization", "other"]
@@ -29,18 +36,18 @@ class LimitRequest:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         """Get request ID as string."""
         return str(self._id) if self._id else None
 
     @property
-    def user_id(self) -> str:
+    def user_id(self) -> Optional[str]:
         """Get user ID as string."""
         user_id = self._data.get("user_id")
         return str(user_id) if user_id else None
 
     @property
-    def username(self) -> str:
+    def username(self) -> Optional[str]:
         return self._data.get("username")
 
     @property
@@ -111,62 +118,59 @@ class LimitRequest:
             "reviewed_at": utc_iso(self.reviewed_at),
         }
 
+    def _review(self, status: str, changes: Dict[str, Any]) -> bool:
+        reviewed = mongo.db[self.COLLECTION].find_one_and_update(
+            {"_id": self._id, "status": self.STATUS_PENDING},
+            {"$set": {**changes, "status": status, "reviewed_at": datetime.utcnow()}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if reviewed is None:
+            return False
+        self._data = reviewed
+        return True
+
     def approve(
-        self, admin_username: str, approved_limit: int = None, response: str = None
-    ) -> None:
-        """Approve the limit request."""
+        self,
+        admin_username: str,
+        approved_limit: Optional[int] = None,
+        response: Optional[str] = None,
+    ) -> bool:
         from app.models.user import User
 
         final_limit = approved_limit or self.requested_tier
-
-        # Update request status
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
+        approved = self._review(
+            self.STATUS_APPROVED,
             {
-                "$set": {
-                    "status": self.STATUS_APPROVED,
-                    "approved_limit": final_limit,
-                    "admin_response": response,
-                    "reviewed_by": admin_username,
-                    "reviewed_at": datetime.utcnow(),
-                }
+                "approved_limit": final_limit,
+                "admin_response": response,
+                "reviewed_by": admin_username,
             },
         )
+        if not approved:
+            return False
 
-        # Update user's limit
-        user = User.get_by_id(self.user_id)
+        user = User.get_by_id(self.user_id) if self.user_id else None
         if user:
-            current_limits = user._data.get("limits", {})
-            current_limits["max_domains"] = final_limit
-            user.set_limits(current_limits)
-
-            # Add notification
+            user.apply_limits({"max_domains": final_limit})
             user.add_notification(
                 notification_type="limit_request_approved",
                 title="Limit Request Approved",
                 message=f"Your domain limit has been increased to {final_limit:,} domains.",
                 data={"new_limit": final_limit, "request_id": self.id},
             )
+        return True
 
-    def deny(self, admin_username: str, response: str = None) -> None:
-        """Deny the limit request."""
+    def deny(self, admin_username: str, response: Optional[str] = None) -> bool:
         from app.models.user import User
 
-        # Update request status
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_DENIED,
-                    "admin_response": response,
-                    "reviewed_by": admin_username,
-                    "reviewed_at": datetime.utcnow(),
-                }
-            },
+        denied = self._review(
+            self.STATUS_DENIED,
+            {"admin_response": response, "reviewed_by": admin_username},
         )
+        if not denied:
+            return False
 
-        # Add notification to user
-        user = User.get_by_id(self.user_id)
+        user = User.get_by_id(self.user_id) if self.user_id else None
         if user:
             message = "Your request for a higher domain limit has been denied."
             if response:
@@ -178,6 +182,7 @@ class LimitRequest:
                 message=message,
                 data={"request_id": self.id},
             )
+        return True
 
     @classmethod
     def create(
@@ -205,7 +210,10 @@ class LimitRequest:
             "reviewed_at": None,
         }
 
-        result = mongo.db[cls.COLLECTION].insert_one(request_data)
+        try:
+            result = mongo.db[cls.COLLECTION].insert_one(request_data)
+        except DuplicateKeyError:
+            raise PendingRequestExists() from None
         request_data["_id"] = result.inserted_id
 
         return cls(request_data)

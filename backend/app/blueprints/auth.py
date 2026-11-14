@@ -17,8 +17,10 @@ from flask import (
 )
 import requests
 
+from app.extensions import limiter
 from app.models.user import User
 from app.utils.client_ip import get_client_ip
+from app.utils.rate_limits import configured_limit
 from app.utils.time import utc_iso
 
 auth_bp = Blueprint("auth", __name__)
@@ -208,6 +210,21 @@ def github_callback():
             name=user_data.get("name"),  # GitHub display name
         )
 
+        if not user.is_enabled:
+            current_app.logger.info(f"Disabled user {user.username} refused at login")
+            return redirect(
+                f"{current_app.config['FRONTEND_URL']}/login?error=account_disabled"
+            )
+        if user.is_banned:
+            current_app.logger.info(f"Banned user {user.username} refused at login")
+            refusal = {"error": "account_banned"}
+            ban_ends_at = utc_iso(user.ban_ends_at)
+            if ban_ends_at:
+                refusal["until"] = ban_ends_at
+            return redirect(
+                f"{current_app.config['FRONTEND_URL']}/login?{urlencode(refusal)}"
+            )
+
         # Set session
         session.permanent = True
         session["user_id"] = str(user.id)
@@ -239,6 +256,7 @@ def logout():
 
 
 @auth_bp.route("/me")
+@limiter.limit(configured_limit("RATELIMIT_AUTH_ME"))
 @login_required
 def get_current_user(user: User) -> Response:
     ip = get_client_ip()
