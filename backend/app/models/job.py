@@ -222,6 +222,9 @@ class Job:
             "completed_at": utc_iso(self.completed_at),
             "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
+            "read": bool(self._data.get("read", False)),
+            "force_rebuild": bool(self._data.get("force_rebuild", False)),
+            "attempts": int(self._data.get("stale_attempts") or 0),
         }
 
     def get_progress_snapshot(self) -> Dict[str, Any]:

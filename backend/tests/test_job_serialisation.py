@@ -41,6 +41,22 @@ def test_aware_timestamps_are_converted_to_utc() -> None:
     assert payload["created_at"] == "2026-01-02T03:04:05.000Z"
 
 
+def test_read_force_rebuild_and_attempts_default_when_unset() -> None:
+    payload = Job(stored_job()).to_dict()
+
+    assert payload["read"] is False
+    assert payload["force_rebuild"] is False
+    assert payload["attempts"] == 0
+
+
+def test_read_force_rebuild_and_attempts_reflect_stored_values() -> None:
+    payload = Job(stored_job(read=True, force_rebuild=True, stale_attempts=2)).to_dict()
+
+    assert payload["read"] is True
+    assert payload["force_rebuild"] is True
+    assert payload["attempts"] == 2
+
+
 def test_unset_timestamps_stay_null() -> None:
     payload = Job(
         stored_job(status=Job.STATUS_QUEUED, started_at=None, completed_at=None)
