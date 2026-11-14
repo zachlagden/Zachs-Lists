@@ -1,3 +1,4 @@
+mod cancellation;
 mod config;
 mod db;
 mod downloader;
@@ -9,6 +10,8 @@ mod safe_http;
 mod source_cache_test_server;
 #[cfg(test)]
 mod source_contract_tests;
+#[cfg(test)]
+mod test_support;
 mod whitelist;
 #[cfg(test)]
 mod whitelist_contract_tests;

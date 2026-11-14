@@ -280,6 +280,26 @@ impl JobProgress {
     }
 }
 
+pub mod error_code {
+    pub const INVALID_CONFIG: &str = "invalid_config";
+    pub const NO_SOURCES: &str = "no_sources";
+    pub const ALL_SOURCES_FAILED: &str = "all_sources_failed";
+    pub const NO_DOMAINS: &str = "no_domains";
+    pub const INTERNAL: &str = "internal";
+
+    #[cfg(test)]
+    pub const ALL: [&str; 5] = [
+        INVALID_CONFIG,
+        NO_SOURCES,
+        ALL_SOURCES_FAILED,
+        NO_DOMAINS,
+        INTERNAL,
+    ];
+}
+
+pub const INTERNAL_ERROR_MESSAGE: &str =
+    "The build failed because of an internal error. Please try again.";
+
 /// Job result on completion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobResult {
@@ -294,7 +314,9 @@ pub struct JobResult {
     pub categories: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub errors: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<String>,
     /// Username whose output was copied (for fingerprint-matched builds)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,13 +351,21 @@ impl JobResult {
             output_files,
             categories: std::collections::HashMap::new(),
             errors: Vec::new(),
+            error_code: None,
             skip_reason: None,
             copied_from: None,
         }
     }
 
+    pub fn skipped(reason: &str) -> Self {
+        Self {
+            skip_reason: Some(reason.to_string()),
+            ..Self::success(0, 0, 0, 0, 0, Vec::new())
+        }
+    }
+
     /// Create a failure result
-    pub fn failure(errors: Vec<String>) -> Self {
+    pub fn failure(code: &str, errors: Vec<String>) -> Self {
         Self {
             sources_processed: 0,
             sources_failed: 0,
@@ -345,6 +375,7 @@ impl JobResult {
             output_files: Vec::new(),
             categories: std::collections::HashMap::new(),
             errors,
+            error_code: Some(code.to_string()),
             skip_reason: None,
             copied_from: None,
         }
@@ -373,6 +404,7 @@ impl JobResult {
                 .map(|source| source.categories.clone())
                 .unwrap_or_default(),
             errors: Vec::new(),
+            error_code: None,
             skip_reason: None,
             copied_from: Some(source_username),
         }

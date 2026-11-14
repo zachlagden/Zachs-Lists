@@ -1,70 +1,111 @@
-use anyhow::Result;
-use bson::{doc, oid::ObjectId, DateTime as BsonDateTime};
-use chrono::Utc;
+use bson::{doc, oid::ObjectId, Bson, Document};
 use mongodb::{
     options::{FindOneAndUpdateOptions, FindOneOptions, ReturnDocument},
     Collection, Database,
 };
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
-use super::progress::{JobProgress, JobResult};
+use super::progress::{error_code, JobProgress, JobResult, INTERNAL_ERROR_MESSAGE};
 
 /// Job type enum
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum JobType {
+    #[default]
     Manual,
     Scheduled,
     Admin,
 }
 
-/// Job status enum
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum JobStatus {
-    Queued,
-    Processing,
-    Completed,
-    Failed,
-    Skipped,
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigSnapshot {
+    pub blocklists: String,
+    #[serde(default)]
+    pub whitelist: Option<String>,
 }
 
-/// Job document from MongoDB
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Job {
     #[serde(rename = "_id")]
     pub id: ObjectId,
     pub job_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<ObjectId>,
     pub username: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub job_type: JobType,
-    pub status: JobStatus,
-    pub priority: i32,
-    pub progress: JobProgress,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<JobResult>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<BsonDateTime>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<BsonDateTime>,
-    pub created_at: BsonDateTime,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worker_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub claimed_at: Option<BsonDateTime>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub heartbeat_at: Option<BsonDateTime>,
-    #[serde(default)]
-    pub read: bool,
     #[serde(default)]
     pub force_rebuild: bool,
+    #[serde(default)]
+    pub config_snapshot: Option<ConfigSnapshot>,
+    #[serde(default)]
+    pub attempt: i64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum JobWriteError {
+    #[error("the job lease is no longer held by this worker")]
+    LeaseLost,
+    #[error(transparent)]
+    Database(#[from] mongodb::error::Error),
+    #[error(transparent)]
+    Encode(#[from] bson::ser::Error),
+}
+
+#[derive(Debug)]
+pub enum Claim {
+    Claimed(Box<Job>),
+    Unusable,
+    NoneQueued,
+}
+
+pub fn initial_queue_progress() -> Document {
+    doc! {
+        "current_step": "queued",
+        "stage": "queue",
+        "total_sources": 0,
+        "processed_sources": 0,
+        "current_source": Bson::Null,
+        "sources": [],
+        "whitelist": Bson::Null,
+        "generation": Bson::Null,
+        "queue_position": Bson::Null,
+        "queue_delay_remaining_ms": Bson::Null,
+        "stage_started_at": Bson::Null,
+    }
+}
+
+fn increment_or_start(field: &str) -> Document {
+    let path = format!("${field}");
+    doc! {
+        "$cond": [
+            { "$isNumber": &path },
+            { "$add": [&path, 1] },
+            1,
+        ]
+    }
+}
+
+fn requeue_fields() -> Document {
+    doc! {
+        "status": "queued",
+        "worker_id": Bson::Null,
+        "claimed_at": Bson::Null,
+        "heartbeat_at": Bson::Null,
+        "progress": initial_queue_progress(),
+    }
+}
+
+fn revision_bump(set: Document) -> Document {
+    doc! {
+        "$set": set,
+        "$inc": { "rev": 1 },
+        "$currentDate": { "updated_at": true },
+    }
 }
 
 /// Job repository for MongoDB operations
 pub struct JobRepository {
-    collection: Collection<Job>,
+    collection: Collection<Document>,
     worker_id: String,
 }
 
@@ -77,174 +118,166 @@ impl JobRepository {
         }
     }
 
-    /// Claim the next available job (atomic operation)
-    pub async fn claim_next(&self) -> Result<Option<Job>> {
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-
+    pub async fn claim_next(&self) -> Result<Claim, JobWriteError> {
         let filter = doc! {
             "status": "queued",
             "worker_id": null
         };
 
-        let update = doc! {
+        let update = vec![doc! {
             "$set": {
                 "status": "processing",
                 "worker_id": &self.worker_id,
-                "claimed_at": now,
-                "heartbeat_at": now,
-                "started_at": now
+                "claimed_at": "$$NOW",
+                "heartbeat_at": "$$NOW",
+                "started_at": { "$ifNull": ["$started_at", "$$NOW"] },
+                "attempt": increment_or_start("attempt"),
+                "rev": increment_or_start("rev"),
+                "updated_at": "$$NOW",
             }
-        };
+        }];
 
         let options = FindOneAndUpdateOptions::builder()
             .sort(doc! { "priority": 1, "created_at": 1 })
             .return_document(ReturnDocument::After)
             .build();
 
-        let result = self
+        let Some(document) = self
             .collection
             .find_one_and_update(filter, update)
             .with_options(options)
-            .await?;
-
-        Ok(result)
-    }
-
-    /// Update job progress
-    pub async fn update_progress(&self, job_id: &ObjectId, progress: &JobProgress) -> Result<()> {
-        let progress_doc = bson::to_document(progress)?;
-
-        self.collection
-            .update_one(
-                doc! { "_id": job_id },
-                doc! { "$set": { "progress": progress_doc } },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Update heartbeat timestamp
-    pub async fn heartbeat(&self, job_id: &str) -> Result<bool> {
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-
-        let result = self
-            .collection
-            .update_one(
-                doc! {
-                    "job_id": job_id,
-                    "worker_id": &self.worker_id,
-                    "status": "processing"
-                },
-                doc! { "$set": { "heartbeat_at": now } },
-            )
-            .await?;
-
-        Ok(result.modified_count > 0)
-    }
-
-    /// Complete a job successfully
-    pub async fn complete(&self, job_id: &ObjectId, result: JobResult) -> Result<()> {
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-        let result_doc = bson::to_document(&result)?;
-
-        self.collection
-            .update_one(
-                doc! { "_id": job_id },
-                doc! {
-                    "$set": {
-                        "status": "completed",
-                        "completed_at": now,
-                        "result": result_doc
-                    }
-                },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Fail a job
-    pub async fn fail(&self, job_id: &ObjectId, errors: Vec<String>) -> Result<()> {
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-        let result = JobResult::failure(errors);
-        let result_doc = bson::to_document(&result)?;
-
-        self.collection
-            .update_one(
-                doc! { "_id": job_id },
-                doc! {
-                    "$set": {
-                        "status": "failed",
-                        "completed_at": now,
-                        "result": result_doc
-                    }
-                },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Skip a job (no changes detected)
-    pub async fn skip(&self, job_id: &ObjectId, reason: String) -> Result<()> {
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-
-        // Create a minimal result with skip_reason
-        let result_doc = doc! {
-            "sources_processed": 0_i64,
-            "sources_failed": 0_i64,
-            "total_domains": 0_i64,
-            "unique_domains": 0_i64,
-            "whitelisted_removed": 0_i64,
-            "output_files": [],
-            "errors": [],
-            "skip_reason": &reason,
+            .await?
+        else {
+            return Ok(Claim::NoneQueued);
         };
 
-        self.collection
-            .update_one(
-                doc! { "_id": job_id },
-                doc! {
-                    "$set": {
-                        "status": "skipped",
-                        "completed_at": now,
-                        "result": result_doc
-                    }
-                },
-            )
-            .await?;
-
-        Ok(())
+        let stored_id = document.get("_id").cloned().unwrap_or(Bson::Null);
+        match bson::from_document::<Job>(document) {
+            Ok(job) => Ok(Claim::Claimed(Box::new(job))),
+            Err(unreadable) => {
+                error!("Claimed job {stored_id} cannot be read: {unreadable}");
+                self.write_failure(
+                    &stored_id,
+                    error_code::INTERNAL,
+                    vec![INTERNAL_ERROR_MESSAGE.to_string()],
+                )
+                .await?;
+                Ok(Claim::Unusable)
+            }
+        }
     }
 
-    /// Release a job back to the queue (on shutdown)
-    pub async fn release(&self, job_id: &str) -> Result<bool> {
+    async fn write_under_lease(
+        &self,
+        stored_id: &Bson,
+        set: Document,
+    ) -> Result<(), JobWriteError> {
         let result = self
             .collection
             .update_one(
                 doc! {
-                    "job_id": job_id,
+                    "_id": stored_id.clone(),
                     "worker_id": &self.worker_id,
                     "status": "processing"
                 },
-                doc! {
-                    "$set": {
-                        "status": "queued",
-                        "worker_id": null,
-                        "claimed_at": null,
-                        "heartbeat_at": null,
-                        "started_at": null
-                    }
-                },
+                revision_bump(set),
             )
             .await?;
 
-        Ok(result.modified_count > 0)
+        if result.matched_count == 0 {
+            return Err(JobWriteError::LeaseLost);
+        }
+        Ok(())
     }
 
-    /// Release all jobs held by this worker
-    pub async fn release_all(&self) -> Result<u64> {
+    async fn write_failure(
+        &self,
+        stored_id: &Bson,
+        code: &str,
+        errors: Vec<String>,
+    ) -> Result<(), JobWriteError> {
+        let result = bson::to_document(&JobResult::failure(code, errors))?;
+        self.write_under_lease(
+            stored_id,
+            doc! {
+                "status": "failed",
+                "completed_at": bson::DateTime::now(),
+                "result": result,
+            },
+        )
+        .await
+    }
+
+    pub async fn update_progress(
+        &self,
+        job_id: &ObjectId,
+        progress: &JobProgress,
+    ) -> Result<(), JobWriteError> {
+        let progress = bson::to_document(progress)?;
+        self.write_under_lease(&Bson::ObjectId(*job_id), doc! { "progress": progress })
+            .await
+    }
+
+    pub async fn heartbeat(&self, job_id: &ObjectId) -> Result<bool, JobWriteError> {
+        let written = self
+            .write_under_lease(
+                &Bson::ObjectId(*job_id),
+                doc! { "heartbeat_at": bson::DateTime::now() },
+            )
+            .await;
+        match written {
+            Ok(()) => Ok(true),
+            Err(JobWriteError::LeaseLost) => Ok(false),
+            Err(failed) => Err(failed),
+        }
+    }
+
+    pub async fn complete(
+        &self,
+        job_id: &ObjectId,
+        result: &JobResult,
+    ) -> Result<(), JobWriteError> {
+        let result = bson::to_document(result)?;
+        self.write_under_lease(
+            &Bson::ObjectId(*job_id),
+            doc! {
+                "status": "completed",
+                "completed_at": bson::DateTime::now(),
+                "result": result,
+            },
+        )
+        .await
+    }
+
+    pub async fn fail(
+        &self,
+        job_id: &ObjectId,
+        code: &str,
+        errors: Vec<String>,
+    ) -> Result<(), JobWriteError> {
+        self.write_failure(&Bson::ObjectId(*job_id), code, errors)
+            .await
+    }
+
+    pub async fn skip(&self, job_id: &ObjectId, reason: &str) -> Result<(), JobWriteError> {
+        let result = bson::to_document(&JobResult::skipped(reason))?;
+        self.write_under_lease(
+            &Bson::ObjectId(*job_id),
+            doc! {
+                "status": "skipped",
+                "completed_at": bson::DateTime::now(),
+                "result": result,
+            },
+        )
+        .await
+    }
+
+    pub async fn release(&self, job_id: &ObjectId) -> Result<(), JobWriteError> {
+        self.write_under_lease(&Bson::ObjectId(*job_id), requeue_fields())
+            .await
+    }
+
+    pub async fn release_all(&self) -> Result<u64, JobWriteError> {
         let result = self
             .collection
             .update_many(
@@ -252,15 +285,7 @@ impl JobRepository {
                     "worker_id": &self.worker_id,
                     "status": "processing"
                 },
-                doc! {
-                    "$set": {
-                        "status": "queued",
-                        "worker_id": null,
-                        "claimed_at": null,
-                        "heartbeat_at": null,
-                        "started_at": null
-                    }
-                },
+                revision_bump(requeue_fields()),
             )
             .await?;
 
@@ -270,45 +295,58 @@ impl JobRepository {
     /// Get the result from a user's last completed job
     ///
     /// Used for copying build stats when fingerprint matches another user.
-    pub async fn get_last_completed_result(&self, username: &str) -> Result<Option<JobResult>> {
-        let filter = doc! {
-            "username": username,
-            "status": "completed",
-            "result": { "$exists": true }
-        };
-
-        let options = FindOneOptions::builder()
-            .sort(doc! { "completed_at": -1 })
-            .build();
-
-        let job = self
-            .collection
-            .find_one(filter)
-            .with_options(options)
-            .await?;
-        Ok(job.and_then(|j| j.result))
+    pub async fn get_last_completed_result(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<JobResult>> {
+        match self.last_completed_field(username, "result").await? {
+            Some(result) => Ok(Some(bson::from_document(result)?)),
+            None => Ok(None),
+        }
     }
 
     /// Get the progress from a user's last completed job
     ///
     /// Used for copying full progress (sources, whitelist breakdown, stage snapshots)
     /// when fingerprint matches another user.
-    pub async fn get_last_completed_progress(&self, username: &str) -> Result<Option<JobProgress>> {
+    pub async fn get_last_completed_progress(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<JobProgress>> {
+        match self.last_completed_field(username, "progress").await? {
+            Some(progress) => Ok(Some(bson::from_document(progress)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn last_completed_field(
+        &self,
+        username: &str,
+        field: &str,
+    ) -> anyhow::Result<Option<Document>> {
         let filter = doc! {
             "username": username,
             "status": "completed",
-            "progress": { "$exists": true }
+            field: { "$type": "object" }
         };
 
         let options = FindOneOptions::builder()
             .sort(doc! { "completed_at": -1 })
+            .projection(doc! { field: 1 })
             .build();
 
-        let job = self
+        let stored = self
             .collection
             .find_one(filter)
             .with_options(options)
             .await?;
-        Ok(job.map(|j| j.progress))
+        match stored.and_then(|mut job| job.remove(field)) {
+            Some(Bson::Document(value)) => Ok(Some(value)),
+            _ => Ok(None),
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "job_tests.rs"]
+mod tests;
