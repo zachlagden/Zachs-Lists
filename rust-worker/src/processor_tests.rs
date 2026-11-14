@@ -704,25 +704,28 @@ async fn heartbeat_keeps_writing_during_blocking_work_and_leaves_the_revision_al
         }
     });
 
-    let blocked_until = crate::stages::run_blocking(|| {
-        let extractor = DomainExtractor::new();
-        let mut domains = ExtractedDomains::default();
-        extract_source(
-            &extractor,
-            SourceBody {
-                source_index: 0,
-                category: None,
-                content: hosts_body(100_000),
-            },
-            &mut domains,
-            &Cancellation::default(),
-            &|_| {},
-        )?;
-        std::thread::sleep(Duration::from_millis(600));
-        Ok(std::time::Instant::now())
-    })
-    .await
-    .unwrap();
+    let blocked_until = harness
+        .processor
+        .stage_thread
+        .run(|| {
+            let extractor = DomainExtractor::new();
+            let mut domains = CategoryDomains::default();
+            extract_source(
+                &extractor,
+                SourceBody {
+                    source_index: 0,
+                    category: None,
+                    content: hosts_body(100_000),
+                },
+                &mut domains,
+                &Cancellation::default(),
+                &|_| {},
+            )?;
+            std::thread::sleep(Duration::from_millis(600));
+            Ok(std::time::Instant::now())
+        })
+        .await
+        .unwrap();
 
     let fifth_heartbeat_at = heartbeat.await.unwrap();
     assert!(fifth_heartbeat_at < blocked_until);

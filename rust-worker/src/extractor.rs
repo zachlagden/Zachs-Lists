@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, LinkedList};
 
 use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
 
@@ -58,8 +58,14 @@ impl FormatBreakdown {
 /// Result of extraction with format breakdown
 #[derive(Debug, Clone)]
 pub struct ExtractionOutput {
-    pub results: Vec<ExtractionResult>,
+    pub batches: Vec<Vec<ExtractionResult>>,
     pub format_breakdown: FormatBreakdown,
+}
+
+impl ExtractionOutput {
+    pub fn domain_count(&self) -> u64 {
+        self.batches.iter().map(|batch| batch.len() as u64).sum()
+    }
 }
 
 #[derive(Default)]
@@ -203,20 +209,27 @@ impl DomainExtractor {
                 }
                 Ok(partial)
             })
-            .try_reduce(PartialExtraction::default, |mut left, mut right| {
-                left.results.append(&mut right.results);
-                left.format_breakdown.hosts += right.format_breakdown.hosts;
-                left.format_breakdown.plain += right.format_breakdown.plain;
-                left.format_breakdown.adblock += right.format_breakdown.adblock;
-                left.unreported += right.unreported;
+            .map(|partial| partial.map(|partial| LinkedList::from([partial])))
+            .try_reduce(LinkedList::new, |mut left, mut right| {
+                left.append(&mut right);
                 Ok(left)
             })?;
-        report_extracted(merged.unreported);
 
-        Ok(ExtractionOutput {
-            results: merged.results,
-            format_breakdown: merged.format_breakdown,
-        })
+        let mut output = ExtractionOutput {
+            batches: Vec::with_capacity(merged.len()),
+            format_breakdown: FormatBreakdown::default(),
+        };
+        let mut unreported = 0;
+        for partial in merged {
+            output.format_breakdown.hosts += partial.format_breakdown.hosts;
+            output.format_breakdown.plain += partial.format_breakdown.plain;
+            output.format_breakdown.adblock += partial.format_breakdown.adblock;
+            unreported += partial.unreported;
+            output.batches.push(partial.results);
+        }
+        report_extracted(unreported);
+
+        Ok(output)
     }
 
     /// Sort domains alphabetically (parallel sort)
@@ -434,7 +447,7 @@ mod tests {
             .extract(content, &Cancellation::default(), &|_| {})
             .unwrap();
 
-        assert_eq!(output.results.len(), 7);
+        assert_eq!(output.domain_count(), 7);
         assert_eq!(output.format_breakdown.hosts, 2);
         assert_eq!(output.format_breakdown.adblock, 3);
         assert_eq!(output.format_breakdown.plain, 2);
@@ -475,7 +488,7 @@ mod tests {
         let output = extractor
             .extract(&content, &Cancellation::default(), &count)
             .unwrap();
-        assert_eq!(output.results.len(), 50_000);
+        assert_eq!(output.domain_count(), 50_000);
         assert_eq!(output.format_breakdown.hosts, 50_000);
         assert_eq!(reported.into_inner(), 50_000);
 

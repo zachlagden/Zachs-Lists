@@ -59,9 +59,9 @@ fn body(source_index: usize, category: Option<&str>, content: Vec<u8>) -> Source
     }
 }
 
-fn extracted(bodies: Vec<SourceBody>) -> ExtractedDomains {
+fn extracted(bodies: Vec<SourceBody>) -> CategoryDomains {
     let extractor = DomainExtractor::new();
-    let mut domains = ExtractedDomains::default();
+    let mut domains = CategoryDomains::default();
     for body in bodies {
         extract_source(
             &extractor,
@@ -75,7 +75,7 @@ fn extracted(bodies: Vec<SourceBody>) -> ExtractedDomains {
     domains
 }
 
-fn whitelisted(domains: ExtractedDomains, whitelist: &str) -> WhitelistOutcome {
+fn whitelisted(domains: CategoryDomains, whitelist: &str) -> WhitelistOutcome {
     let cancellation = Cancellation::default();
     let plan = plan_whitelist(whitelist, domains, &cancellation).unwrap();
     apply_whitelist(plan, &cancellation, &|_| {}).unwrap()
@@ -84,7 +84,7 @@ fn whitelisted(domains: ExtractedDomains, whitelist: &str) -> WhitelistOutcome {
 #[test]
 fn extraction_counts_domains_and_keeps_the_rule_of_the_later_source() {
     let extractor = DomainExtractor::new();
-    let mut domains = ExtractedDomains::default();
+    let mut domains = CategoryDomains::default();
     let cancellation = Cancellation::default();
 
     let later = extract_source(
@@ -118,8 +118,12 @@ fn extraction_counts_domains_and_keeps_the_rule_of_the_later_source() {
     assert_eq!(earlier.format_breakdown.adblock, 1);
     let filtered = whitelisted(domains, "");
     assert_eq!(
-        filtered.domains.adblock_rules.get("shared.example"),
-        Some(&"||shared.example^$important".to_string())
+        filtered
+            .domains
+            .adblock_rules
+            .get("shared.example")
+            .map(AsRef::as_ref),
+        Some("||shared.example^$important")
     );
     assert_eq!(filtered.progress.domains_before, 2);
 }
@@ -127,7 +131,7 @@ fn extraction_counts_domains_and_keeps_the_rule_of_the_later_source() {
 #[test]
 fn cancellation_during_extraction_stops_within_the_bound() {
     let extractor = DomainExtractor::new();
-    let mut domains = ExtractedDomains::default();
+    let mut domains = CategoryDomains::default();
     let stop = CancelOnFirstReport::new();
 
     let outcome = extract_source(
@@ -350,21 +354,23 @@ async fn heartbeat_ticks_keep_running_while_extraction_blocks_one_runtime_thread
     let ticks_before = ticks.load(Ordering::Relaxed);
     let started = Instant::now();
 
-    let extraction = run_blocking(|| {
-        let extractor = DomainExtractor::new();
-        let mut domains = ExtractedDomains::default();
-        let extraction = extract_source(
-            &extractor,
-            body(0, None, hosts_body(30 * WORK_GRAIN)),
-            &mut domains,
-            &Cancellation::default(),
-            &|_| {},
-        )?;
-        std::thread::sleep(Duration::from_millis(300));
-        Ok(extraction.domain_count)
-    })
-    .await
-    .unwrap();
+    let stage_thread = StageThread::start().unwrap();
+    let extraction = stage_thread
+        .run(|| {
+            let extractor = DomainExtractor::new();
+            let mut domains = CategoryDomains::default();
+            let extraction = extract_source(
+                &extractor,
+                body(0, None, hosts_body(30 * WORK_GRAIN)),
+                &mut domains,
+                &Cancellation::default(),
+                &|_| {},
+            )?;
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(extraction.domain_count)
+        })
+        .await
+        .unwrap();
 
     let blocked_for = started.elapsed();
     let ticks_during = ticks.load(Ordering::Relaxed) - ticks_before;

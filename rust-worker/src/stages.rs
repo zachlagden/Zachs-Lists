@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use tracing::debug;
 
 use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
 use crate::db::progress::{OutputFile, WhitelistProgress};
@@ -12,34 +13,52 @@ use crate::whitelist::{job_warnings, ParsedWhitelist, WhitelistManager};
 
 const CATEGORY_LEFT_OUT_OF_COMBINED_LIST: &str = "nsfw";
 
-pub async fn run_blocking<T, W>(work: W) -> Result<T>
-where
-    T: Send + 'static,
-    W: FnOnce() -> Result<T> + Send + 'static,
-{
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|stopped| anyhow!("A blocking build stage did not finish: {stopped}"))?
+type StageWork = Box<dyn FnOnce() + Send>;
+
+pub struct StageThread {
+    queue: std::sync::mpsc::Sender<StageWork>,
 }
 
-struct RankedRule {
-    source_index: usize,
-    rule: String,
-}
-
-#[derive(Default)]
-pub struct ExtractedDomains {
-    by_category: HashMap<Option<String>, HashSet<String>>,
-    adblock_rules: HashMap<String, RankedRule>,
-}
-
-impl ExtractedDomains {
-    pub fn is_empty(&self) -> bool {
-        self.by_category.values().all(HashSet::is_empty)
+impl StageThread {
+    pub fn start() -> std::io::Result<Self> {
+        let (queue, queued) = std::sync::mpsc::channel::<StageWork>();
+        std::thread::Builder::new()
+            .name("build-stages".to_string())
+            .spawn(move || {
+                for work in queued {
+                    work();
+                }
+            })?;
+        Ok(Self { queue })
     }
 
-    pub fn category_count(&self) -> usize {
-        self.by_category.len()
+    pub async fn run<T, W>(&self, work: W) -> Result<T>
+    where
+        T: Send + 'static,
+        W: FnOnce() -> Result<T> + Send + 'static,
+    {
+        let (finished, outcome) = tokio::sync::oneshot::channel();
+        self.queue
+            .send(Box::new(move || {
+                if finished.send(work()).is_err() {
+                    debug!("A build stage finished after its build had stopped");
+                }
+            }))
+            .map_err(|_| anyhow!("The build stage thread has stopped"))?;
+        outcome
+            .await
+            .map_err(|_| anyhow!("A build stage stopped without a result"))?
+    }
+}
+
+pub struct RankedRule {
+    rule: Box<str>,
+    source_index: u32,
+}
+
+impl AsRef<str> for RankedRule {
+    fn as_ref(&self) -> &str {
+        &self.rule
     }
 }
 
@@ -51,12 +70,16 @@ pub struct CategoryDomains {
     pub by_category: HashMap<Option<String>, HashSet<String>>,
     /// Raw adblock rules keyed by domain (for adblock output passthrough)
     /// Only populated for domains that came from adblock-format sources
-    pub adblock_rules: HashMap<String, String>,
+    pub adblock_rules: HashMap<String, RankedRule>,
 }
 
 impl CategoryDomains {
-    fn contains(&self, domain: &str) -> bool {
-        self.by_category.values().any(|d| d.contains(domain))
+    pub fn is_empty(&self) -> bool {
+        self.by_category.values().all(HashSet::is_empty)
+    }
+
+    pub fn category_count(&self) -> usize {
+        self.by_category.len()
     }
 }
 
@@ -68,7 +91,7 @@ fn unique_count<'a>(
     if let [only] = sets.as_slice() {
         return Ok(only.len() as u64);
     }
-    let mut unique: HashSet<&str> = HashSet::new();
+    let mut unique: HashSet<&String> = HashSet::new();
     for set in sets {
         for (position, domain) in set.iter().enumerate() {
             if position % WORK_GRAIN == 0 {
@@ -94,7 +117,7 @@ pub struct SourceBody {
 pub fn extract_source(
     extractor: &DomainExtractor,
     body: SourceBody,
-    domains: &mut ExtractedDomains,
+    domains: &mut CategoryDomains,
     cancellation: &Cancellation,
     report_extracted: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<SourceExtraction, Cancelled> {
@@ -109,24 +132,31 @@ pub fn extract_source(
     };
     drop(content);
 
-    let domain_count = extraction.results.len() as u64;
+    let domain_count = extraction.domain_count();
+    let source_index = u32::try_from(source_index).unwrap_or(u32::MAX);
     let category_set = domains.by_category.entry(category).or_default();
-    for (position, extracted) in extraction.results.into_iter().enumerate() {
-        if position % WORK_GRAIN == 0 {
-            cancellation.check()?;
-        }
-        if let Some(rule) = extracted.raw_adblock_rule {
-            let from_later_source = domains
-                .adblock_rules
-                .get(&extracted.domain)
-                .is_none_or(|kept| kept.source_index <= source_index);
-            if from_later_source {
-                domains
-                    .adblock_rules
-                    .insert(extracted.domain.clone(), RankedRule { source_index, rule });
+    for batch in extraction.batches {
+        for (position, extracted) in batch.into_iter().enumerate() {
+            if position % WORK_GRAIN == 0 {
+                cancellation.check()?;
             }
+            if let Some(rule) = extracted.raw_adblock_rule {
+                let from_later_source = domains
+                    .adblock_rules
+                    .get(&extracted.domain)
+                    .is_none_or(|kept| kept.source_index <= source_index);
+                if from_later_source {
+                    domains.adblock_rules.insert(
+                        extracted.domain.clone(),
+                        RankedRule {
+                            rule: rule.into_boxed_str(),
+                            source_index,
+                        },
+                    );
+                }
+            }
+            category_set.insert(extracted.domain);
         }
-        category_set.insert(extracted.domain);
     }
 
     Ok(SourceExtraction {
@@ -136,14 +166,14 @@ pub fn extract_source(
 }
 
 pub struct WhitelistPlan {
-    pub domains: ExtractedDomains,
+    pub domains: CategoryDomains,
     pub parsed: ParsedWhitelist,
     pub domains_before: u64,
 }
 
 pub fn plan_whitelist(
     whitelist_content: &str,
-    domains: ExtractedDomains,
+    domains: CategoryDomains,
     cancellation: &Cancellation,
 ) -> Result<WhitelistPlan, Cancelled> {
     let domains_before = unique_count(domains.by_category.values(), cancellation)?;
@@ -181,7 +211,10 @@ pub fn apply_whitelist(
         domains_before,
     } = plan;
 
-    let mut filtered = CategoryDomains::default();
+    let mut filtered = CategoryDomains {
+        by_category: HashMap::new(),
+        adblock_rules: domains.adblock_rules,
+    };
     let mut removed_domains: HashSet<String> = HashSet::new();
     for (category, category_domains) in domains.by_category {
         let removed_before = &removed_domains;
@@ -204,16 +237,13 @@ pub fn apply_whitelist(
     let pattern_matches =
         whitelist.pattern_matches_until_cancelled(&removed_domains, cancellation)?;
     let domains_after = domains_before.saturating_sub(removed_domains.len() as u64);
-    drop(removed_domains);
-
-    for (position, (domain, ranked)) in domains.adblock_rules.into_iter().enumerate() {
+    for (position, domain) in removed_domains.iter().enumerate() {
         if position % WORK_GRAIN == 0 {
             cancellation.check()?;
         }
-        if filtered.contains(&domain) {
-            filtered.adblock_rules.insert(domain, ranked.rule);
-        }
+        filtered.adblock_rules.remove(domain);
     }
+    drop(removed_domains);
 
     let combined = unique_count(
         filtered

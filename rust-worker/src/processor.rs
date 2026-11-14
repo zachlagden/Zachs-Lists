@@ -22,8 +22,8 @@ use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::progress_tracker::{LiveProgress, ProgressTracker};
 use crate::stages::{
-    apply_whitelist, extract_source, generate_outputs, plan_whitelist, run_blocking,
-    CategoryDomains, ExtractedDomains, SourceBody,
+    apply_whitelist, extract_source, generate_outputs, plan_whitelist, CategoryDomains, SourceBody,
+    StageThread,
 };
 use crate::whitelist::WhitelistManager;
 
@@ -107,6 +107,7 @@ pub struct JobProcessor {
     user_repo: UserRepository,
     downloader: Arc<Downloader>,
     extractor: Arc<DomainExtractor>,
+    stage_thread: StageThread,
 }
 
 impl JobProcessor {
@@ -130,6 +131,7 @@ impl JobProcessor {
             user_repo,
             downloader,
             extractor,
+            stage_thread: StageThread::start()?,
         })
     }
 
@@ -550,14 +552,16 @@ impl JobProcessor {
         self.cancellation.check()?;
 
         let cancellation = self.cancellation.clone();
-        let plan = run_blocking(move || {
-            Ok(plan_whitelist(
-                &whitelist_content,
-                extracted,
-                &cancellation,
-            )?)
-        })
-        .await?;
+        let plan = self
+            .stage_thread
+            .run(move || {
+                Ok(plan_whitelist(
+                    &whitelist_content,
+                    extracted,
+                    &cancellation,
+                )?)
+            })
+            .await?;
         tracker.begin_whitelist(
             plan.domains_before,
             plan.parsed.whitelist.pattern_count() as u64,
@@ -566,12 +570,14 @@ impl JobProcessor {
 
         let cancellation = self.cancellation.clone();
         let reporting = Arc::clone(&tracker);
-        let filtered = run_blocking(move || {
-            Ok(apply_whitelist(plan, &cancellation, &|newly_removed| {
-                reporting.whitelist_removed(newly_removed)
-            })?)
-        })
-        .await?;
+        let filtered = self
+            .stage_thread
+            .run(move || {
+                Ok(apply_whitelist(plan, &cancellation, &|newly_removed| {
+                    reporting.whitelist_removed(newly_removed)
+                })?)
+            })
+            .await?;
         let whitelist_removed = filtered.progress.total_removed;
         if filtered.ignored_lines > 0 {
             warn!(
@@ -597,12 +603,14 @@ impl JobProcessor {
         let reporting = Arc::clone(&tracker);
         let output_dir = self.config.output_dir(&job.username);
         let domains: CategoryDomains = filtered.domains;
-        let generated = run_blocking(move || {
-            generate_outputs(output_dir, domains, &cancellation, &|event| {
-                reporting.generation_event(event)
+        let generated = self
+            .stage_thread
+            .run(move || {
+                generate_outputs(output_dir, domains, &cancellation, &|event| {
+                    reporting.generation_event(event)
+                })
             })
-        })
-        .await?;
+            .await?;
         let output_files = generated.files;
         tracker.complete()?;
 
@@ -794,7 +802,7 @@ impl JobProcessor {
         sources: Vec<Source>,
         force: bool,
         tracker: &Arc<ProgressTracker>,
-    ) -> Result<ExtractedDomains, BuildError> {
+    ) -> Result<CategoryDomains, BuildError> {
         let (handoff, mut downloads) = mpsc::channel::<Downloaded>(DOWNLOAD_HANDOFF_CAPACITY);
         let categories: Vec<Option<String>> = sources
             .iter()
@@ -802,7 +810,7 @@ impl JobProcessor {
             .collect();
         let mut dispatcher = self.start_downloads_in_config_order(sources, force, tracker, handoff);
 
-        let mut extracted = ExtractedDomains::default();
+        let mut extracted = CategoryDomains::default();
         loop {
             self.cancellation.check()?;
             let downloaded =
@@ -830,9 +838,9 @@ impl JobProcessor {
         &self,
         downloaded: Downloaded,
         categories: &[Option<String>],
-        extracted: ExtractedDomains,
+        extracted: CategoryDomains,
         tracker: &Arc<ProgressTracker>,
-    ) -> Result<ExtractedDomains, BuildError> {
+    ) -> Result<CategoryDomains, BuildError> {
         let Downloaded {
             index,
             mut result,
@@ -855,15 +863,17 @@ impl JobProcessor {
         let extractor = Arc::clone(&self.extractor);
         let cancellation = self.cancellation.clone();
         let reporting = Arc::clone(tracker);
-        let (extracted, extraction) = run_blocking(move || {
-            let mut extracted = extracted;
-            let extraction =
-                extract_source(&extractor, body, &mut extracted, &cancellation, &|count| {
-                    reporting.source_domains_extracted(index, count)
-                })?;
-            Ok((extracted, extraction))
-        })
-        .await?;
+        let (extracted, extraction) = self
+            .stage_thread
+            .run(move || {
+                let mut extracted = extracted;
+                let extraction =
+                    extract_source(&extractor, body, &mut extracted, &cancellation, &|count| {
+                        reporting.source_domains_extracted(index, count)
+                    })?;
+                Ok((extracted, extraction))
+            })
+            .await?;
         drop(held_slot);
 
         debug!(

@@ -137,11 +137,11 @@ impl OutputGenerator {
     /// For hosts/plain: always uses domain format
     /// For adblock: uses raw_rule if available, otherwise generates ||domain^
     #[inline]
-    fn write_domain<W: Write>(
+    fn write_domain<W: Write, R: AsRef<str>>(
         encoder: &mut W,
         format: OutputFormat,
         domain: &str,
-        adblock_rules: Option<&HashMap<String, String>>,
+        adblock_rules: Option<&HashMap<String, R>>,
     ) -> std::io::Result<()> {
         match format {
             OutputFormat::Hosts => {
@@ -157,7 +157,7 @@ impl OutputGenerator {
                 // For adblock format, use raw rule if available (preserves modifiers)
                 if let Some(rules) = adblock_rules {
                     if let Some(raw_rule) = rules.get(domain) {
-                        encoder.write_all(raw_rule.as_bytes())?;
+                        encoder.write_all(raw_rule.as_ref().as_bytes())?;
                         encoder.write_all(b"\n")?;
                         return Ok(());
                     }
@@ -171,12 +171,12 @@ impl OutputGenerator {
         Ok(())
     }
 
-    fn write_list(
+    fn write_list<R: AsRef<str>>(
         &self,
         list_name: &str,
         format: OutputFormat,
         domains: &[String],
-        adblock_rules: &HashMap<String, String>,
+        adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
     ) -> Result<OutputFile> {
         control.cancellation.check()?;
@@ -226,10 +226,10 @@ impl OutputGenerator {
     }
 
     /// Generate all output formats in parallel (optimized)
-    pub fn generate_all(
+    pub fn generate_all<R: AsRef<str> + Sync>(
         &self,
         domains: &[String],
-        adblock_rules: &HashMap<String, String>,
+        adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
     ) -> Result<Vec<OutputFile>> {
         fs::create_dir_all(&self.output_dir)?;
@@ -243,10 +243,10 @@ impl OutputGenerator {
     }
 
     /// Generate output files for all categories in parallel
-    pub fn generate_all_categories(
+    pub fn generate_all_categories<R: AsRef<str> + Sync>(
         &self,
         category_domains: &HashMap<Option<String>, Vec<String>>,
-        adblock_rules: &HashMap<String, String>,
+        adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
     ) -> Result<Vec<OutputFile>> {
         // Ensure output directory exists before parallel execution
@@ -310,17 +310,21 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    const NO_RULES: Option<&HashMap<String, String>> = None;
+
     #[test]
     fn test_write_domain_hosts() {
         let mut buf = Vec::new();
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Hosts, "example.com", None).unwrap();
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Hosts, "example.com", NO_RULES)
+            .unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "0.0.0.0 example.com\n");
     }
 
     #[test]
     fn test_write_domain_plain() {
         let mut buf = Vec::new();
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Plain, "example.com", None).unwrap();
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Plain, "example.com", NO_RULES)
+            .unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "example.com\n");
     }
 
@@ -328,7 +332,7 @@ mod tests {
     fn test_write_domain_adblock_no_rule() {
         let mut buf = Vec::new();
         // No adblock rule stored - generates default format
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", None)
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", NO_RULES)
             .unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "||example.com^\n");
     }
@@ -448,7 +452,7 @@ mod tests {
         let files = generator
             .generate_all_categories(
                 &categories,
-                &HashMap::new(),
+                &HashMap::<String, String>::new(),
                 &GenerationControl {
                     cancellation: &cancellation,
                     report: &report,
@@ -519,7 +523,7 @@ mod tests {
 
         let outcome = generator.generate_all(
             &domains,
-            &HashMap::new(),
+            &HashMap::<String, String>::new(),
             &GenerationControl {
                 cancellation: &cancellation,
                 report: &cancel_after_first_chunk,
