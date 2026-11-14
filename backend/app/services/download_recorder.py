@@ -75,10 +75,18 @@ failures = FailureLog()
 database_pause = DatabasePause()
 
 
-def visitor_hash(ip: str) -> str:
+def keyed_ip_hash(ip: str, purpose: str) -> str:
     key = str(current_app.config["SECRET_KEY"]).encode()
-    digest = hmac.new(key, f"analytics-visitor:{ip}".encode(), hashlib.sha256)
+    digest = hmac.new(key, f"{purpose}:{ip}".encode(), hashlib.sha256)
     return digest.hexdigest()[:VISITOR_HASH_LENGTH]
+
+
+def visitor_hash(ip: str) -> str:
+    return keyed_ip_hash(ip, "analytics-visitor")
+
+
+def access_log_hash(ip: str) -> str:
+    return keyed_ip_hash(ip, "account-access")
 
 
 def _locate(ip: str) -> tuple[str | None, str | None]:

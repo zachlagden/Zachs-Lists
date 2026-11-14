@@ -15,7 +15,7 @@ from app.models.job import Job
 from app.models.user import User
 from app.scheduled_tasks.tasks import delete_finished_jobs_before
 from app.services import download_recorder
-from app.services.download_recorder import visitor_hash
+from app.services.download_recorder import access_log_hash
 from conftest import Api
 
 ADDRESS = "198.51.100.10"
@@ -30,15 +30,15 @@ def ip_log(api: Api, name: str = "sam") -> list[dict[str, Any]]:
     return api.db.users.find_one({"username": name}).get("ip_log", [])
 
 
-def test_ip_log_uses_the_keyed_visitor_hash(api: Api, sam: User) -> None:
+def test_ip_log_uses_its_own_keyed_hash(api: Api, sam: User) -> None:
     sam.log_ip_access(ADDRESS)
     sam.log_ip_access(ADDRESS)
     sam.log_ip_access("203.0.113.20")
 
     entries = ip_log(api)
     assert [(entry["ip_hash"], entry["access_count"]) for entry in entries] == [
-        (visitor_hash(ADDRESS), 2),
-        (visitor_hash("203.0.113.20"), 1),
+        (access_log_hash(ADDRESS), 2),
+        (access_log_hash("203.0.113.20"), 1),
     ]
     unkeyed = hashlib.sha256(ADDRESS.encode()).hexdigest()[:16]
     assert unkeyed not in {entry["ip_hash"] for entry in entries}
@@ -105,7 +105,7 @@ def test_ip_log_keeps_the_fifty_most_recently_added_addresses(
 
     entries = ip_log(api)
     assert len(entries) == User.MAX_IP_LOG_ENTRIES == 50
-    assert entries[-1]["ip_hash"] == visitor_hash(ADDRESS)
+    assert entries[-1]["ip_hash"] == access_log_hash(ADDRESS)
     assert [entry["ip_hash"] for entry in entries[:-1]] == [
         entry["ip_hash"] for entry in legacy[21:]
     ]
@@ -115,7 +115,7 @@ def test_ip_log_keeps_the_fifty_most_recently_added_addresses(
     entries = ip_log(api)
     assert len(entries) == 50
     assert {entry["ip_hash"] for entry in entries} == {
-        visitor_hash(f"203.0.113.{number}") for number in range(10, 60)
+        access_log_hash(f"203.0.113.{number}") for number in range(10, 60)
     }
 
 
@@ -158,7 +158,7 @@ def test_readers_accept_old_and_new_ip_log_entries(api: Api, sam: User) -> None:
         "last_seen": None,
         "access_count": 0,
     }
-    assert body["ip_log"][2]["ip_hash"] == visitor_hash(ADDRESS)
+    assert body["ip_log"][2]["ip_hash"] == access_log_hash(ADDRESS)
     detail = api.client(admin).get(f"/api/admin/users/{sam.id}").get_json()
     assert detail["ip_log"] == body["ip_log"]
 
@@ -171,7 +171,7 @@ def test_signed_in_profile_request_records_the_address(api: Api, sam: User) -> N
         )
         assert response.status_code == 200
     assert [(entry["ip_hash"], entry["access_count"]) for entry in ip_log(api)] == [
-        (visitor_hash(ADDRESS), 2)
+        (access_log_hash(ADDRESS), 2)
     ]
 
 
@@ -434,3 +434,9 @@ def test_callback_lets_an_expired_ban_sign_in(
     sam.ban(datetime.utcnow() - timedelta(minutes=1), "example")
     path, _, _ = sign_in_through_github(api, monkeypatch, 5001, "sam")
     assert path == "/dashboard"
+
+
+def test_ip_log_hash_differs_from_the_analytics_visitor_hash(api: Api) -> None:
+    from app.services.download_recorder import visitor_hash
+
+    assert access_log_hash(ADDRESS) != visitor_hash(ADDRESS)

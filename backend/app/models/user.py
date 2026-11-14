@@ -451,9 +451,9 @@ class User:
         return [n for n in self.notifications if not n.get("read", False)]
 
     def log_ip_access(self, ip: str) -> None:
-        from app.services.download_recorder import visitor_hash
+        from app.services.download_recorder import access_log_hash
 
-        ip_hash = visitor_hash(ip)
+        ip_hash = access_log_hash(ip)
         now = datetime.utcnow()
         users = mongo.db[self.COLLECTION]
         seen_again = {
