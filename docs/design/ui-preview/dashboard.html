@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard · Zach's Lists preview</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body data-page="dashboard" data-crumbs="<b>Dashboard</b>">
+    <a class="skip" href="#content">Skip to content</a>
+    <div class="shell">
+      <main class="main">
+        <div class="page" id="content">
+          <div class="page-head">
+            <div>
+              <h1>Dashboard</h1>
+              <p>Your list, its sources and its recent builds.</p>
+            </div>
+            <div class="actions">
+              <a class="btn" href="config.html" data-icon="sliders">Edit sources</a>
+              <a class="btn primary" href="build.html" data-icon="bolt">Build now</a>
+            </div>
+          </div>
+
+          <div class="stack">
+            <section class="card" aria-labelledby="state">
+              <div class="hero">
+                <div>
+                  <span class="pill ok" data-icon="check">Published</span>
+                  <h2 id="state">Your list is published and up to date</h2>
+                  <p>
+                    3,412,907 domains from 38 sources. Two sources need attention: one used an older
+                    copy and one was left out.
+                  </p>
+                </div>
+                <div class="cta">
+                  <span class="pill" data-icon="clock">Next rebuild in 6 hours</span>
+                  <small>2 of 3 manual builds left this week</small>
+                </div>
+              </div>
+              <div class="facts">
+                <div class="fact">
+                  <span class="label">Published</span>
+                  <b class="num">8 Nov, 06:42</b>
+                  <small>6 days ago</small>
+                </div>
+                <div class="fact">
+                  <span class="label">Sources last checked</span>
+                  <b class="num">12 Nov, 19:20</b>
+                  <small>Nothing had changed</small>
+                </div>
+                <div class="fact">
+                  <span class="label">Last content change</span>
+                  <b class="num">8 Nov, 06:42</b>
+                  <small class="up">+1,204 domains</small>
+                </div>
+                <div class="fact">
+                  <span class="label">Next rebuild</span>
+                  <b class="num">15 Nov, 07:30</b>
+                  <small>Every Sunday</small>
+                </div>
+              </div>
+            </section>
+
+            <section class="grid g4" aria-label="Figures">
+              <div class="card stat">
+                <span class="label">Unique domains</span>
+                <div class="value">3,412,907</div>
+                <div class="bar" role="img" aria-label="85% of your limit used">
+                  <i style="width: 85%"></i>
+                </div>
+                <small style="display: block; margin-top: 8px">85% of your 4,000,000 limit</small>
+              </div>
+              <div class="card stat">
+                <span class="label">Sources</span>
+                <div class="value">38</div>
+                <small>36 current · 1 older copy · 1 failed</small>
+              </div>
+              <div class="card stat">
+                <span class="label">Removed by whitelist</span>
+                <div class="value">4,212</div>
+                <small>14 patterns</small>
+              </div>
+              <div class="card stat">
+                <span class="label">Downloads, 30 days</span>
+                <div class="value">18,204</div>
+                <small>41.7 GB served</small>
+              </div>
+            </section>
+
+            <div class="grid g-split">
+              <section class="card" aria-labelledby="addr">
+                <div class="card-head">
+                  <h2 id="addr">List address</h2>
+                  <div class="right">
+                    <div class="seg" role="group" aria-label="Format">
+                      <button aria-pressed="true">Hosts</button>
+                      <button aria-pressed="false">Plain</button>
+                      <button aria-pressed="false">Adblock</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body stack">
+                  <div class="url">
+                    <span>https://lists.example.com/u/alex/all_domains.txt?format=hosts</span>
+                    <button class="btn sm" data-icon="copy">Copy</button>
+                  </div>
+                  <p class="muted" style="font-size: 13px">
+                    The address never changes. Pi-hole and AdGuard Home read the hosts format. 28.4
+                    MB compressed.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="padding-left: 0">Category list</th>
+                        <th class="r">Domains</th>
+                        <th class="r" style="padding-right: 0"><span class="sr">Copy</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style="padding-left: 0">advertising</td>
+                        <td class="r">269,114</td>
+                        <td class="r" style="padding-right: 0">
+                          <button class="btn sm ghost" data-icon="copy">Copy</button>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding-left: 0">tracking</td>
+                        <td class="r">18,440</td>
+                        <td class="r" style="padding-right: 0">
+                          <button class="btn sm ghost" data-icon="copy">Copy</button>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding-left: 0">malicious</td>
+                        <td class="r">1,590,221</td>
+                        <td class="r" style="padding-right: 0">
+                          <button class="btn sm ghost" data-icon="copy">Copy</button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card" aria-labelledby="attn">
+                <div class="card-head">
+                  <h2 id="attn">Needs attention</h2>
+                  <div class="right"><span class="pill warn">2</span></div>
+                </div>
+                <div class="card-body">
+                  <div class="note">
+                    <div>
+                      <h3>Sample Telemetry B</h3>
+                      <p>Timed out after 30 s. The build used the copy from 1 Nov.</p>
+                    </div>
+                    <span class="pill warn" data-icon="warn">Older copy</span>
+                  </div>
+                  <div class="note">
+                    <div>
+                      <h3>Acme Phishing Extra</h3>
+                      <p>
+                        The address returned 404 and no earlier copy exists, so it was left out.
+                      </p>
+                    </div>
+                    <span class="pill fail" data-icon="x">Failed</span>
+                  </div>
+                  <div class="note">
+                    <a class="btn sm" href="config.html">Review sources</a>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section class="card" aria-labelledby="recent">
+              <div class="card-head">
+                <h2 id="recent">Recent builds</h2>
+                <div class="right"><a class="btn sm ghost" href="build.html">All builds</a></div>
+              </div>
+              <div style="overflow-x: auto">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Started</th>
+                      <th>Result</th>
+                      <th class="hide-sm">Type</th>
+                      <th class="r">Domains</th>
+                      <th class="r hide-sm">Change</th>
+                      <th class="r">Took</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><a href="build.html">Today, 20:41</a></td>
+                      <td>
+                        <span class="pill info" data-icon="loop" data-spin="1">Building</span>
+                      </td>
+                      <td class="hide-sm muted">Manual</td>
+                      <td class="r faint">in progress</td>
+                      <td class="r hide-sm"></td>
+                      <td class="r">42 s</td>
+                    </tr>
+                    <tr>
+                      <td><a href="build.html">12 Nov, 19:20</a></td>
+                      <td><span class="pill" data-icon="dash">Skipped</span></td>
+                      <td class="hide-sm muted">Manual</td>
+                      <td class="r">3,412,907</td>
+                      <td class="r hide-sm faint">0</td>
+                      <td class="r">9 s</td>
+                    </tr>
+                    <tr>
+                      <td><a href="build.html">8 Nov, 06:40</a></td>
+                      <td><span class="pill ok" data-icon="check">Completed</span></td>
+                      <td class="hide-sm muted">Scheduled</td>
+                      <td class="r">3,412,907</td>
+                      <td class="r hide-sm up">+1,204</td>
+                      <td class="r">1 min 48 s</td>
+                    </tr>
+                    <tr>
+                      <td><a href="build.html">4 Nov, 21:05</a></td>
+                      <td><span class="pill fail" data-icon="x">Failed</span></td>
+                      <td class="hide-sm muted">Manual</td>
+                      <td class="r faint">not published</td>
+                      <td class="r hide-sm"></td>
+                      <td class="r">1 min 12 s</td>
+                    </tr>
+                    <tr>
+                      <td><a href="build.html">1 Nov, 06:41</a></td>
+                      <td><span class="pill ok" data-icon="check">Completed</span></td>
+                      <td class="hide-sm muted">Scheduled</td>
+                      <td class="r">3,411,703</td>
+                      <td class="r hide-sm down">−318</td>
+                      <td class="r">1 min 51 s</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

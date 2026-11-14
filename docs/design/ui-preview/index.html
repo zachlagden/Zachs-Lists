@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zach's Lists preview</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <div class="main" style="min-height: 100vh">
+      <div class="land">
+        <header class="land-nav">
+          <a class="brand" href="index.html" style="padding: 0"
+            ><span class="logo">ZL</span>Zach's Lists</a
+          >
+          <span style="flex: 1"></span>
+          <a class="btn ghost hide-sm" href="#lists">Default lists</a>
+          <button class="btn icon ghost" id="theme" data-icon="theme">
+            <span class="sr">Switch theme</span>
+          </button>
+          <a class="btn primary" href="dashboard.html">Sign in with GitHub</a>
+        </header>
+
+        <main id="content">
+          <section class="land-hero">
+            <div>
+              <span class="pill" data-icon="bolt">Built by a Rust worker, rebuilt every week</span>
+              <h1 style="margin-top: 18px">
+                One blocklist, built from the sources <span>you choose</span>.
+              </h1>
+              <p>
+                Combine public blocklists, remove the domains you need to keep working, and get one
+                address for Pi-hole, AdGuard Home or your browser.
+              </p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap">
+                <a class="btn primary" href="dashboard.html" style="height: 44px; padding: 0 20px"
+                  >Build your list</a
+                >
+                <a class="btn" href="#lists" style="height: 44px; padding: 0 20px"
+                  >Use a default list</a
+                >
+              </div>
+            </div>
+            <div class="card">
+              <div class="term-head">
+                <i></i><i></i><i></i><span style="margin-left: 8px">adlists.list</span>
+              </div>
+              <div class="term">
+                # Add this address to your blocker<br />
+                <span class="hl">https://lists.example.com/lists/all_domains.txt</span><br />
+                # 2.1 million domains · rebuilt on Sunday
+              </div>
+              <div style="padding: 0 16px 16px">
+                <button class="btn" style="width: 100%" data-icon="copy">Copy address</button>
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="grid g4"
+            style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 56px"
+            aria-label="What it does"
+          >
+            <div class="card feat">
+              <h3>Pick your sources</h3>
+              <p>Choose from a library of public lists or paste any list address.</p>
+            </div>
+            <div class="card feat">
+              <h3>Keep what you need</h3>
+              <p>
+                Whitelist exact domains, whole subdomain trees, wildcards or regular expressions.
+              </p>
+            </div>
+            <div class="card feat">
+              <h3>Watch it build</h3>
+              <p>See each source download and the domain count grow as the build runs.</p>
+            </div>
+            <div class="card feat">
+              <h3>Three formats</h3>
+              <p>Hosts, plain domains and Adblock rules, at addresses that never change.</p>
+            </div>
+          </section>
+
+          <section id="lists" class="card" style="margin-bottom: 72px" aria-labelledby="dl">
+            <div class="card-head">
+              <h2 id="dl">Default lists</h2>
+              <div class="right">Rebuilt 8 Nov · no account needed</div>
+            </div>
+            <div style="overflow-x: auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>List</th>
+                    <th class="hide-sm">What it blocks</th>
+                    <th class="r">Domains</th>
+                    <th class="r"><span class="sr">Copy</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><b style="font-weight: 500">all_domains</b></td>
+                    <td class="hide-sm muted">Everything below except adult content</td>
+                    <td class="r">2.1 million</td>
+                    <td class="r"><button class="btn sm" data-icon="copy">Copy</button></td>
+                  </tr>
+                  <tr>
+                    <td><b style="font-weight: 500">advertising</b></td>
+                    <td class="hide-sm muted">Ad servers and ad networks</td>
+                    <td class="r">269,000</td>
+                    <td class="r"><button class="btn sm" data-icon="copy">Copy</button></td>
+                  </tr>
+                  <tr>
+                    <td><b style="font-weight: 500">tracking</b></td>
+                    <td class="hide-sm muted">Analytics and device telemetry</td>
+                    <td class="r">18,000</td>
+                    <td class="r"><button class="btn sm" data-icon="copy">Copy</button></td>
+                  </tr>
+                  <tr>
+                    <td><b style="font-weight: 500">malicious</b></td>
+                    <td class="hide-sm muted">Malware, phishing and scam sites</td>
+                    <td class="r">1.6 million</td>
+                    <td class="r"><button class="btn sm" data-icon="copy">Copy</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

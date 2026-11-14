@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Build · Zach's Lists preview</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body data-page="builds" data-crumbs="Builds <span>/</span> <b>Today, 20:41</b>">
+    <a class="skip" href="#content">Skip to content</a>
+    <div class="shell">
+      <main class="main">
+        <div class="page" id="content">
+          <div class="banner" id="reconnect" hidden data-icon="loop" data-spin="1">
+            Connection lost. Reconnecting, and the figures will catch up when it returns.
+          </div>
+
+          <div class="page-head">
+            <div>
+              <span class="pill info" data-icon="loop" data-spin="1">Building</span>
+              <h1 style="margin-top: 10px">Downloading sources</h1>
+              <p>Your published list stays as it is until this build finishes.</p>
+            </div>
+            <div class="actions">
+              <button class="btn sm ghost" id="toggle-reconnect">Preview: connection lost</button>
+            </div>
+          </div>
+
+          <div class="stack">
+            <section class="card" aria-label="Progress">
+              <div class="card-body" style="display: grid; gap: 10px">
+                <div style="display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap">
+                  <b style="font-size: 16px"
+                    ><span id="done" class="num">20</span> of 38 sources finished</b
+                  >
+                  <span class="muted num"><span id="bytes">142.6</span> MB downloaded</span>
+                  <span class="muted num" style="margin-left: auto"
+                    >Elapsed <span id="elapsed">42 s</span></span
+                  >
+                </div>
+                <div
+                  class="bar"
+                  role="progressbar"
+                  aria-label="Sources finished"
+                  aria-valuemin="0"
+                  aria-valuemax="38"
+                  aria-valuenow="20"
+                  id="overall-bar"
+                >
+                  <i id="overall" style="width: 53%"></i>
+                </div>
+              </div>
+              <div class="steps" style="border-top: 1px solid var(--border)">
+                <div class="step now">
+                  <span class="n">1</span><b>Download</b>
+                  <small>Running for 40 s</small>
+                </div>
+                <div class="step wait">
+                  <span class="n">2</span><b>Whitelist</b>
+                  <small>14 patterns to apply</small>
+                </div>
+                <div class="step wait">
+                  <span class="n">3</span><b>Generate</b>
+                  <small>Hosts, plain, adblock</small>
+                </div>
+                <div class="step wait">
+                  <span class="n">4</span><b>Publish</b>
+                  <small>Swaps in when complete</small>
+                </div>
+              </div>
+            </section>
+
+            <div class="grid g-split">
+              <section class="card" aria-labelledby="sources">
+                <div class="card-head">
+                  <h2 id="sources">Sources</h2>
+                  <div class="right chips" id="tally"></div>
+                </div>
+                <div style="overflow-x: auto">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th class="hide-sm">Download</th>
+                        <th class="r">Domains</th>
+                        <th class="r hide-sm">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <div class="stack" style="align-content: start">
+                <section class="card" aria-labelledby="job">
+                  <div class="card-head"><h2 id="job">This build</h2></div>
+                  <div class="card-body">
+                    <dl class="kv">
+                      <dt>Requested</dt>
+                      <dd>Manual, by alex</dd>
+                      <dt>Queued</dt>
+                      <dd>20:41:07</dd>
+                      <dt>Started</dt>
+                      <dd>20:41:09</dd>
+                      <dt>Waited in queue</dt>
+                      <dd>2 s</dd>
+                      <dt>Attempt</dt>
+                      <dd>1</dd>
+                      <dt>Workers online</dt>
+                      <dd>2</dd>
+                    </dl>
+                  </div>
+                </section>
+                <section class="card" aria-labelledby="sofar">
+                  <div class="card-head"><h2 id="sofar">So far</h2></div>
+                  <div class="card-body">
+                    <dl class="kv">
+                      <dt>Domains read</dt>
+                      <dd id="domains">1,402,118</dd>
+                      <dt>From cache, unchanged</dt>
+                      <dd>5 sources</dd>
+                      <dt>Older copy used</dt>
+                      <dd>1 source</dd>
+                      <dt>Failed</dt>
+                      <dd>1 source</dd>
+                    </dl>
+                  </div>
+                </section>
+                <section class="card" aria-labelledby="out">
+                  <div class="card-head">
+                    <h2 id="out">Output</h2>
+                    <div class="right">Waiting</div>
+                  </div>
+                  <div class="card-body stack" style="gap: 12px">
+                    <div>
+                      <div
+                        style="display: flex; justify-content: space-between; margin-bottom: 6px"
+                      >
+                        <span>Hosts</span><span class="faint">not started</span>
+                      </div>
+                      <div class="bar thin idle"><i style="width: 0"></i></div>
+                    </div>
+                    <div>
+                      <div
+                        style="display: flex; justify-content: space-between; margin-bottom: 6px"
+                      >
+                        <span>Plain</span><span class="faint">not started</span>
+                      </div>
+                      <div class="bar thin idle"><i style="width: 0"></i></div>
+                    </div>
+                    <div>
+                      <div
+                        style="display: flex; justify-content: space-between; margin-bottom: 6px"
+                      >
+                        <span>Adblock</span><span class="faint">not started</span>
+                      </div>
+                      <div class="bar thin idle"><i style="width: 0"></i></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+    <script>
+      const fmt = (n) => n.toLocaleString('en-GB');
+      const names = ['Acme', 'Example', 'Sample', 'Demo', 'Placeholder'];
+      const kinds = [
+        ['Ads', 'advertising'],
+        ['Trackers', 'tracking'],
+        ['Malware', 'malicious'],
+        ['Phishing', 'malicious'],
+        ['Telemetry', 'tracking'],
+        ['Scam Shops', 'suspicious'],
+        ['Mobile Ads', 'advertising'],
+        ['Analytics', 'tracking'],
+      ];
+      const sources = [];
+      for (let i = 0; i < 38; i += 1) {
+        const [kind, category] = kinds[i % kinds.length];
+        const size = 0.2 + ((i * 37) % 90) / 10;
+        sources.push({
+          name: `${names[i % names.length]} ${kind}${i >= 16 ? ' Extra' : ''}`,
+          category,
+          size,
+          got: 0,
+          state: 'pending',
+          domains: 2000 + ((i * 7919) % 290000),
+          change: [0, 140, -9, 1204, 0, 611, -204, 0][i % 8],
+        });
+      }
+      sources[0].state = 'failed';
+      sources[1].state = 'stale';
+      for (let i = 2; i < 8; i += 1)
+        Object.assign(sources[i], {
+          state: 'downloading',
+          got: sources[i].size * (0.15 + i * 0.09),
+        });
+      for (let i = 8; i < 12; i += 1)
+        Object.assign(sources[i], { state: 'processing', got: sources[i].size });
+      for (let i = 12; i < 25; i += 1)
+        Object.assign(sources[i], { state: 'done', got: sources[i].size });
+      for (let i = 25; i < 30; i += 1) Object.assign(sources[i], { state: 'cached', got: 0 });
+
+      const status = {
+        failed: () => pill('fail', 'x', 'Failed'),
+        stale: () => pill('warn', 'warn', 'Older copy'),
+        downloading: () => pill('info', 'loop', 'Downloading', true),
+        processing: () => pill('info', 'loop', 'Reading', true),
+        done: () => pill('ok', 'check', 'Done'),
+        cached: () => pill('ok', 'check', 'Unchanged'),
+        pending: () => pill('', 'clock', 'Waiting'),
+      };
+      const download = (s) => {
+        if (s.state === 'failed') return '<small style="margin:0">404 from the source</small>';
+        if (s.state === 'stale') return '<small style="margin:0">copy from 1 Nov</small>';
+        if (s.state === 'cached') return '<small style="margin:0">not modified</small>';
+        if (s.state === 'pending')
+          return '<div class="bar thin idle"><i style="width:0"></i></div><small>&nbsp;</small>';
+        const pct = Math.min(100, (s.got / s.size) * 100);
+        const cls = s.state === 'downloading' ? ' run' : ' ok';
+        return `<div class="bar thin${cls}"><i style="width:${pct}%"></i></div><small>${s.got.toFixed(1)} of ${s.size.toFixed(1)} MB</small>`;
+      };
+      const change = (s) => {
+        if (!['done', 'cached', 'stale'].includes(s.state)) return '';
+        if (s.change === 0 || s.state !== 'done') return '<span class="faint">0</span>';
+        return s.change > 0
+          ? `<span class="up">+${fmt(s.change)}</span>`
+          : `<span class="down">−${fmt(-s.change)}</span>`;
+      };
+      const note = (s) =>
+        s.state === 'failed'
+          ? '<em class="down">No earlier copy exists, so this source is left out.</em>'
+          : s.state === 'stale'
+            ? '<em style="color:var(--warn)">Timed out after 30 s.</em>'
+            : '';
+      const order = ['failed', 'stale', 'downloading', 'processing', 'done', 'cached', 'pending'];
+
+      function render() {
+        const sorted = [...sources].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state));
+        document.getElementById('rows').innerHTML = sorted
+          .map(
+            (s) => `<tr>
+              <td class="src"><b>${s.name}</b><small>${s.category}</small>${note(s)}${['downloading', 'processing'].includes(s.state) ? `<div class="bar thin show-sm${s.state === 'downloading' ? ' run' : ' ok'}"><i style="width:${Math.min(100, (s.got / s.size) * 100)}%"></i></div>` : ''}</td>
+              <td>${status[s.state]()}</td>
+              <td class="dl hide-sm">${download(s)}</td>
+              <td class="r">${['done', 'cached', 'stale'].includes(s.state) ? fmt(s.domains) : s.state === 'processing' ? '<span class="faint">counting</span>' : ''}</td>
+              <td class="r hide-sm">${change(s)}</td>
+            </tr>`,
+          )
+          .join('');
+        const count = (...states) => sources.filter((s) => states.includes(s.state)).length;
+        const finished = count('done', 'cached', 'stale', 'failed');
+        document.getElementById('tally').innerHTML =
+          pill('ok', 'check', `${count('done', 'cached')} done`) +
+          pill('info', 'loop', `${count('downloading', 'processing')} active`) +
+          pill('', 'clock', `${count('pending')} waiting`);
+        document.getElementById('done').textContent = finished;
+        document.getElementById('overall').style.width = `${(finished / 38) * 100}%`;
+        document.getElementById('overall-bar').setAttribute('aria-valuenow', finished);
+        const mb = sources.reduce((sum, s) => sum + s.got, 0);
+        document.getElementById('bytes').textContent = mb.toFixed(1);
+        document.getElementById('domains').textContent = fmt(
+          sources
+            .filter((s) => ['done', 'cached', 'stale'].includes(s.state))
+            .reduce((sum, s) => sum + s.domains, 0),
+        );
+      }
+
+      let seconds = 42;
+      function tick() {
+        seconds += 1;
+        document.getElementById('elapsed').textContent =
+          seconds < 60 ? `${seconds} s` : `1 min ${String(seconds - 60).padStart(2, '0')} s`;
+        for (const s of sources) {
+          if (s.state === 'downloading') {
+            s.got = Math.min(s.size, s.got + s.size * 0.12 + 0.05);
+            if (s.got >= s.size) s.state = 'processing';
+          } else if (s.state === 'processing' && Math.random() < 0.5) {
+            s.state = 'done';
+          }
+        }
+        const active = sources.filter((s) => s.state === 'downloading').length;
+        const next = sources.find((s) => s.state === 'pending');
+        if (active < 6 && next) next.state = 'downloading';
+        render();
+        if (sources.every((s) => !['pending', 'downloading', 'processing'].includes(s.state)))
+          clearInterval(timer);
+      }
+      render();
+      const still =
+        matchMedia('(prefers-reduced-motion: reduce)').matches || location.hash === '#still';
+      const timer = still ? 0 : setInterval(tick, 1000);
+      document.getElementById('toggle-reconnect').addEventListener('click', () => {
+        const banner = document.getElementById('reconnect');
+        banner.hidden = !banner.hidden;
+      });
+    </script>
+  </body>
+</html>
