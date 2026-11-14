@@ -10,6 +10,7 @@ from pymongo.errors import ConnectionFailure, PyMongoError
 from app.models.analytics import Analytics
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.job import Job
+from app.utils.job_document import revision_bump
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ def prepare_active_job_targets(db: Database) -> None:
         if not isinstance(job.get("target_id"), str) or not job["target_id"]:
             job["target_id"] = Job.target_id_for(job) or f"orphan:{job['_id']}"
             jobs.update_one(
-                {"_id": job["_id"]}, {"$set": {"target_id": job["target_id"]}}
+                {"_id": job["_id"]},
+                {"$set": {"target_id": job["target_id"]}, **revision_bump()},
             )
         by_target.setdefault(job["target_id"], []).append(job)
     for target_id, active in by_target.items():
@@ -64,7 +66,8 @@ def prepare_active_job_targets(db: Database) -> None:
                             ],
                             "error_code": Job.ERROR_SUPERSEDED,
                         },
-                    }
+                    },
+                    **revision_bump(),
                 },
             )
             if cancelled.modified_count:

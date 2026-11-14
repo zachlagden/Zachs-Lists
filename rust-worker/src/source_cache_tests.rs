@@ -1,29 +1,12 @@
 use super::*;
 use bson::{doc, Bson};
-use mongodb::Client;
 
 use crate::source_cache_test_server::{Reply, TestServer};
+use crate::test_support::{test_config, test_database};
 
 async fn fixture(server: &TestServer) -> (Database, Downloader, Source) {
-    let uri =
-        std::env::var("SOURCE_CACHE_TEST_MONGO_URI").expect("isolated test Mongo URI is required");
-    let client = Client::with_uri_str(uri).await.unwrap();
-    let db = client.database(&format!(
-        "source_cache_test_{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    let config = Config {
-        mongo_uri: String::new(),
-        database_name: db.name().into(),
-        data_dir: std::env::temp_dir(),
-        worker_id: "fixture".into(),
-        heartbeat_interval_secs: 10,
-        max_concurrent_downloads: 2,
-        http_timeout_secs: 2,
-        cache_ttl_days: 7,
-        source_fresh_secs: 0,
-        mongo_connect_timeout_secs: 2,
-    };
+    let db = test_database("source_cache_test").await;
+    let config = test_config(&db, &std::env::temp_dir(), "fixture");
     let mut downloader = Downloader::new(config, &db).unwrap();
     downloader.test_address = Some(server.address);
     let source = Source {

@@ -67,6 +67,8 @@ export interface Job {
   read?: boolean;
   force_rebuild?: boolean;
   attempts?: number;
+  rev?: number;
+  updated_at?: string | null;
 }
 
 // Legacy progress interface for backward compatibility

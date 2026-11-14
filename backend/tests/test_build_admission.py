@@ -1,4 +1,5 @@
 import importlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,12 +31,14 @@ from app.services.build_admission import (
     refund_quota_if_due,
 )
 from app.services.job_poller import JobStatusPoller
+from app.utils.job_document import initial_progress
 from app.utils.time import next_week_start, utc_iso, week_start
 
 realtime: Any = importlib.import_module("app.socketio")
 VALID_CONFIG = "https://example.com/hosts.txt|example|tracking"
 INVALID_CONFIG = "http://127.0.0.1/private"
 WEEKLY_LIMIT = TestingConfig.DEFAULT_MANUAL_UPDATES_PER_WEEK
+FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures"
 
 
 @dataclass
@@ -886,3 +889,170 @@ def test_week_starts_on_sunday_midnight_utc() -> None:
     assert week_start(datetime(2026, 11, 14, 23, 59, 59)) == sunday
     assert week_start(datetime(2026, 11, 15)) == datetime(2026, 11, 15)
     assert next_week_start(datetime(2026, 11, 14, 20, 29)) == datetime(2026, 11, 15)
+
+
+def shared_fixture(name: str) -> Any:
+    return json.loads((FIXTURES / name).read_text())
+
+
+def claim_as_stale(site: Site, job: Job, **fields: Any) -> dict[str, Any]:
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {
+            "$set": {
+                "status": "processing",
+                "worker_id": "worker-a",
+                "claimed_at": datetime.utcnow() - timedelta(hours=1),
+                "heartbeat_at": datetime.utcnow() - timedelta(hours=1),
+                "started_at": datetime(2026, 1, 2, 3, 4, 5),
+                "updated_at": datetime(2026, 1, 2, 3, 4, 5),
+                "attempt": 1,
+                "rev": 7,
+                "progress": {"stage": "downloading", "sources": [{"id": "a"}]},
+                **fields,
+            }
+        },
+    )
+    return site.db.jobs.find_one({"job_id": job.job_id})
+
+
+def test_admission_and_stale_requeue_write_the_shared_initial_progress(
+    site: Site,
+) -> None:
+    expected = shared_fixture("job-initial-progress.json")
+    assert initial_progress() == expected
+
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    admitted = site.db.jobs.find_one({"job_id": job.job_id})
+    assert admitted["progress"] == expected
+    assert admitted["rev"] == 0
+    assert admitted["updated_at"] == admitted["created_at"]
+
+    claim_as_stale(site, job)
+    assert Job.reset_stale() == (1, 0)
+
+    assert site.db.jobs.find_one({"job_id": job.job_id})["progress"] == expected
+
+
+def test_stale_requeue_clears_the_lease_and_bumps_the_revision(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    claimed = claim_as_stale(site, job)
+
+    assert Job.reset_stale() == (1, 0)
+
+    stored = site.db.jobs.find_one({"job_id": job.job_id})
+    assert stored["status"] == "queued"
+    for key in ("worker_id", "claimed_at", "heartbeat_at"):
+        assert stored[key] is None
+    assert stored["started_at"] == claimed["started_at"]
+    assert stored["attempt"] == 1
+    assert stored["stale_attempts"] == 1
+    assert stored["rev"] == 8
+    assert stored["updated_at"] > claimed["updated_at"]
+
+
+def test_abandoning_a_job_bumps_the_revision(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    claimed = claim_as_stale(site, job, stale_attempts=Job.MAX_STALE_ATTEMPTS)
+
+    assert Job.reset_stale() == (0, 1)
+
+    stored = site.db.jobs.find_one({"job_id": job.job_id})
+    assert stored["status"] == "failed"
+    assert stored["rev"] == 8
+    assert stored["updated_at"] > claimed["updated_at"]
+
+
+def test_refund_flag_and_read_flag_bump_the_revision(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.finish(job, Job.STATUS_FAILED, "internal")
+    before = site.db.jobs.find_one({"job_id": job.job_id})
+
+    assert refund_quota_if_due(job.job_id) is True
+    refunded = site.db.jobs.find_one({"job_id": job.job_id})
+    assert refunded["rev"] == before["rev"] + 1
+    assert refunded["updated_at"] > before["updated_at"]
+
+    Job.mark_failures_read(ObjectId(site.sam.id))
+    read = site.db.jobs.find_one({"job_id": job.job_id})
+    assert read["read"] is True
+    assert read["rev"] == before["rev"] + 2
+
+    Job.mark_failures_read(ObjectId(site.sam.id))
+    assert site.db.jobs.find_one({"job_id": job.job_id}) == read
+
+
+def test_duplicate_cancellation_bumps_the_revision() -> None:
+    db: Any = mongomock.MongoClient().default
+    sam = ObjectId("000000000000000000000001")
+    stamped = datetime(2026, 1, 1)
+    db.jobs.insert_many(
+        [
+            {
+                "job_id": name,
+                "user_id": sam,
+                "status": "queued",
+                "created_at": created,
+                "rev": 3,
+                "updated_at": stamped,
+            }
+            for name, created in [
+                ("kept", stamped),
+                ("cancelled", datetime(2026, 1, 2)),
+            ]
+        ]
+    )
+
+    prepare_active_job_targets(db)
+
+    jobs = {job["job_id"]: job for job in db.jobs.find()}
+    assert jobs["cancelled"]["status"] == "failed"
+    assert jobs["cancelled"]["rev"] == 5
+    assert jobs["cancelled"]["updated_at"] > stamped
+    assert jobs["kept"]["status"] == "queued"
+    assert jobs["kept"]["rev"] == 4
+
+
+def test_refund_codes_agree_with_the_codes_each_side_writes() -> None:
+    codes = shared_fixture("job-error-codes.json")
+    known = {**codes["worker"], **codes["backend"]}
+    refundable = {code for code, rule in known.items() if rule["refunds_quota"]}
+
+    assert set(build_admission.REFUNDABLE_ERROR_CODES) == refundable
+    assert set(codes["backend"]) == {Job.ERROR_WORKER_ABANDONED, Job.ERROR_SUPERSEDED}
+    assert not set(codes["worker"]) & set(codes["backend"])
+
+
+@pytest.mark.parametrize(
+    ("error_code", "refunded"),
+    [
+        (code, rule["refunds_quota"])
+        for code, rule in json.loads((FIXTURES / "job-error-codes.json").read_text())[
+            "worker"
+        ].items()
+    ],
+)
+def test_worker_failure_codes_refund_only_when_the_fixture_says_so(
+    site: Site, error_code: str, refunded: bool
+) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.finish(job, Job.STATUS_FAILED, error_code)
+
+    assert refund_quota_if_due(job.job_id) is refunded
+    assert site.used(site.sam) == (0 if refunded else 1)
+
+
+def test_null_error_code_on_a_completed_job_is_not_refunded(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {
+            "$set": {
+                "status": Job.STATUS_COMPLETED,
+                "result": {"errors": [], "error_code": None},
+            }
+        },
+    )
+
+    assert refund_quota_if_due(job.job_id) is False
+    assert site.used(site.sam) == 1
