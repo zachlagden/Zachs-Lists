@@ -13,9 +13,11 @@ def register_input_checks(app: Flask) -> None:
             "PATCH",
         ):
             return None
-        if not request.content_length and not request.environ.get(
+        if request.content_length is None and not request.environ.get(
             "wsgi.input_terminated"
         ):
+            return None
+        if not request.get_data(cache=True):
             return None
         if not request.is_json:
             return (

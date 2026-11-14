@@ -32,6 +32,8 @@ class Config:
 
     # Root user (super admin) - REQUIRED
     ROOT_USERNAME = os.environ.get("ROOT_USERNAME")
+    _ROOT_GITHUB_ID = os.environ.get("ROOT_GITHUB_ID", "")
+    ROOT_GITHUB_ID = int(_ROOT_GITHUB_ID) if _ROOT_GITHUB_ID.isdigit() else None
 
     # Data paths
     DATA_DIR = os.environ.get("DATA_DIR", "./data")

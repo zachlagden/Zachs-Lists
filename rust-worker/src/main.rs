@@ -50,8 +50,8 @@ async fn main() -> Result<()> {
                     info!("Loaded environment from {:?}", path);
                     break;
                 }
-                Err(e) => {
-                    error!("Failed to load .env from {:?}: {}", path, e);
+                Err(_) => {
+                    return Err(anyhow::anyhow!("Could not load environment configuration"));
                 }
             }
         }
@@ -125,12 +125,9 @@ async fn connect_with_retry(config: &Config) -> Result<Database> {
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
             }
-            Err(e) => {
-                error!(
-                    "MongoDB unreachable after {}s, giving up: {}",
-                    config.mongo_connect_timeout_secs, e
-                );
-                return Err(e);
+            Err(_) => {
+                error!("MongoDB unreachable after {}s", config.mongo_connect_timeout_secs);
+                return Err(anyhow::anyhow!("Database unavailable during worker startup"));
             }
         }
     }

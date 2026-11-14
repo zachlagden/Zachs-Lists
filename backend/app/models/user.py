@@ -3,9 +3,12 @@ User model for MongoDB.
 """
 
 import os
+import re
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from flask import current_app
 
 from app.extensions import mongo
@@ -41,6 +44,10 @@ class User:
         if not isinstance(value, str) or not value:
             raise ValueError("Username is missing")
         return value
+
+    @property
+    def github_username(self) -> str:
+        return self._data.get("github_username", self.username)
 
     @property
     def email(self) -> Optional[str]:
@@ -83,17 +90,31 @@ class User:
     @property
     def is_root(self) -> bool:
         """Check if user is the root admin (from env)."""
-        return self.username == current_app.config.get("ROOT_USERNAME")
+        root_id = current_app.config.get("ROOT_GITHUB_ID")
+        return type(root_id) is int and root_id > 0 and self.github_id == root_id
 
     @property
     def is_admin(self) -> bool:
         """Check if user has admin privileges (root or granted admin)."""
         return self.is_root or self._data.get("is_admin", False)
 
+    @property
+    def auth_version(self) -> int:
+        return self._data.get("auth_version", 0)
+
+    def revoke_sessions(self) -> None:
+        mongo.db[self.COLLECTION].update_one(
+            {"_id": self._id}, {"$inc": {"auth_version": 1}}
+        )
+        from app.socketio import disconnect_user
+
+        disconnect_user(self.id)
+
     def set_admin(self, value: bool) -> None:
         """Set admin status in database."""
         mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id}, {"$set": {"is_admin": value}}
+            {"_id": self._id},
+            {"$set": {"is_admin": value}, "$inc": {"auth_version": 1}},
         )
         self._data["is_admin"] = value
         from app.socketio import disconnect_user
@@ -321,7 +342,10 @@ class User:
         """Enable or disable user."""
         mongo.db[self.COLLECTION].update_one(
             {"_id": self._id},
-            {"$set": {"is_enabled": enabled, "updated_at": datetime.utcnow()}},
+            {
+                "$set": {"is_enabled": enabled, "updated_at": datetime.utcnow()},
+                "$inc": {"auth_version": 1},
+            },
         )
         if not enabled:
             from app.socketio import disconnect_user
@@ -344,7 +368,8 @@ class User:
                     "banned_until": until,
                     "ban_reason": reason,
                     "updated_at": datetime.utcnow(),
-                }
+                },
+                "$inc": {"auth_version": 1},
             },
         )
         from app.socketio import disconnect_user
@@ -502,6 +527,7 @@ class User:
         return {
             "id": self.id,
             "username": self.username,
+            "github_username": self.github_username,
             "name": self.name,
             "email": self.email,
             "avatar_url": self.avatar_url,
@@ -586,6 +612,10 @@ class User:
         name: str = None,
     ) -> "User":
         """Find existing user or create new one from GitHub data."""
+        if type(github_id) is not int or github_id <= 0:
+            raise ValueError("Invalid GitHub account identifier")
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", username):
+            raise ValueError("Invalid GitHub account name")
         existing = cls.get_by_github_id(github_id)
 
         if existing:
@@ -594,13 +624,13 @@ class User:
                 {"_id": existing._id},
                 {
                     "$set": {
-                        "username": username,
+                        "github_username": username,
                         "email": email,
                         "avatar_url": avatar_url,
-                        "access_token": access_token,
                         "name": name,
                         "updated_at": datetime.utcnow(),
-                    }
+                    },
+                    "$unset": {"access_token": ""},
                 },
             )
             updated = cls.get_by_github_id(github_id)
@@ -608,14 +638,13 @@ class User:
                 raise RuntimeError("Account disappeared while updating login")
             return updated
 
-        # Create new user
         user_data = {
             "github_id": github_id,
             "username": username,
+            "github_username": username,
             "name": name,
             "email": email,
             "avatar_url": avatar_url,
-            "access_token": access_token,
             "is_enabled": True,
             "limits": {},
             "stats": {
@@ -630,10 +659,26 @@ class User:
             "updated_at": datetime.utcnow(),
         }
 
-        result = mongo.db[cls.COLLECTION].insert_one(user_data)
-        user_data["_id"] = result.inserted_id
-
-        return cls(user_data)
+        for attempt in range(8):
+            if attempt == 0:
+                candidate = username
+            elif attempt == 1:
+                candidate = f"{username}-{github_id}"
+            else:
+                candidate = f"u{github_id}-{secrets.token_hex(8)}"
+            if cls.get_by_username(candidate) is not None:
+                continue
+            user_data["username"] = candidate
+            try:
+                result = mongo.db[cls.COLLECTION].insert_one(user_data)
+            except DuplicateKeyError:
+                existing = cls.get_by_github_id(github_id)
+                if existing is not None:
+                    return existing
+                continue
+            user_data["_id"] = result.inserted_id
+            return cls(user_data)
+        raise ValueError("Could not reserve a public list identifier; retry sign-in")
 
     @classmethod
     def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:
