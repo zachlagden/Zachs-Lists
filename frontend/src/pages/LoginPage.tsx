@@ -4,6 +4,7 @@ import { useAuthStore } from '../store';
 import { authApi } from '../api/client';
 import PublicNav from '../components/PublicNav';
 import { Footer } from '../components/home';
+import { loginErrorMessage } from '../utils/loginErrors';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -50,12 +51,7 @@ export default function LoginPage() {
 
             {error && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm">
-                {error === 'access_denied' && 'You denied access to your GitHub account.'}
-                {error === 'no_email' &&
-                  'Unable to retrieve email from GitHub. Please ensure your email is public or verify your email.'}
-                {error === 'disabled' && 'Your account has been disabled. Please contact support.'}
-                {!['access_denied', 'no_email', 'disabled'].includes(error) &&
-                  'An error occurred during authentication.'}
+                {loginErrorMessage(error, searchParams.get('until'))}
               </div>
             )}
 

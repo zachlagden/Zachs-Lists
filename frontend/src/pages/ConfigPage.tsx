@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useUserDataStore, useAuthStore } from '../store';
 import { userApi } from '../api/client';
+import { apiErrorMessage } from '../api/apiError';
 import LoadingSpinner from '../components/LoadingSpinner';
 import {
   AdvancedConfigEditor,
@@ -35,6 +36,7 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [copyingTemplate, setCopyingTemplate] = useState(false);
+  const templateDialogRef = useRef<HTMLDialogElement>(null);
   const [message, setMessage] = useState<{
     type: 'success' | 'error' | 'warning';
     text: string;
@@ -167,12 +169,13 @@ export default function ConfigPage() {
     }
   };
 
-  const handleCopyTemplate = async (overwrite: boolean = false) => {
+  const handleCopyTemplate = async () => {
+    templateDialogRef.current?.close();
     setCopyingTemplate(true);
     setMessage(null);
 
     try {
-      await userApi.copyDefaultTemplate(overwrite);
+      await userApi.copyDefaultTemplate(true);
       // Refresh config
       const [configData, whitelistData] = await Promise.all([
         userApi.getConfig(),
@@ -182,10 +185,13 @@ export default function ConfigPage() {
       setWhitelist(whitelistData.whitelist || '');
       setLocalConfig(configData.config || '');
       setLocalWhitelist(whitelistData.whitelist || '');
+      setHasChanges(false);
+      setValidationResult(null);
+      setValidationToken(null);
       setMessage({ type: 'success', text: 'Default template copied successfully' });
     } catch (error) {
       console.error('Failed to copy template:', error);
-      setMessage({ type: 'error', text: 'Failed to copy template' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to copy template') });
     } finally {
       setCopyingTemplate(false);
     }
@@ -237,7 +243,7 @@ export default function ConfigPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => handleCopyTemplate(true)}
+            onClick={() => templateDialogRef.current?.showModal()}
             disabled={copyingTemplate}
             className="btn btn-ghost"
           >
@@ -461,6 +467,40 @@ export default function ConfigPage() {
           onSave={() => handleSave()}
         />
       )}
+
+      <dialog
+        ref={templateDialogRef}
+        aria-labelledby="template-dialog-title"
+        className="!m-auto bg-pihole-card rounded-xl shadow-xl max-w-lg w-full p-0 text-pihole-text backdrop:bg-black/50"
+      >
+        <div className="p-4 border-b border-pihole-border">
+          <h2 id="template-dialog-title" className="text-lg font-semibold text-pihole-text">
+            Replace your configuration?
+          </h2>
+        </div>
+        <div className="p-4 space-y-3 text-sm text-pihole-text-muted">
+          <p>
+            This replaces your saved blocklist sources and your saved whitelist with the default
+            template.
+          </p>
+          <p>
+            Everything in both is deleted, along with any unsaved edits on this page. This cannot be
+            undone. Your built lists stay as they are until the next build.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-pihole-border">
+          <button
+            type="button"
+            onClick={() => templateDialogRef.current?.close()}
+            className="btn btn-ghost"
+          >
+            Cancel
+          </button>
+          <button type="button" onClick={handleCopyTemplate} className="btn btn-primary">
+            Replace with default template
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
