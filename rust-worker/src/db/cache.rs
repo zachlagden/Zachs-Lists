@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
-pub const MAX_FALLBACK_AGE_DAYS: i64 = 7;
+pub const MAX_FALLBACK_AGE_DAYS: i64 = 8;
 pub const MAX_FALLBACK_AGE_MILLIS: i64 = MAX_FALLBACK_AGE_DAYS * MILLIS_PER_DAY;
 const MILLIS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
