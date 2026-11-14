@@ -1,6 +1,11 @@
 use anyhow::{anyhow, bail, Result};
 use ipnet::IpNet;
-use reqwest::{redirect::Policy, Client, Response};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH},
+    redirect::Policy,
+    Client, Response,
+};
+use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -131,13 +136,78 @@ async fn resolved_client(url: &Url, timeout: Duration) -> Result<Client> {
         .map_err(|_| anyhow!("Could not create source HTTP client"))
 }
 
-pub async fn get_source(value: &str, timeout: Duration) -> Result<Response> {
+#[derive(Debug, Clone)]
+pub struct SourceValidators {
+    pub final_url: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+impl SourceValidators {
+    pub fn validate(&self) -> Result<()> {
+        self.headers_for(&parse_source_url(&self.final_url)?)
+            .map(|_| ())
+    }
+
+    fn headers_for(&self, url: &Url) -> Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        if parse_source_url(&self.final_url)? != *url {
+            return Ok(headers);
+        }
+        for (name, value) in [
+            (IF_NONE_MATCH, &self.etag),
+            (IF_MODIFIED_SINCE, &self.last_modified),
+        ] {
+            if let Some(value) = value {
+                if value.is_empty() || value.len() > 8192 {
+                    bail!("Invalid cached source validator");
+                }
+                headers.insert(
+                    name,
+                    HeaderValue::from_str(value)
+                        .map_err(|_| anyhow!("Invalid cached source validator"))?,
+                );
+            }
+        }
+        Ok(headers)
+    }
+}
+
+pub async fn get_source_conditional(
+    value: &str,
+    timeout: Duration,
+    validators: Option<&SourceValidators>,
+) -> Result<Response> {
+    get_source_with_client(value, timeout, validators, |url, timeout| async move {
+        resolved_client(&url, timeout).await
+    })
+    .await
+}
+
+async fn get_source_with_client<F, Fut>(
+    value: &str,
+    timeout: Duration,
+    validators: Option<&SourceValidators>,
+    mut client_for: F,
+) -> Result<Response>
+where
+    F: FnMut(Url, Duration) -> Fut,
+    Fut: Future<Output = Result<Client>>,
+{
     tokio::time::timeout(timeout, async {
+        if let Some(validators) = validators {
+            validators.validate()?;
+        }
         let mut current = parse_source_url(value)?;
         for attempt in 0..=5 {
-            let client = resolved_client(&current, timeout).await?;
+            let client = client_for(current.clone(), timeout).await?;
+            let headers = match validators {
+                Some(validators) => validators.headers_for(&current)?,
+                None => HeaderMap::new(),
+            };
             let response = client
                 .get(current.clone())
+                .headers(headers)
                 .send()
                 .await
                 .map_err(|_| anyhow!("Could not fetch source"))?;
@@ -152,19 +222,50 @@ pub async fn get_source(value: &str, timeout: Duration) -> Result<Response> {
                 .get("location")
                 .and_then(|header| header.to_str().ok())
                 .ok_or_else(|| anyhow!("Invalid source redirect"))?;
-            let joined = current
-                .join(location)
-                .map_err(|_| anyhow!("Invalid source redirect"))?;
-            if current.scheme() == "https" && joined.scheme() != "https" {
-                bail!("Source redirect cannot downgrade HTTPS");
-            }
-            current = parse_source_url(joined.as_str())?;
+            current = redirect_target(&current, location)?;
         }
         bail!("Source redirect exceeds the limit")
     })
     .await
     .map_err(|_| anyhow!("Source request timed out"))?
 }
+
+fn redirect_target(current: &Url, location: &str) -> Result<Url> {
+    let joined = current
+        .join(location)
+        .map_err(|_| anyhow!("Invalid source redirect"))?;
+    if current.scheme() == "https" && joined.scheme() != "https" {
+        bail!("Source redirect cannot downgrade HTTPS");
+    }
+    parse_source_url(joined.as_str())
+}
+
+#[cfg(test)]
+pub(crate) async fn get_source_for_test(
+    value: &str,
+    timeout: Duration,
+    validators: Option<&SourceValidators>,
+    address: SocketAddr,
+) -> Result<Response> {
+    get_source_with_client(value, timeout, validators, |url, timeout| async move {
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow!("Invalid source host"))?;
+        Client::builder()
+            .no_proxy()
+            .redirect(Policy::none())
+            .timeout(timeout)
+            .gzip(true)
+            .resolve_to_addrs(host, &[address])
+            .build()
+            .map_err(Into::into)
+    })
+    .await
+}
+
+#[cfg(test)]
+#[path = "source_transport_tests.rs"]
+mod source_transport_tests;
 
 #[cfg(test)]
 mod tests {
