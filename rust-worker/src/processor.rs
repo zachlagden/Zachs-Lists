@@ -20,7 +20,7 @@ use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::generator::OutputGenerator;
-use crate::whitelist::WhitelistManager;
+use crate::whitelist::{job_warnings, ParsedWhitelist, WhitelistManager};
 
 /// Domains organized by category for per-category output generation
 pub struct CategoryDomains {
@@ -124,8 +124,9 @@ impl JobProcessor {
             .collect();
 
         // Parse and sort whitelist patterns
-        let whitelist_mgr = WhitelistManager::from_content(whitelist);
-        let patterns = whitelist_mgr.patterns_as_strings();
+        let patterns = WhitelistManager::parse(whitelist)
+            .whitelist
+            .patterns_as_strings();
 
         // Hash combined normalized content
         let combined = format!("{}\n---\n{}", sources_str.join("\n"), patterns.join("\n"));
@@ -816,15 +817,12 @@ impl JobProcessor {
         category_domains: CategoryDomains,
         progress: Arc<Mutex<JobProgress>>,
     ) -> Result<(CategoryDomains, u64, crate::db::progress::WhitelistProgress)> {
-        // Borrow every unique domain for global stats, without cloning them
-        let unique_domains: Vec<&String> = category_domains
+        let domains_before = category_domains
             .by_category
             .values()
             .flatten()
             .collect::<HashSet<&String>>()
-            .into_iter()
-            .collect();
-        let domains_before = unique_domains.len() as u64;
+            .len() as u64;
 
         // Capture downloading stage snapshot before transitioning
         {
@@ -849,20 +847,31 @@ impl JobProcessor {
 
         // Load whitelist from MongoDB
         let whitelist_content = self.user_config_repo.get_whitelist(username).await?;
-        let whitelist = WhitelistManager::from_content(&whitelist_content);
-
-        // Whitelist stats over ALL domains (pattern matches, etc.)
-        let (total_removed, pattern_matches) = whitelist.filter_stats(&unique_domains);
-        drop(unique_domains);
+        let ParsedWhitelist {
+            whitelist,
+            problems,
+        } = WhitelistManager::parse(&whitelist_content);
+        if !problems.is_empty() {
+            warn!(
+                "Ignored {} unusable whitelist lines for {}",
+                problems.len(),
+                username
+            );
+        }
 
         // Filter each category separately
         let mut filtered = CategoryDomains::new();
+        let mut removed_domains: HashSet<String> = HashSet::new();
         for (category, domains) in category_domains.by_category {
-            let (remaining, _, _) = whitelist.filter_domains(domains);
+            let (remaining, removed) = whitelist.partition(domains);
+            removed_domains.extend(removed);
             if !remaining.is_empty() {
                 filtered.by_category.insert(category, remaining);
             }
         }
+        let total_removed = removed_domains.len() as u64;
+        let pattern_matches = whitelist.pattern_matches(&removed_domains);
+        drop(removed_domains);
 
         // Copy over adblock_rules for domains that remain after whitelist filtering
         for (domain, rule) in category_domains.adblock_rules {
@@ -874,7 +883,12 @@ impl JobProcessor {
         let domains_after = filtered.total_count() as u64;
 
         // Create whitelist progress
-        let whitelist_progress = whitelist.create_progress(domains_before, domains_after, pattern_matches);
+        let whitelist_progress = whitelist.create_progress(
+            domains_before,
+            domains_after,
+            pattern_matches,
+            job_warnings(&problems),
+        );
 
         // Update progress
         {

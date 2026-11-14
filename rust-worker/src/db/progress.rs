@@ -88,7 +88,7 @@ pub struct SourceProgress {
 }
 
 /// Whitelist pattern match info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhitelistPatternMatch {
     pub pattern: String,
     pub pattern_type: String,
@@ -106,6 +106,8 @@ pub struct WhitelistProgress {
     pub processing: bool,
     #[serde(default)]
     pub patterns: Vec<WhitelistPatternMatch>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Single format generation progress
@@ -225,6 +227,7 @@ impl JobProgress {
             total_removed: 0,
             processing: true,
             patterns: Vec::new(),
+            warnings: Vec::new(),
         });
         self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
     }

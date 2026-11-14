@@ -10,6 +10,9 @@ mod source_cache_test_server;
 #[cfg(test)]
 mod source_contract_tests;
 mod whitelist;
+#[cfg(test)]
+mod whitelist_contract_tests;
+mod whitelist_validation;
 mod worker;
 
 use anyhow::Result;
