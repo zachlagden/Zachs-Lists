@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use bson::DateTime as BsonDateTime;
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
 use mongodb::Database;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
@@ -11,7 +11,6 @@ use crate::db::cache::{
     content_hash, CacheEntry, CacheRepository, CheckedDownload, MAX_FALLBACK_AGE_DAYS,
     MAX_SOURCE_SIZE_BYTES,
 };
-use crate::db::progress::{SourceProgress, SourceStatus};
 use crate::safe_http::{get_source_conditional, parse_source_url, SourceValidators};
 
 #[derive(Debug, Clone)]
@@ -36,6 +35,8 @@ pub struct DownloadResult {
     pub warnings: Vec<String>,
     pub previous_domain_count: Option<u64>,
 }
+
+pub type ByteReport<'a> = dyn Fn(u64, Option<u64>) + Send + Sync + 'a;
 
 pub struct Downloader {
     config: Config,
@@ -65,7 +66,18 @@ impl Downloader {
         format!("{:x}", hasher.finalize())
     }
 
+    #[cfg(test)]
     pub async fn download_source(&self, source: &Source, force: bool) -> DownloadResult {
+        self.download_source_reporting(source, force, &|_, _| {})
+            .await
+    }
+
+    pub async fn download_source_reporting(
+        &self,
+        source: &Source,
+        force: bool,
+        report_bytes: &ByteReport<'_>,
+    ) -> DownloadResult {
         let url_hash = Self::hash_url(&source.url);
         let start = Instant::now();
         let mut result = DownloadResult {
@@ -83,7 +95,7 @@ impl Downloader {
             previous_domain_count: None,
         };
         if let Err(error) = self
-            .check_source(source, &url_hash, force, &mut result)
+            .check_source(source, &url_hash, force, &mut result, report_bytes)
             .await
         {
             result.error = Some(error.to_string());
@@ -98,6 +110,7 @@ impl Downloader {
         url_hash: &str,
         force: bool,
         result: &mut DownloadResult,
+        report_bytes: &ByteReport<'_>,
     ) -> Result<()> {
         parse_source_url(&source.url)?;
         let entry = match self.cache_repo.get_entry(url_hash).await {
@@ -223,7 +236,7 @@ impl Downloader {
         }
         let final_url = response.url().to_string();
         drop(cached_content);
-        let content = match Self::read_response(response).await {
+        let content = match Self::read_response(response, report_bytes).await {
             Ok(content) => content,
             Err(error) => {
                 let fallback_content = if let Some(entry) = entry
@@ -271,13 +284,15 @@ impl Downloader {
         Ok(())
     }
 
-    async fn read_response(response: reqwest::Response) -> Result<Vec<u8>> {
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_SOURCE_SIZE_BYTES)
-        {
+    async fn read_response(
+        response: reqwest::Response,
+        report_bytes: &ByteReport<'_>,
+    ) -> Result<Vec<u8>> {
+        let declared_length = response.content_length();
+        if declared_length.is_some_and(|length| length > MAX_SOURCE_SIZE_BYTES) {
             bail!("Source body exceeds the size limit");
         }
+        report_bytes(0, declared_length);
         let mut content = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
@@ -286,6 +301,7 @@ impl Downloader {
                 bail!("Source body exceeds the size limit");
             }
             content.extend_from_slice(&chunk);
+            report_bytes(content.len() as u64, declared_length);
         }
         Ok(content)
     }
@@ -316,78 +332,6 @@ impl Downloader {
             error,
             MAX_FALLBACK_AGE_DAYS
         ))
-    }
-
-    /// Download multiple sources in parallel
-    pub async fn download_sources(
-        &self,
-        sources: Vec<Source>,
-        force: bool,
-        progress_callback: impl Fn(usize, &SourceProgress) + Send + Sync,
-    ) -> Vec<DownloadResult> {
-        let max_concurrent = self.config.max_concurrent_downloads.max(1);
-
-        let results: Vec<DownloadResult> = stream::iter(sources.into_iter().enumerate())
-            .map(|(idx, source)| {
-                let downloader = self;
-                async move {
-                    // Notify starting
-                    let mut progress = SourceProgress {
-                        id: Self::hash_url(&source.url),
-                        name: source.name.clone(),
-                        url: source.url.clone(),
-                        status: SourceStatus::Downloading,
-                        cache_hit: None,
-                        bytes_downloaded: 0,
-                        bytes_total: None,
-                        download_percent: None,
-                        download_time_ms: None,
-                        domain_count: None,
-                        domain_change: None,
-                        format_breakdown: None,
-                        detected_formats: Vec::new(),
-                        error: None,
-                        warnings: Vec::new(),
-                        started_at: Some(
-                            chrono::Utc::now()
-                                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                                .to_string(),
-                        ),
-                        completed_at: None,
-                    };
-
-                    // Download
-                    let result = downloader.download_source(&source, force).await;
-
-                    // Update progress with result
-                    progress.status = if result.error.is_some() {
-                        SourceStatus::Failed
-                    } else {
-                        SourceStatus::Completed
-                    };
-                    progress.cache_hit = Some(result.cache_hit);
-                    progress.bytes_downloaded = result.bytes_downloaded;
-                    progress.download_time_ms = Some(result.download_time_ms);
-                    progress.error = result.error.clone();
-                    progress.warnings = result.warnings.clone();
-                    progress.completed_at = Some(
-                        chrono::Utc::now()
-                            .format("%Y-%m-%dT%H:%M:%S%.6f")
-                            .to_string(),
-                    );
-
-                    (idx, result, progress)
-                }
-            })
-            .buffered(max_concurrent)
-            .map(|(idx, result, progress)| {
-                progress_callback(idx, &progress);
-                result
-            })
-            .collect()
-            .await;
-
-        results
     }
 
     /// Parse sources from config file content

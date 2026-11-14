@@ -63,6 +63,7 @@ export interface Job {
   queue_info?: QueueInfo; // Present for queued jobs
   result?: JobResult;
   started_at?: string;
+  attempt_started_at?: string | null;
   completed_at?: string;
   created_at: string;
   read?: boolean;
@@ -94,16 +95,17 @@ export interface SourceProgress {
   url: string;
   status: SourceStatus;
   cache_hit: boolean | null;
+  stale: boolean;
   bytes_downloaded: number;
   bytes_total: number | null;
   download_percent: number | null;
   download_time_ms: number | null;
   domain_count: number | null;
   domain_change: number | null;
-  format_breakdown?: FormatBreakdown;
-  detected_formats?: string[]; // e.g., ["hosts", "adblock"]
+  format_breakdown: FormatBreakdown | null;
+  detected_formats: string[];
   error: string | null;
-  warnings?: string[];
+  warnings: string[];
   started_at: string | null;
   completed_at: string | null;
 }
@@ -121,14 +123,16 @@ export interface WhitelistProgress {
   domains_before: number;
   domains_after: number;
   total_removed: number;
-  patterns: WhitelistPatternProgress[];
   processing: boolean;
+  patterns_total: number;
+  patterns: WhitelistPatternProgress[];
+  warnings: string[];
 }
 
 // Output format generation progress
 export interface FormatProgress {
   format: 'hosts' | 'plain' | 'adblock';
-  status: 'pending' | 'generating' | 'compressing' | 'completed';
+  status: 'pending' | 'generating' | 'completed';
   domains_written: number;
   total_domains: number;
   percent: number;
@@ -138,14 +142,27 @@ export interface FormatProgress {
 
 // Generation stage progress
 export interface GenerationProgress {
-  formats: FormatProgress[];
+  files_total: number;
+  files_completed: number;
   current_format: string | null;
+  formats: FormatProgress[];
 }
 
 // Snapshot of a stage's final state
 export interface StageSnapshot {
   completed_at: string;
   data: unknown; // Stage-specific data
+}
+
+export interface StageTiming {
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface StageTimings {
+  downloading: StageTiming | null;
+  whitelist: StageTiming | null;
+  generation: StageTiming | null;
 }
 
 // Enhanced job progress with all stages
@@ -169,9 +186,10 @@ export interface EnhancedJobProgress {
 
   // Timing
   stage_started_at: string | null;
+  stages: StageTimings;
 
   // Stage snapshots for viewing historical state
-  stage_snapshots?: Record<string, StageSnapshot>;
+  stage_snapshots: Record<string, StageSnapshot>;
 
   // Legacy compatibility
   current_step: string;
@@ -181,14 +199,17 @@ export interface EnhancedJobProgress {
 export interface JobResult {
   sources_processed: number;
   sources_failed: number;
+  sources_stale: number;
   total_domains: number;
   unique_domains: number;
   whitelisted_removed: number;
   output_files: OutputFile[];
-  categories?: Record<string, number>;
+  categories: Record<string, number>;
   errors: string[];
-  skip_reason?: string;
-  copied_from?: string; // Username whose build was copied (fingerprint match)
+  warnings: string[];
+  error_code: string | null;
+  skip_reason: string | null;
+  copied_from: string | null; // Username whose build was copied (fingerprint match)
 }
 
 export interface OutputFile {

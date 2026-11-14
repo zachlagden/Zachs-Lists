@@ -132,7 +132,7 @@ def register_scheduled_tasks(app, scheduler):
     def reset_stale_jobs():
         """Reset jobs from dead workers back to queued status.
 
-        Runs every minute. Jobs that haven't received a heartbeat in 10 minutes
+        Runs every minute. Jobs that haven't received a heartbeat in 2 minutes
         are considered stale and reset to queued status so they can be picked
         up by another worker.
         """
@@ -140,7 +140,9 @@ def register_scheduled_tasks(app, scheduler):
             try:
                 from app.models.job import Job
 
-                reset_count, abandoned_count = Job.reset_stale(timeout_minutes=10)
+                reset_count, abandoned_count = Job.reset_stale(
+                    timeout_minutes=Job.STALE_AFTER_MINUTES
+                )
 
                 if reset_count > 0:
                     logger.info(f"Reset {reset_count} stale job(s) to queued status")

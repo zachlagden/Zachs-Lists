@@ -41,6 +41,8 @@ class Job:
     # Stale resets a job may accumulate before it is abandoned as unbuildable
     MAX_STALE_ATTEMPTS = 3
 
+    STALE_AFTER_MINUTES = 2
+
     def __init__(self, data: Dict[str, Any]):
         self._data = data
         self._id = data.get("_id")
@@ -97,6 +99,10 @@ class Job:
         return self._data.get("started_at")
 
     @property
+    def attempt_started_at(self) -> Optional[datetime]:
+        return self._data.get("attempt_started_at")
+
+    @property
     def completed_at(self) -> Optional[datetime]:
         return self._data.get("completed_at")
 
@@ -150,6 +156,7 @@ class Job:
             "progress": self.progress,
             "result": self.result,
             "started_at": utc_iso(self.started_at),
+            "attempt_started_at": utc_iso(self.attempt_started_at),
             "completed_at": utc_iso(self.completed_at),
             "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
@@ -257,7 +264,9 @@ class Job:
 
     @classmethod
     def reset_stale(
-        cls, timeout_minutes: int = 10, max_attempts: int = MAX_STALE_ATTEMPTS
+        cls,
+        timeout_minutes: int = STALE_AFTER_MINUTES,
+        max_attempts: int = MAX_STALE_ATTEMPTS,
     ) -> Tuple[int, int]:
         """
         Reset jobs from dead workers back to queued status.

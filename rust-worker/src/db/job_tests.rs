@@ -21,6 +21,27 @@ fn revision(job: &Document) -> i64 {
     }
 }
 
+fn downloading_progress() -> JobProgress {
+    JobProgress::downloading(vec![crate::db::progress::SourceProgress::pending(
+        "a".repeat(64),
+        "first_list".into(),
+        "https://lists.example.com/first.txt".into(),
+    )])
+}
+
+fn whole_progress(progress: &JobProgress) -> Document {
+    doc! { "progress": bson::to_document(progress).unwrap() }
+}
+
+fn completed_result() -> JobResult {
+    JobResult {
+        sources_processed: 1,
+        total_domains: 1,
+        unique_domains: 1,
+        ..JobResult::default()
+    }
+}
+
 fn updated_at(job: &Document) -> bson::DateTime {
     *job.get_datetime("updated_at").unwrap()
 }
@@ -52,6 +73,14 @@ fn initial_queue_progress_matches_the_shared_fixture() {
 }
 
 #[test]
+fn default_progress_is_the_initial_queue_progress() {
+    assert_eq!(
+        serde_json::to_value(JobProgress::default()).unwrap(),
+        initial_progress_fixture()
+    );
+}
+
+#[test]
 fn worker_error_codes_match_the_shared_fixture() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/job-error-codes.json")).unwrap();
@@ -73,8 +102,13 @@ fn results_always_carry_an_error_code_key() {
     .unwrap();
     assert_eq!(failed.get_str("error_code").unwrap(), "no_sources");
 
-    let succeeded = bson::to_document(&JobResult::success(1, 0, 2, 2, 0, Vec::new())).unwrap();
+    let succeeded = bson::to_document(&completed_result()).unwrap();
     assert_eq!(succeeded.get("error_code"), Some(&Bson::Null));
+    assert_eq!(succeeded.get("skip_reason"), Some(&Bson::Null));
+    assert_eq!(succeeded.get("copied_from"), Some(&Bson::Null));
+    assert_eq!(succeeded.get_document("categories").unwrap().len(), 0);
+    assert_eq!(succeeded.get_array("warnings").unwrap().len(), 0);
+    assert_eq!(succeeded.get_i64("sources_stale").unwrap(), 0);
 
     let skipped = bson::to_document(&JobResult::skipped("unchanged")).unwrap();
     assert_eq!(skipped.get("error_code"), Some(&Bson::Null));
@@ -100,6 +134,10 @@ async fn claim_takes_the_lease_and_counts_the_attempt() {
     let first_start = *first.get_datetime("started_at").unwrap();
     assert_eq!(first.get_datetime("claimed_at").unwrap(), &first_start);
     assert_eq!(first.get_datetime("heartbeat_at").unwrap(), &first_start);
+    assert_eq!(
+        first.get_datetime("attempt_started_at").unwrap(),
+        &first_start
+    );
     assert_eq!(updated_at(&first), first_start);
 
     assert!(matches!(
@@ -117,6 +155,10 @@ async fn claim_takes_the_lease_and_counts_the_attempt() {
     assert_eq!(second.get_str("worker_id").unwrap(), "worker-b");
     assert_eq!(second.get_datetime("started_at").unwrap(), &first_start);
     assert!(*second.get_datetime("claimed_at").unwrap() > first_start);
+    assert_eq!(
+        second.get_datetime("attempt_started_at").unwrap(),
+        second.get_datetime("claimed_at").unwrap()
+    );
     assert_eq!(revision(&second), 2);
     db.drop().await.unwrap();
 }
@@ -134,19 +176,26 @@ async fn writes_from_a_worker_that_lost_the_lease_change_nothing() {
     claimed(worker_b.claim_next().await.unwrap());
     let held_by_b = stored_job(&db, &id).await;
 
-    let progress = JobProgress::downloading(3);
-    let result = JobResult::success(1, 0, 1, 1, 0, Vec::new());
+    let progress = downloading_progress();
+    let result = completed_result();
     assert!(matches!(
-        worker_a.update_progress(&id, &progress).await,
+        worker_a
+            .write_progress_fields(&id, whole_progress(&progress))
+            .await,
         Err(JobWriteError::LeaseLost)
     ));
     assert!(matches!(
-        worker_a.complete(&id, &result).await,
+        worker_a.complete(&id, &result, &progress).await,
         Err(JobWriteError::LeaseLost)
     ));
     assert!(matches!(
         worker_a
-            .fail(&id, error_code::INTERNAL, vec!["failed".into()])
+            .fail(
+                &id,
+                error_code::INTERNAL,
+                vec!["failed".into()],
+                Some(&progress)
+            )
             .await,
         Err(JobWriteError::LeaseLost)
     ));
@@ -166,12 +215,22 @@ async fn writes_from_a_worker_that_lost_the_lease_change_nothing() {
     pause().await;
     assert!(worker_b.heartbeat(&id).await.unwrap());
     let after_heartbeat = stored_job(&db, &id).await;
-    assert_eq!(revision(&after_heartbeat), revision(&previous) + 1);
-    assert!(updated_at(&after_heartbeat) > updated_at(&previous));
+    assert_eq!(revision(&after_heartbeat), revision(&previous));
+    assert_eq!(updated_at(&after_heartbeat), updated_at(&previous));
+    assert!(
+        after_heartbeat.get_datetime("heartbeat_at").unwrap()
+            > previous.get_datetime("heartbeat_at").unwrap()
+    );
+    let mut unchanged_by_heartbeat = after_heartbeat.clone();
+    unchanged_by_heartbeat.insert("heartbeat_at", previous.get("heartbeat_at").unwrap());
+    assert_eq!(unchanged_by_heartbeat, previous);
     previous = after_heartbeat;
 
     pause().await;
-    worker_b.update_progress(&id, &progress).await.unwrap();
+    worker_b
+        .write_progress_fields(&id, whole_progress(&progress))
+        .await
+        .unwrap();
     let after_progress = stored_job(&db, &id).await;
     assert_eq!(
         after_progress
@@ -186,15 +245,30 @@ async fn writes_from_a_worker_that_lost_the_lease_change_nothing() {
     previous = after_progress;
 
     pause().await;
-    worker_b.complete(&id, &result).await.unwrap();
+    let mut final_progress = progress.clone();
+    final_progress.processed_sources = 1;
+    worker_b
+        .complete(&id, &result, &final_progress)
+        .await
+        .unwrap();
     let completed = stored_job(&db, &id).await;
     assert_eq!(completed.get_str("status").unwrap(), "completed");
+    assert_eq!(
+        completed
+            .get_document("progress")
+            .unwrap()
+            .get_i64("processed_sources")
+            .unwrap(),
+        1
+    );
     assert_eq!(completed.get_str("worker_id").unwrap(), "worker-b");
     assert_eq!(revision(&completed), revision(&previous) + 1);
     assert!(updated_at(&completed) > updated_at(&previous));
 
     assert!(matches!(
-        worker_b.update_progress(&id, &progress).await,
+        worker_b
+            .write_progress_fields(&id, whole_progress(&progress))
+            .await,
         Err(JobWriteError::LeaseLost)
     ));
     assert_eq!(stored_job(&db, &id).await, completed);
@@ -214,12 +288,21 @@ async fn fail_and_skip_end_the_job_under_the_lease() {
             &failing,
             error_code::ALL_SOURCES_FAILED,
             vec!["All source downloads failed".into()],
+            Some(&downloading_progress()),
         )
         .await
         .unwrap();
     let failed = stored_job(&db, &failing).await;
     assert_eq!(failed.get_str("status").unwrap(), "failed");
     assert_eq!(revision(&failed), 2);
+    assert_eq!(
+        failed
+            .get_document("progress")
+            .unwrap()
+            .get_str("stage")
+            .unwrap(),
+        "downloading"
+    );
     let result = failed.get_document("result").unwrap();
     assert_eq!(result.get_str("error_code").unwrap(), "all_sources_failed");
     assert_eq!(
@@ -236,6 +319,10 @@ async fn fail_and_skip_end_the_job_under_the_lease() {
     let result = skipped.get_document("result").unwrap();
     assert_eq!(result.get_str("skip_reason").unwrap(), "unchanged");
     assert_eq!(result.get("error_code"), Some(&Bson::Null));
+    assert_eq!(
+        as_json(skipped.get("progress").unwrap()),
+        initial_progress_fixture()
+    );
     db.drop().await.unwrap();
 }
 
@@ -299,7 +386,7 @@ async fn release_requeues_with_initial_progress_and_keeps_the_attempt() {
 
     claimed(worker.claim_next().await.unwrap());
     worker
-        .update_progress(&first, &JobProgress::downloading(3))
+        .write_progress_fields(&first, whole_progress(&downloading_progress()))
         .await
         .unwrap();
     let before = stored_job(&db, &first).await;
@@ -323,7 +410,7 @@ async fn release_requeues_with_initial_progress_and_keeps_the_attempt() {
 
     assert_eq!(claimed(worker.claim_next().await.unwrap()).attempt, 2);
     worker
-        .update_progress(&first, &JobProgress::downloading(3))
+        .write_progress_fields(&first, whole_progress(&downloading_progress()))
         .await
         .unwrap();
     assert_eq!(worker.release_all().await.unwrap(), 1);

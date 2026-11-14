@@ -160,6 +160,8 @@ def test_admitted_job_carries_target_snapshot_and_current_progress_shape(
         "queue_position": None,
         "queue_delay_remaining_ms": None,
         "stage_started_at": None,
+        "stages": {"downloading": None, "whitelist": None, "generation": None},
+        "stage_snapshots": {},
     }
     for key in ("result", "started_at", "completed_at", "worker_id", "claimed_at"):
         assert stored[key] is None

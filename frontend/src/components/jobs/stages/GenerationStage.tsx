@@ -30,7 +30,6 @@ const formatConfig: Record<
 const statusLabels: Record<string, string> = {
   pending: 'Waiting...',
   generating: 'Generating...',
-  compressing: 'Compressing...',
   completed: 'Complete',
 };
 
@@ -86,7 +85,7 @@ export default function GenerationStage({ generation, formats }: GenerationStage
             description: '',
             color: 'blue' as const,
           };
-          const isActive = format.status === 'generating' || format.status === 'compressing';
+          const isActive = format.status === 'generating';
           const isComplete = format.status === 'completed';
 
           return (

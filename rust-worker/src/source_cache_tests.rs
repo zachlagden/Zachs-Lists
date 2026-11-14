@@ -756,13 +756,10 @@ async fn entry_without_a_check_time_fails_only_its_own_source_when_upstream_is_d
         url: server.url("/healthy"),
         category: None,
     };
-    let reported = std::sync::Mutex::new(Vec::new());
-    let results = downloader
-        .download_sources(vec![source.clone(), healthy], false, |_, progress| {
-            reported.lock().unwrap().push(progress.clone())
-        })
-        .await;
-    assert_eq!(results.len(), 2);
+    let results = [
+        downloader.download_source(&source, false).await,
+        downloader.download_source(&healthy, false).await,
+    ];
     assert!(results[0].content.is_none());
     assert!(results[0].error.as_ref().unwrap().contains("HTTP 503"));
     assert!(results[1].error.is_none(), "{:?}", results[1].error);
@@ -770,9 +767,6 @@ async fn entry_without_a_check_time_fails_only_its_own_source_when_upstream_is_d
         results[1].content.as_deref(),
         Some(b"healthy.example\n".as_slice())
     );
-    let reported = reported.into_inner().unwrap();
-    assert_eq!(reported[0].status, SourceStatus::Failed);
-    assert_eq!(reported[1].status, SourceStatus::Completed);
     assert!(metadata(&db, &source).await.last_checked_at.is_none());
     db.drop().await.unwrap();
 }
@@ -839,18 +833,20 @@ async fn stale_fallback_warning_reaches_source_progress() {
         .await
         .error
         .is_none());
-    let reported = std::sync::Mutex::new(Vec::new());
-    let results = downloader
-        .download_sources(vec![source.clone()], false, |_, progress| {
-            reported.lock().unwrap().push(progress.clone())
-        })
-        .await;
-    assert!(results[0].stale_fallback && results[0].error.is_none());
-    let reported = reported.into_inner().unwrap();
-    assert_eq!(reported.len(), 1);
-    assert_eq!(reported[0].status, SourceStatus::Completed);
-    assert_eq!(reported[0].cache_hit, Some(true));
-    assert!(reported[0]
+    let result = downloader.download_source(&source, false).await;
+    assert!(result.stale_fallback && result.error.is_none());
+    let tracker =
+        crate::progress_tracker::ProgressTracker::downloading(std::slice::from_ref(&source));
+    tracker.source_downloaded(0, &result);
+    let reported = tracker.snapshot().sources.remove(0);
+    assert_eq!(
+        reported.status,
+        crate::db::progress::SourceStatus::Processing
+    );
+    assert_eq!(reported.cache_hit, Some(true));
+    assert!(reported.stale);
+    assert_eq!(reported.bytes_downloaded, 0);
+    assert!(reported
         .warnings
         .iter()
         .any(|warning| warning.starts_with("Stale source:") && warning.contains("HTTP 503")));
