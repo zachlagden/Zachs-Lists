@@ -1,8 +1,6 @@
 use super::*;
 
-#[path = "source_cache_test_server.rs"]
-mod server;
-use server::{Reply, TestServer};
+use crate::source_cache_test_server::{Reply, TestServer};
 
 #[test]
 fn validators_are_bounded_and_bound_to_the_exact_destination() {

@@ -173,10 +173,6 @@ impl SourceValidators {
     }
 }
 
-pub async fn get_source(value: &str, timeout: Duration) -> Result<Response> {
-    get_source_conditional(value, timeout, None).await
-}
-
 pub async fn get_source_conditional(
     value: &str,
     timeout: Duration,

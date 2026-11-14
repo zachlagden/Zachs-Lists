@@ -1,0 +1,8 @@
+{
+  "fallback_days": 7,
+  "cases": [
+    { "configured_days": 0, "retention_days": 7 },
+    { "configured_days": 7, "retention_days": 7 },
+    { "configured_days": 30, "retention_days": 30 }
+  ]
+}

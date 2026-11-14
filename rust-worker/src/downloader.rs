@@ -3,16 +3,14 @@ use bson::DateTime as BsonDateTime;
 use futures::stream::{self, StreamExt};
 use mongodb::Database;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, LazyLock, Mutex, Weak,
-};
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex as AsyncMutex;
+use tracing::{debug, warn};
 
 use crate::config::Config;
-use crate::db::cache::{content_hash, CacheEntry, CacheRepository, MAX_SOURCE_SIZE_BYTES};
+use crate::db::cache::{
+    content_hash, CacheEntry, CacheRepository, CheckedDownload, MAX_FALLBACK_AGE_DAYS,
+    MAX_SOURCE_SIZE_BYTES,
+};
 use crate::db::progress::{SourceProgress, SourceStatus};
 use crate::safe_http::{get_source_conditional, parse_source_url, SourceValidators};
 
@@ -39,28 +37,6 @@ pub struct DownloadResult {
     pub previous_domain_count: Option<u64>,
 }
 
-#[derive(Default)]
-struct SourceCheckGate {
-    lock: AsyncMutex<()>,
-    successful_checks: AtomicU64,
-}
-
-static SOURCE_CHECKS: LazyLock<Mutex<HashMap<String, Weak<SourceCheckGate>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn source_check_gate(key: String) -> Arc<SourceCheckGate> {
-    let mut gates = SOURCE_CHECKS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    gates.retain(|_, gate| gate.strong_count() > 0);
-    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
-        return gate;
-    }
-    let gate = Arc::new(SourceCheckGate::default());
-    gates.insert(key, Arc::downgrade(&gate));
-    gate
-}
-
 pub struct Downloader {
     config: Config,
     cache_repo: CacheRepository,
@@ -84,7 +60,7 @@ impl Downloader {
         format!("{:x}", hasher.finalize())
     }
 
-    pub async fn download_source(&self, source: &Source, _force: bool) -> DownloadResult {
+    pub async fn download_source(&self, source: &Source, force: bool) -> DownloadResult {
         let url_hash = Self::hash_url(&source.url);
         let start = Instant::now();
         let mut result = DownloadResult {
@@ -101,24 +77,11 @@ impl Downloader {
             warnings: Vec::new(),
             previous_domain_count: None,
         };
-        let gate = source_check_gate(format!(
-            "{}:{}:{}",
-            Self::hash_url(&self.config.mongo_uri),
-            self.cache_repo.namespace(),
-            url_hash,
-        ));
-        let observed_checks = gate.successful_checks.load(Ordering::SeqCst);
-        let _guard = gate.lock.lock().await;
-        let coalesced = gate.successful_checks.load(Ordering::SeqCst) != observed_checks;
-        match self
-            .check_source(source, &url_hash, coalesced, &mut result)
+        if let Err(error) = self
+            .check_source(source, &url_hash, force, &mut result)
             .await
         {
-            Ok(true) => {
-                gate.successful_checks.fetch_add(1, Ordering::SeqCst);
-            }
-            Ok(false) => {}
-            Err(error) => result.error = Some(error.to_string()),
+            result.error = Some(error.to_string());
         }
         result.download_time_ms = start.elapsed().as_millis() as u64;
         result
@@ -128,13 +91,14 @@ impl Downloader {
         &self,
         source: &Source,
         url_hash: &str,
-        coalesced: bool,
+        force: bool,
         result: &mut DownloadResult,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         parse_source_url(&source.url)?;
         let entry = match self.cache_repo.get_entry(url_hash).await {
             Ok(entry) => entry,
-            Err(_) => {
+            Err(error) => {
+                warn!("Cache metadata read failed for {}: {}", source.name, error);
                 result.warnings.push(
                     "Source cache metadata could not be read; checking upstream without validators"
                         .into(),
@@ -158,15 +122,16 @@ impl Downloader {
                     .push("Source cache URL does not match the requested source".into());
             }
         }
-        if coalesced {
-            if let (Some(entry), Some(content)) = (&entry, cached_content.as_ref()) {
-                if entry.allows_fallback_at(BsonDateTime::now()) {
-                    result.content_hash = Some(content_hash(content));
-                    result.content = cached_content;
-                    result.cache_hit = true;
-                    result.last_checked_at = entry.last_checked_at;
-                    return Ok(false);
-                }
+        if !force {
+            if let Some(entry) = entry.as_ref().filter(|entry| {
+                cached_content.is_some()
+                    && entry.is_fresh_at(BsonDateTime::now(), self.config.source_fresh_secs)
+            }) {
+                result.content_hash = entry.content_hash.clone();
+                result.content = cached_content;
+                result.cache_hit = true;
+                result.last_checked_at = entry.last_checked_at;
+                return Ok(());
             }
         }
         let validators = entry
@@ -241,7 +206,7 @@ impl Downloader {
             result.content = Some(content);
             result.cache_hit = true;
             result.last_checked_at = Some(checked_at);
-            return Ok(true);
+            return Ok(());
         }
         if response.status() != reqwest::StatusCode::OK {
             return Self::fallback(
@@ -283,12 +248,14 @@ impl Downloader {
             .cache_repo
             .store_checked(
                 url_hash,
-                &source.url,
-                &final_url,
-                &content,
-                etag.as_deref(),
-                last_modified.as_deref(),
-                domain_count,
+                CheckedDownload {
+                    url: &source.url,
+                    final_url: &final_url,
+                    content: &content,
+                    etag: etag.as_deref(),
+                    last_modified: last_modified.as_deref(),
+                    domain_count,
+                },
             )
             .await
             .context("Could not persist the downloaded source body")?;
@@ -296,7 +263,7 @@ impl Downloader {
         result.content_hash = Some(content_hash(&content));
         result.content = Some(content);
         result.last_checked_at = Some(checked_at);
-        Ok(true)
+        Ok(())
     }
 
     async fn read_response(response: reqwest::Response) -> Result<Vec<u8>> {
@@ -323,20 +290,27 @@ impl Downloader {
         content: Option<Vec<u8>>,
         error: anyhow::Error,
         result: &mut DownloadResult,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         if let (Some(entry), Some(content)) = (entry, content) {
             if entry.verify_body(&content).is_ok() && entry.allows_fallback_at(BsonDateTime::now())
             {
-                result.warnings.push(format!("Stale source: upstream check failed ({}); using a verified cache body checked within seven days", error));
+                result.warnings.push(format!(
+                    "Stale source: upstream check failed ({}); using a verified cache body checked within {} days",
+                    error, MAX_FALLBACK_AGE_DAYS
+                ));
                 result.content_hash = Some(content_hash(&content));
                 result.content = Some(content);
                 result.last_checked_at = entry.last_checked_at;
                 result.cache_hit = true;
                 result.stale_fallback = true;
-                return Ok(false);
+                return Ok(());
             }
         }
-        Err(anyhow!("Source check failed ({}); no verified cache body checked within seven days is available", error))
+        Err(anyhow!(
+            "Source check failed ({}); no verified cache body checked within {} days is available",
+            error,
+            MAX_FALLBACK_AGE_DAYS
+        ))
     }
 
     /// Download multiple sources in parallel
@@ -518,8 +492,26 @@ impl Downloader {
             .await
     }
 
-    pub async fn check_all_cached(&self, _sources: &[Source]) -> bool {
-        false
+    pub async fn check_all_cached(&self, sources: &[Source]) -> bool {
+        for source in sources {
+            let url_hash = Self::hash_url(&source.url);
+            match self
+                .cache_repo
+                .has_valid_cache(&url_hash, &source.url, self.config.source_fresh_secs)
+                .await
+            {
+                Ok(true) => continue,
+                Ok(false) => {
+                    debug!("Source {} has no fresh cache entry", source.name);
+                    return false;
+                }
+                Err(error) => {
+                    warn!("Cache check error for {}: {}", source.name, error);
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 

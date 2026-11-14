@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
-pub const MAX_FALLBACK_AGE_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
+pub const MAX_FALLBACK_AGE_DAYS: i64 = 7;
+pub const MAX_FALLBACK_AGE_MILLIS: i64 = MAX_FALLBACK_AGE_DAYS * MILLIS_PER_DAY;
+const MILLIS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CacheStats {
@@ -49,13 +51,25 @@ pub struct CacheEntry {
 }
 
 impl CacheEntry {
+    fn millis_since_check(&self, now: BsonDateTime) -> Option<i64> {
+        self.last_checked_at.and_then(|checked| {
+            now.timestamp_millis()
+                .checked_sub(checked.timestamp_millis())
+        })
+    }
+
     pub fn allows_fallback_at(&self, now: BsonDateTime) -> bool {
-        self.last_checked_at
-            .and_then(|checked| {
-                now.timestamp_millis()
-                    .checked_sub(checked.timestamp_millis())
-            })
+        self.millis_since_check(now)
             .is_some_and(|age| (0..=MAX_FALLBACK_AGE_MILLIS).contains(&age))
+    }
+
+    pub fn is_fresh_at(&self, now: BsonDateTime, fresh_secs: u64) -> bool {
+        let window = i64::try_from(fresh_secs)
+            .unwrap_or(i64::MAX)
+            .saturating_mul(1000)
+            .min(MAX_FALLBACK_AGE_MILLIS);
+        self.millis_since_check(now)
+            .is_some_and(|age| (0..window).contains(&age))
     }
 
     pub fn verify_body(&self, content: &[u8]) -> Result<()> {
@@ -76,6 +90,19 @@ pub fn content_hash(content: &[u8]) -> String {
     format!("{:x}", Sha256::digest(content))
 }
 
+pub fn retention_days(configured_days: i64) -> i64 {
+    configured_days.max(MAX_FALLBACK_AGE_DAYS)
+}
+
+pub struct CheckedDownload<'a> {
+    pub url: &'a str,
+    pub final_url: &'a str,
+    pub content: &'a [u8],
+    pub etag: Option<&'a str>,
+    pub last_modified: Option<&'a str>,
+    pub domain_count: i64,
+}
+
 pub struct CacheRepository {
     db: Database,
     collection: Collection<CacheEntry>,
@@ -87,10 +114,6 @@ impl CacheRepository {
             db: db.clone(),
             collection: db.collection("cache"),
         }
-    }
-
-    pub fn namespace(&self) -> &str {
-        self.db.name()
     }
 
     fn get_bucket(&self) -> GridFsBucket {
@@ -130,24 +153,21 @@ impl CacheRepository {
         Ok(content)
     }
 
-    pub async fn get_content(&self, url_hash: &str) -> Result<Option<Vec<u8>>> {
-        match self.get_entry(url_hash).await? {
-            Some(entry) => Ok(Some(self.get_verified_content(&entry).await?)),
-            None => Ok(None),
-        }
-    }
-
     pub async fn store_checked(
         &self,
         url_hash: &str,
-        url: &str,
-        final_url: &str,
-        content: &[u8],
-        etag: Option<&str>,
-        last_modified: Option<&str>,
-        domain_count: i64,
+        download: CheckedDownload<'_>,
     ) -> Result<BsonDateTime> {
         use futures::io::AsyncWriteExt;
+
+        let CheckedDownload {
+            url,
+            final_url,
+            content,
+            etag,
+            last_modified,
+            domain_count,
+        } = download;
 
         let checked_at = BsonDateTime::now();
         if content.len() as u64 > MAX_SOURCE_SIZE_BYTES {
@@ -258,8 +278,7 @@ impl CacheRepository {
     pub async fn cleanup_stale(&self, days: i64) -> Result<u64> {
         use futures::TryStreamExt;
 
-        let retention_days = days.max(7);
-        let retention_millis = retention_days.saturating_mul(24 * 60 * 60 * 1000);
+        let retention_millis = retention_days(days).saturating_mul(MILLIS_PER_DAY);
         let cutoff = BsonDateTime::from_millis(
             Utc::now()
                 .timestamp_millis()
@@ -284,22 +303,40 @@ impl CacheRepository {
             if result.deleted_count == 1 {
                 deleted += 1;
                 if let Some(id) = entry.gridfs_id {
-                    bucket.delete(Bson::ObjectId(id)).await?;
+                    if let Err(error) = bucket.delete(Bson::ObjectId(id)).await {
+                        tracing::warn!("Could not remove expired cached source body: {}", error);
+                    }
                 }
             }
         }
         Ok(deleted)
     }
 
-    pub async fn has_valid_cache(&self, url_hash: &str) -> Result<bool> {
+    pub async fn has_valid_cache(
+        &self,
+        url_hash: &str,
+        url: &str,
+        fresh_secs: u64,
+    ) -> Result<bool> {
         let Some(entry) = self.get_entry(url_hash).await? else {
             return Ok(false);
         };
-        if !entry.allows_fallback_at(BsonDateTime::now()) {
+        if entry.url.as_deref() != Some(url)
+            || entry.content_hash.is_none()
+            || !(0..=MAX_SOURCE_SIZE_BYTES as i64).contains(&entry.stats.size_bytes)
+            || !entry.is_fresh_at(BsonDateTime::now(), fresh_secs)
+        {
             return Ok(false);
         }
-        self.get_verified_content(&entry).await?;
-        Ok(entry.allows_fallback_at(BsonDateTime::now()))
+        let Some(gridfs_id) = entry.gridfs_id else {
+            return Ok(false);
+        };
+        let stored_bodies = self
+            .db
+            .collection::<bson::Document>("cache_files.files")
+            .count_documents(doc! { "_id": gridfs_id, "length": entry.stats.size_bytes })
+            .await?;
+        Ok(stored_bodies == 1)
     }
 }
 

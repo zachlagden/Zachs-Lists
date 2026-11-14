@@ -108,6 +108,10 @@ impl TestServer {
         }
     }
 
+    pub fn recorded_requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("http://source.example:{}{}", self.address.port(), path)
     }
