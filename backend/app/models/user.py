@@ -13,7 +13,7 @@ from flask import current_app
 
 from app.extensions import mongo
 from app.utils.config_revision import ConfigRevisionConflict
-from app.utils.time import utc_iso
+from app.utils.time import utc_iso, week_start
 
 
 class User:
@@ -156,10 +156,14 @@ class User:
             "total_output_size_bytes": 0,
             "last_build_at": None,
             "manual_updates_this_week": 0,
-            "week_reset_at": datetime.utcnow(),
+            "week_reset_at": None,
         }
         user_stats = self._data.get("stats", {})
-        return {**defaults, **user_stats}
+        return {
+            **defaults,
+            **user_stats,
+            "manual_updates_this_week": self.manual_updates_used(),
+        }
 
     @property
     def lists(self) -> List[Dict[str, Any]]:
@@ -269,46 +273,23 @@ class User:
 
     # Stats methods
 
-    def can_do_manual_update(self) -> bool:
-        """Check if user can perform a manual update."""
-        # Admins can always do manual updates
+    def manual_updates_used(self, now: Optional[datetime] = None) -> int:
+        stats = self._data.get("stats", {})
+        counted_from = stats.get("week_reset_at")
+        current_week = week_start(now or datetime.utcnow())
+        if not isinstance(counted_from, datetime) or counted_from < current_week:
+            return 0
+        used = stats.get("manual_updates_this_week", 0)
+        return used if isinstance(used, int) and used > 0 else 0
+
+    def can_do_manual_update(self, now: Optional[datetime] = None) -> bool:
         if self.is_admin:
             return True
+        return self.get_remaining_manual_updates(now) > 0
 
-        stats = self.stats
-        week_reset = stats.get("week_reset_at", datetime.utcnow() - timedelta(days=8))
-
-        # Check if week has reset
-        if datetime.utcnow() - week_reset > timedelta(days=7):
-            # Reset counter
-            mongo.db[self.COLLECTION].update_one(
-                {"_id": self._id},
-                {
-                    "$set": {
-                        "stats.manual_updates_this_week": 0,
-                        "stats.week_reset_at": datetime.utcnow(),
-                    }
-                },
-            )
-            return True
-
-        return (
-            stats.get("manual_updates_this_week", 0)
-            < self.limits["manual_updates_per_week"]
-        )
-
-    def increment_manual_updates(self) -> None:
-        """Increment manual update counter."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id}, {"$inc": {"stats.manual_updates_this_week": 1}}
-        )
-
-    def get_remaining_manual_updates(self) -> int:
-        """Get remaining manual updates for this week."""
-        stats = self.stats
-        used = stats.get("manual_updates_this_week", 0)
+    def get_remaining_manual_updates(self, now: Optional[datetime] = None) -> int:
         limit = self.limits["manual_updates_per_week"]
-        return max(0, limit - used)
+        return max(0, limit - self.manual_updates_used(now))
 
     # Admin methods
     def set_enabled(self, enabled: bool) -> None:

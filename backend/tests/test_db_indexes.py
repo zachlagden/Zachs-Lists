@@ -43,6 +43,7 @@ def test_ensure_indexes_creates_every_named_index_and_is_repeatable(
         "user_id_1_created_at_-1",
         "user_id_1_status_1_completed_at_-1",
         "updated_at_1",
+        "one_active_job_per_target",
     }
     assert index_names(database, "cache") == {"url_hash_1"}
     assert index_names(database, "workers") == {"worker_id_1"}
@@ -76,6 +77,11 @@ def test_index_keys_and_options(database: Any) -> None:
         ("status", 1),
         ("completed_at", -1),
     ]
+    assert jobs["one_active_job_per_target"]["key"] == [("target_id", 1)]
+    assert jobs["one_active_job_per_target"]["unique"] is True
+    assert jobs["one_active_job_per_target"]["partialFilterExpression"] == {
+        "status": {"$in": ["queued", "processing"]}
+    }
     assert "unique" not in jobs["updated_at_1"]
     assert "expireAfterSeconds" not in jobs["updated_at_1"]
 
@@ -96,7 +102,12 @@ def test_index_names_are_unique_per_collection() -> None:
 def test_failing_index_is_logged_and_does_not_stop_the_rest(
     database: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
-    database.jobs.insert_many([{"job_id": "duplicate"}, {"job_id": "duplicate"}])
+    database.jobs.insert_many(
+        [
+            {"job_id": "duplicate", "target_id": "000000000000000000000001"},
+            {"job_id": "duplicate", "target_id": "000000000000000000000002"},
+        ]
+    )
 
     with caplog.at_level(logging.ERROR, logger=db_indexes.__name__):
         ensure_indexes(database)
