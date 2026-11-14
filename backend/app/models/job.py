@@ -97,6 +97,10 @@ class Job:
         return self._data.get("started_at")
 
     @property
+    def attempt_started_at(self) -> Optional[datetime]:
+        return self._data.get("attempt_started_at")
+
+    @property
     def completed_at(self) -> Optional[datetime]:
         return self._data.get("completed_at")
 
@@ -150,6 +154,7 @@ class Job:
             "progress": self.progress,
             "result": self.result,
             "started_at": utc_iso(self.started_at),
+            "attempt_started_at": utc_iso(self.attempt_started_at),
             "completed_at": utc_iso(self.completed_at),
             "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
