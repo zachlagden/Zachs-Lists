@@ -73,25 +73,12 @@ export default function JobsPage() {
     [updateJob, setHasUnreadFailures, clearJobProgress],
   );
 
-  const handleJobSkipped = useCallback((data: { job_id: string; reason: string }) => {
-    setSelectedJob((prev) =>
-      prev?.job_id === data.job_id
-        ? {
-            ...prev,
-            status: 'skipped',
-            result: { ...prev.result, skip_reason: data.reason } as Job['result'],
-          }
-        : prev,
-    );
-  }, []);
-
   // Subscribe to real-time updates
   useJobSocket({
     userId: user?.id,
     onJobCreated: handleJobCreated,
     onJobProgress: handleJobProgress,
     onJobCompleted: handleJobCompleted,
-    onJobSkipped: handleJobSkipped,
   });
 
   useEffect(() => {
