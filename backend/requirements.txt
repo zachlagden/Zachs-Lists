@@ -10,7 +10,7 @@ Werkzeug==3.1.9
 python-socketio==5.16.2
 
 # Database
-pymongo==4.6.3
+pymongo==4.18.3
 
 # HTTP client
 requests==2.33.0
@@ -35,7 +35,7 @@ gevent-websocket==0.10.1
 whitenoise==6.8.2
 
 # Formatting
-black==26.3.1
+black==26.10.1
 
 # Development
 pytest==9.0.3
