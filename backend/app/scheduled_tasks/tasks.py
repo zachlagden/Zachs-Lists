@@ -140,7 +140,7 @@ def register_scheduled_tasks(app, scheduler):
                 from app.services.cache_manager import CacheManager
 
                 cache_manager = CacheManager()
-                cleaned = cache_manager.cleanup_stale(days=30)
+                cleaned = cache_manager.cleanup_stale()
 
                 if cleaned > 0:
                     logger.info(f"Cleaned up {cleaned} stale cache entries")
