@@ -3,7 +3,6 @@ Utility modules package.
 """
 
 from app.utils.validators import (
-    validate_domain,
     normalize_domain,
     validate_blocklist_config,
     validate_whitelist,
@@ -11,7 +10,6 @@ from app.utils.validators import (
 )
 
 __all__ = [
-    "validate_domain",
     "normalize_domain",
     "validate_blocklist_config",
     "validate_whitelist",

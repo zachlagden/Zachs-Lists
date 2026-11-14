@@ -39,6 +39,7 @@ class Config:
     DATA_DIR = os.environ.get("DATA_DIR", "./data")
     USERS_DIR = os.path.join(DATA_DIR, "users")
     DEFAULT_DIR = os.path.join(DATA_DIR, "default")
+    WORKER_BIN = os.environ.get("WORKER_BIN", "/app/rust-worker")
 
     # Frontend
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
