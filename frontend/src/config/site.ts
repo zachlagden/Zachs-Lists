@@ -23,13 +23,18 @@ export const getUserListUrl = (username: string, name: string): string => {
 export const ALLOWLIST_NAME = 'allowlist';
 export const ALLOWLIST_PRIMARY_FORMAT = 'adblock';
 
-export const getUserAllowlistUrl = (
-  username: string,
-  format: string = ALLOWLIST_PRIMARY_FORMAT,
-): string => {
-  return `${getUserListUrl(username, ALLOWLIST_NAME)}?format=${format}`;
+function allowlistUrl(base: string, format?: string): string {
+  if (!format || format === ALLOWLIST_PRIMARY_FORMAT) {
+    return base;
+  }
+  return `${base}?format=${format}`;
+}
+
+/** Bare URL. Adblock is the default format, so the subscription URL has no query. */
+export const getUserAllowlistUrl = (username: string, format?: string): string => {
+  return allowlistUrl(getUserListUrl(username, ALLOWLIST_NAME), format);
 };
 
-export const getDefaultAllowlistUrl = (format: string = ALLOWLIST_PRIMARY_FORMAT): string => {
-  return `${getDefaultListUrl(ALLOWLIST_NAME)}?format=${format}`;
+export const getDefaultAllowlistUrl = (format?: string): string => {
+  return allowlistUrl(getDefaultListUrl(ALLOWLIST_NAME), format);
 };

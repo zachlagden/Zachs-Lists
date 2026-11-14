@@ -87,18 +87,15 @@ On the Config page, opt in to publish the whitelist itself (not only the domains
 
 ```bash
 # Pi-hole v6 allow-type adlist
-https://lists.zachlagden.uk/u/yourname/allowlist.txt?format=adblock
-
-# Exact domains only. Does not honor @@ or *. subdomain semantics.
-https://lists.zachlagden.uk/u/yourname/allowlist.txt?format=plain
+https://lists.zachlagden.uk/u/yourname/allowlist.txt
 ```
+
+`?format=plain` is optional and lists exact domains only. It does not honor `@@` or `*.` subdomain semantics. There is no hosts-format allowlist. The default config uses the same opt-in at `/lists/allowlist.txt`.
 
 - `example.com` becomes `example.com`
 - `@@example.com` (apex and subdomains) becomes `@@||example.com^`
 - `*.example.com` (subdomains only) becomes `@@||example.com^`, which also allows the apex
 - `/regex/` is not emitted. Add it locally with `pihole --allow-regex`
-
-There is no hosts-format allowlist. The default config uses the same opt-in at `/lists/allowlist.txt?format=adblock`.
 
 ---
 
@@ -166,15 +163,15 @@ There is no hosts-format allowlist. The default config uses the same opt-in at `
 
 Works with any DNS blocker or browser extension that accepts blocklists:
 
-| Platform          | Formats                                           |
-| ----------------- | ------------------------------------------------- |
-| **Pi-hole**       | hosts, plain; v6 allowlist uses `?format=adblock` |
-| **AdGuard Home**  | hosts, plain, adblock                             |
-| **uBlock Origin** | adblock                                           |
-| **AdBlock Plus**  | adblock                                           |
-| **Blocky**        | plain                                             |
-| **NextDNS**       | plain                                             |
-| **ControlD**      | plain                                             |
+| Platform          | Formats                    |
+| ----------------- | -------------------------- |
+| **Pi-hole**       | hosts, plain; v6 allowlist |
+| **AdGuard Home**  | hosts, plain, adblock      |
+| **uBlock Origin** | adblock                    |
+| **AdBlock Plus**  | adblock                    |
+| **Blocky**        | plain                      |
+| **NextDNS**       | plain                      |
+| **ControlD**      | plain                      |
 
 If it accepts a URL to a blocklist, it'll work with Zach's Lists.
 

@@ -1354,7 +1354,7 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   <p className="mt-3 text-sm text-pihole-text-muted">
-                    Save to publish /lists/allowlist.txt?format=adblock.
+                    Save to publish /lists/allowlist.txt.
                   </p>
                 ))}
             </div>

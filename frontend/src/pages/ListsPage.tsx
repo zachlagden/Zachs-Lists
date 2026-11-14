@@ -148,8 +148,8 @@ export default function ListsPage() {
           <div>
             <h4 className="text-pihole-text font-medium mb-1">Pi-hole v6 allowlist</h4>
             <p className="text-pihole-text-muted">
-              Opt in on the Config page to publish your whitelist. Use the adblock URL as an
-              allow-type adlist. The plain URL is exact domains only.
+              Opt in on the Config page to publish your whitelist. Add the allowlist URL in Pi-hole
+              v6 as an allow-type adlist. <code>?format=plain</code> is exact domains only.
             </p>
           </div>
           <div>
