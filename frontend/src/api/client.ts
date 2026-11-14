@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   AdminAnalytics,
+  AdminLimitReviewPage,
   AdminStats,
   AnalyticsReport,
   ListAnalyticsReport,
@@ -363,6 +364,21 @@ export const adminApi = {
     const response = await api.post(`/api/admin/limit-requests/${requestId}/deny`, {
       response: responseMsg,
     });
+    return response.data;
+  },
+
+  getLimitReviews: async (page = 1, perPage = 100): Promise<AdminLimitReviewPage> => {
+    const response = await api.get<AdminLimitReviewPage>('/api/admin/limit-reviews', {
+      params: { page, per_page: perPage },
+    });
+    return response.data;
+  },
+
+  resolveLimitReview: async (userId: string, reason: string): Promise<{ success: boolean }> => {
+    const response = await api.post<{ success: boolean }>(
+      `/api/admin/limit-reviews/${userId}/resolve`,
+      { reason },
+    );
     return response.data;
   },
 

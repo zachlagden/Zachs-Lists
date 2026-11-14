@@ -31,6 +31,7 @@ from app.services.admin_forms import (
 )
 from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
 from app.services.job_feed import job_payload, job_payloads
+from app.services import limit_review
 from app.services.site_stats import storage_bytes
 from app.utils.rate_limits import configured_limit
 from app.utils.request_fields import (
@@ -139,6 +140,7 @@ def update_user(admin: User, user_id: str):
 
     if changes is not None:
         target_user.apply_limits(changes)
+        limit_review.limit_changed(target_user, admin.username)
         current_app.logger.info(
             f"Admin {admin.username} updated limits for user {target_user.username}"
         )
@@ -393,6 +395,11 @@ def get_stats(admin: User):
                 "total_mb": round(disk_usage / (1024 * 1024), 2),
             },
             "analytics": analytics,
+            "limits": {
+                "enforce_domain_limit": bool(
+                    current_app.config.get("ENFORCE_DOMAIN_LIMIT", False)
+                ),
+            },
         }
     )
 
@@ -644,6 +651,44 @@ def deny_limit_request(admin: User, request_id: str):
     current_app.logger.info(f"Admin {admin.username} denied limit request {request_id}")
 
     return jsonify({"success": True, "request": limit_request.to_dict()})
+
+
+@admin_bp.route("/limit-reviews", methods=["GET"])
+@admin_required
+def get_limit_reviews(admin: User):
+    page, per_page = pagination()
+    reviews, total = limit_review.open_reviews(page, per_page)
+    return jsonify(
+        {
+            "reviews": reviews,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+    )
+
+
+@admin_bp.route("/limit-reviews/<user_id>/resolve", methods=["POST"])
+@admin_required
+def resolve_limit_review(admin: User, user_id: str):
+    target_id = object_id(user_id, "user_id")
+    reason = required_string(
+        json_object(), "reason", limit_review.MAX_RESOLVE_REASON_LENGTH
+    )
+    if not limit_review.resolve_by_admin(target_id, admin.username, reason):
+        return (
+            jsonify(
+                {"error": "This user has no open limit review", "code": "not_open"}
+            ),
+            404,
+        )
+
+    current_app.logger.info(
+        f"Admin {admin.username} resolved the limit review for user {user_id}"
+    )
+
+    return jsonify({"success": True})
 
 
 # Blocklist Library Management
