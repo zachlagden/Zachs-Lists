@@ -580,7 +580,7 @@ def test_admin_stats_keep_their_shape_and_cache_the_storage_walk(
     record(size_bytes=7)
 
     first = client.get("/api/admin/stats").json
-    assert set(first) == {"users", "jobs", "storage", "analytics"}
+    assert set(first) == {"users", "jobs", "storage", "analytics", "limits"}
     assert set(first["users"]) == {"total", "active"}
     assert set(first["jobs"]) == {"today", "processing", "queued"}
     assert set(first["storage"]) == {

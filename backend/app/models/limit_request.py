@@ -152,6 +152,9 @@ class LimitRequest:
         user = User.get_by_id(self.user_id) if self.user_id else None
         if user:
             user.apply_limits({"max_domains": final_limit})
+            from app.services.limit_review import limit_changed
+
+            limit_changed(user, admin_username)
             user.add_notification(
                 notification_type="limit_request_approved",
                 title="Limit Request Approved",
