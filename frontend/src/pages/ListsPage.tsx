@@ -3,19 +3,25 @@ import { useAuthStore, useUserDataStore } from '../store';
 import { userApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import type { UserList } from '../types';
-import { getUserListUrl } from '../config/site';
+import AllowlistUrlCard from '../components/AllowlistUrlCard';
+import { ALLOWLIST_NAME, getUserListUrl } from '../config/site';
 
 export default function ListsPage() {
   const { user } = useAuthStore();
   const { lists, setLists } = useUserDataStore();
   const [loading, setLoading] = useState(true);
+  const [publishAllowlist, setPublishAllowlist] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchLists = async () => {
       try {
         const data = await userApi.getLists();
-        setLists(data.lists || []);
+        const blocklists = (data.lists || []).filter(
+          (list: UserList) => list.name !== ALLOWLIST_NAME,
+        );
+        setLists(blocklists);
+        setPublishAllowlist(Boolean(data.publish_allowlist));
       } catch (error) {
         console.error('Failed to fetch lists:', error);
       } finally {
@@ -52,9 +58,11 @@ export default function ListsPage() {
         <p className="text-pihole-text-muted">View and manage your generated blocklists</p>
       </div>
 
+      {publishAllowlist && user?.username && <AllowlistUrlCard username={user.username} />}
+
       {lists.length === 0 ? (
         <div className="card text-center py-12">
-          <div className="text-pihole-text-muted mb-4">No lists generated yet</div>
+          <div className="text-pihole-text-muted mb-4">No blocklists generated yet</div>
           <p className="text-sm text-pihole-text-muted mb-6">
             Configure your blocklist sources and trigger a build to generate your first list.
           </p>
@@ -135,6 +143,13 @@ export default function ListsPage() {
             <p className="text-pihole-text-muted">
               Go to Group Management → Adlists → Add your list URL. Pi-hole will automatically fetch
               updates.
+            </p>
+          </div>
+          <div>
+            <h4 className="text-pihole-text font-medium mb-1">Pi-hole v6 allowlist</h4>
+            <p className="text-pihole-text-muted">
+              Opt in on the Config page to publish your whitelist. Use the adblock URL as an
+              allow-type adlist. The plain URL is exact domains only.
             </p>
           </div>
           <div>

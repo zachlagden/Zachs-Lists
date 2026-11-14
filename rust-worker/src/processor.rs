@@ -20,6 +20,9 @@ use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::generator::OutputGenerator;
+use crate::allowlist_files::{
+    is_allowlist_artifact, is_blocklist_artifact, is_blocklist_list_name,
+};
 use crate::whitelist::WhitelistManager;
 
 /// Domains organized by category for per-category output generation
@@ -152,17 +155,24 @@ impl JobProcessor {
         // Ensure target directory exists
         std::fs::create_dir_all(&target_dir)?;
 
-        // Clean up any existing files in target
+        // Clean up generated blocklists in the target. Published allowlists are
+        // written by the API from the whitelist opt-in and are not part of the
+        // blocklist fingerprint, so copy-on-match must leave them in place and
+        // must not copy another user's allowlist over them.
         if let Ok(entries) = std::fs::read_dir(&target_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                let filename_str = entry.file_name().to_string_lossy().to_string();
+                if is_allowlist_artifact(&filename_str) {
+                    continue;
+                }
                 if path.extension().map_or(false, |ext| ext == "gz") {
                     let _ = std::fs::remove_file(&path);
                 }
             }
         }
 
-        // Copy all .gz files from source to target
+        // Copy blocklist .gz files from source to target
         let mut output_files = Vec::new();
         let entries = std::fs::read_dir(&source_dir)?;
 
@@ -170,7 +180,7 @@ impl JobProcessor {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if filename_str.ends_with(".txt.gz") {
+            if is_blocklist_artifact(&filename_str) {
                 let source_path = entry.path();
                 let target_path = target_dir.join(&filename);
 
@@ -391,6 +401,9 @@ impl JobProcessor {
                     // If we have lists from matched user, use those
                     if !matched.lists.is_empty() {
                         for list in &matched.lists {
+                            if !is_blocklist_list_name(&list.name) {
+                                continue;
+                            }
                             all_lists.push(ListMetadata {
                                 name: list.name.clone(),
                                 is_public: true,
@@ -403,18 +416,22 @@ impl JobProcessor {
                         // Build list metadata from output files
                         let mut seen_names: HashSet<String> = HashSet::new();
                         for file in &output_files {
+                            if is_allowlist_artifact(&file.name) {
+                                continue;
+                            }
                             let base_name = file.name.trim_end_matches(".txt.gz");
                             let name = base_name.rsplitn(2, '_').last().unwrap_or(base_name);
-                            if !seen_names.contains(name) {
-                                seen_names.insert(name.to_string());
-                                all_lists.push(ListMetadata {
-                                    name: name.to_string(),
-                                    is_public: true,
-                                    formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
-                                    domain_count: file.domain_count,
-                                    last_updated: now,
-                                });
+                            if !is_blocklist_list_name(name) || seen_names.contains(name) {
+                                continue;
                             }
+                            seen_names.insert(name.to_string());
+                            all_lists.push(ListMetadata {
+                                name: name.to_string(),
+                                is_public: true,
+                                formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
+                                domain_count: file.domain_count,
+                                last_updated: now,
+                            });
                         }
                     }
 
@@ -584,14 +601,18 @@ impl JobProcessor {
         // or all_domains_{format}.txt.gz for the combined list
         let mut category_domain_counts: HashMap<String, u64> = HashMap::new();
         for file in &output_files {
-            // Skip all_domains files - handled separately below
-            if file.name.starts_with("all_domains") {
+            // all_domains is recorded below. Allowlist files are not blocklists
+            // and must not become a category or part of the combined list.
+            if file.name.starts_with("all_domains") || is_allowlist_artifact(&file.name) {
                 continue;
             }
 
             // Extract category name: e.g., "advertising_hosts.txt.gz" -> "advertising"
             // or "uncategorized_hosts.txt.gz" -> "uncategorized"
             if let Some(category) = file.name.split('_').next() {
+                if !is_blocklist_list_name(category) {
+                    continue;
+                }
                 // Only count hosts format files to get domain count (avoid triple-counting)
                 if file.format == "hosts" {
                     category_domain_counts.insert(category.to_string(), file.domain_count);
@@ -601,6 +622,9 @@ impl JobProcessor {
 
         // Build ListMetadata for each category
         for (category, domain_count) in &category_domain_counts {
+            if !is_blocklist_list_name(category) {
+                continue;
+            }
             let list = ListMetadata {
                 name: category.clone(),
                 is_public: true,  // All lists are always public
@@ -937,6 +961,7 @@ impl JobProcessor {
 
         // Create combined "all domains" list (deduplicated across categories).
         // Note: nsfw category is excluded from the combined list.
+        // Published allowlists are not category domains and are not merged here.
         // The per-category files are already written above, so consume the
         // sorted sets and move their domains rather than cloning the lot.
         let all_domains: HashSet<String> = sorted_by_category

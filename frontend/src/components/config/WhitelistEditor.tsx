@@ -63,6 +63,11 @@ const whitelistLanguage = StreamLanguage.define({
         return 'regexp';
       }
 
+      // Apex and subdomains: @@example.com
+      if (stream.match('@@')) {
+        return 'keyword';
+      }
+
       // Wildcard pattern starting with *
       if (stream.peek() === '*') {
         stream.next();
@@ -135,6 +140,7 @@ const whitelistHighlightStyle = HighlightStyle.define([
   { tag: tags.comment, color: '#6a737d', fontStyle: 'italic' },
   { tag: tags.meta, color: '#ffab70' }, // #OPTIONAL / #DISABLED lines
   { tag: tags.regexp, color: '#b392f0' }, // Regex patterns /^.../
+  { tag: tags.keyword, color: '#7ee787' }, // @@ apex and subdomains
   { tag: tags.operator, color: '#f97583' }, // Wildcard star *
   { tag: tags.punctuation, color: '#6e7681' }, // Dots
   { tag: tags.string, color: '#79b8ff' }, // Domain name parts

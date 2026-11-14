@@ -96,14 +96,30 @@ class ParsedConfigLine:
 
 @functools.lru_cache(maxsize=10000)
 def validate_domain(domain: str) -> bool:
+    """Return True for a DNS domain, a ``*.domain`` wildcard, or ``@@domain``.
+
+    ``@@example.com`` is the whitelist form for an apex and its subdomains.
+    The prefix is not part of the domain, so it is stripped before the
+    length and pattern checks.
+    """
+    if not domain:
+        return False
+    if domain.startswith("@@"):
+        prefix_len = 2
+        candidate = domain[2:]
+    elif domain.startswith("*."):
+        prefix_len = 2
+        candidate = domain[2:]
+    else:
+        prefix_len = 0
+        candidate = domain
     if (
-        not domain
-        or len(domain) > MAX_DOMAIN_LENGTH
-        or domain == "localhost"
-        or domain.endswith(".local")
+        not candidate
+        or len(domain) > MAX_DOMAIN_LENGTH + prefix_len
+        or candidate == "localhost"
+        or candidate.endswith(".local")
     ):
         return False
-    candidate = domain[2:] if domain.startswith("*.") else domain
     return bool(DOMAIN_PATTERN.fullmatch(candidate))
 
 
@@ -276,11 +292,16 @@ def validate_whitelist(whitelist: str) -> list[str]:
         line = line.split("#", 1)[0].strip()
         if not line:
             continue
-        if line.startswith("/") and line.endswith("/"):
+        if line.startswith("/") and line.endswith("/") and len(line) > 2:
             try:
                 re.compile(line[1:-1])
             except re.error:
                 errors.append(f"Line {number}: Invalid regex pattern")
+        elif line.startswith("@@"):
+            # Apex and subdomains. Checked before wildcards so @@example.com
+            # is not rejected as a bare domain (it contains no "*").
+            if "*" in line or not validate_domain(line):
+                errors.append(f"Line {number}: Invalid domain")
         elif "*" in line:
             if line.count("*") > 5 or not re.fullmatch(r"[\w\-.*]+", line):
                 errors.append(f"Line {number}: Invalid wildcard pattern")

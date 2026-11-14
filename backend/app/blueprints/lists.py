@@ -9,8 +9,16 @@ from io import BytesIO
 from datetime import datetime
 from flask import Blueprint, Response, send_file, request, abort, jsonify, current_app
 
-from app.models.user import User
+from app.allowlist import (
+    ALLOWLIST_NAME,
+    BLOCKLIST_FORMATS,
+    allowlist_format,
+    blocklist_format,
+    is_blocklist_catalog_name,
+)
 from app.models.analytics import Analytics
+from app.models.system_config import SystemConfig
+from app.models.user import User
 from app.utils.client_ip import get_client_ip
 
 # Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
@@ -158,10 +166,17 @@ def serve_default_list(name: str):
     if not name or not name.replace("_", "").isalnum():
         abort(404)
 
-    # Get format
-    format_type = request.args.get("format", "hosts")
-    if format_type not in ["hosts", "plain", "adblock"]:
-        format_type = "hosts"
+    publishing_allowlist = name == ALLOWLIST_NAME
+    if publishing_allowlist and not SystemConfig.is_allowlist_published():
+        abort(404)
+
+    requested_format = request.args.get("format")
+    if publishing_allowlist:
+        format_type = allowlist_format(requested_format)
+        if format_type is None:
+            abort(404)
+    else:
+        format_type = blocklist_format(requested_format)
 
     # Build file path
     default_dir = current_app.config["DEFAULT_DIR"]
@@ -169,6 +184,9 @@ def serve_default_list(name: str):
     output_path = os.path.join(default_dir, "output", filename)
 
     if not list_file_exists(output_path):
+        # Allowlists are only published as format-specific files.
+        if publishing_allowlist:
+            abort(404)
         # Try without format suffix for backwards compatibility
         alt_path = os.path.join(default_dir, "output", f"{name}.txt")
         if list_file_exists(alt_path):
@@ -179,9 +197,11 @@ def serve_default_list(name: str):
     # Get file size (uncompressed for analytics)
     file_size = get_list_file_size(output_path)
 
-    # Record analytics
+    # Record analytics. Allowlist hits stay out of blocklist totals.
     record_analytics(
-        list_type=Analytics.TYPE_DEFAULT,
+        list_type=(
+            Analytics.TYPE_ALLOWLIST if publishing_allowlist else Analytics.TYPE_DEFAULT
+        ),
         list_name=name,
         username=None,
         format_type=format_type,
@@ -216,17 +236,21 @@ def serve_user_list(username: str, name: str):
     if not user or not user.is_enabled:
         abort(404)
 
-    # Check if list exists and is public
-    list_info = user.get_list(name)
-    if not list_info:
-        abort(404)
-
-    # All lists are public - no visibility check needed
-
-    # Get format
-    format_type = request.args.get("format", "hosts")
-    if format_type not in ["hosts", "plain", "adblock"]:
-        format_type = "hosts"
+    publishing_allowlist = name == ALLOWLIST_NAME
+    if publishing_allowlist:
+        # The allowlist is not stored as a blocklist category. Serving depends
+        # on the opt-in flag and the generated file, not user.lists.
+        if not user.publish_allowlist:
+            abort(404)
+        list_info = None
+        format_type = allowlist_format(request.args.get("format"))
+        if format_type is None:
+            abort(404)
+    else:
+        list_info = user.get_list(name)
+        if not list_info:
+            abort(404)
+        format_type = blocklist_format(request.args.get("format"))
 
     # Build file path
     output_path = user.get_output_path(name, format_type)
@@ -236,9 +260,11 @@ def serve_user_list(username: str, name: str):
     # Get file size (uncompressed for analytics)
     file_size = get_list_file_size(output_path)
 
-    # Record analytics
+    # Record analytics. Allowlist hits stay out of blocklist totals.
     record_analytics(
-        list_type=Analytics.TYPE_USER,
+        list_type=(
+            Analytics.TYPE_ALLOWLIST if publishing_allowlist else Analytics.TYPE_USER
+        ),
         list_name=name,
         username=username,
         format_type=format_type,
@@ -254,7 +280,8 @@ def serve_user_list(username: str, name: str):
     response.headers["X-List-Name"] = name
     response.headers["X-Username"] = username
     response.headers["X-Format"] = format_type
-    response.headers["X-Domain-Count"] = str(list_info.get("domain_count", 0))
+    if list_info is not None:
+        response.headers["X-Domain-Count"] = str(list_info.get("domain_count", 0))
 
     return response
 
@@ -286,12 +313,15 @@ def list_default_lists():
         parts = base_name.rsplit("_", 1)
         if len(parts) == 2:
             name, format_type = parts
-            if format_type not in ["hosts", "plain", "adblock"]:
+            if format_type not in BLOCKLIST_FORMATS:
                 name = base_name
                 format_type = "hosts"
         else:
             name = base_name
             format_type = "hosts"
+
+        if not is_blocklist_catalog_name(name):
+            continue
 
         filepath = os.path.join(output_dir, filename)
 
@@ -354,7 +384,11 @@ def get_featured_lists():
         if not user or not user.is_enabled:
             continue
 
-        list_info = user.get_list(f.get("list_name"))
+        list_name = f.get("list_name")
+        if not is_blocklist_catalog_name(list_name):
+            continue
+
+        list_info = user.get_list(list_name)
         if not list_info:
             continue
 
@@ -387,24 +421,29 @@ def get_community_lists():
         mongo.db.users.find({"is_enabled": True, "lists": {"$exists": True, "$ne": []}})
     )
 
+    return jsonify(community_blocklists(users))
+
+
+def community_blocklists(users: list) -> list:
+    """Public blocklists for browse. The allowlist is not a blocklist category."""
     result = []
-    for u in users:
-        username = u.get("username")
-        for list_info in u.get("lists", []):
+    for user_doc in users:
+        username = user_doc.get("username")
+        for list_info in user_doc.get("lists", []):
+            name = list_info.get("name")
+            if not is_blocklist_catalog_name(name):
+                continue
+            last_updated = list_info.get("last_updated")
             result.append(
                 {
                     "username": username,
-                    "name": list_info.get("name"),
+                    "name": name,
                     "domain_count": list_info.get("domain_count", 0),
                     "last_updated": (
-                        list_info.get("last_updated", "").isoformat()
-                        if list_info.get("last_updated")
-                        else None
+                        last_updated.isoformat() if last_updated else None
                     ),
                 }
             )
 
-    # Sort by domain count (most popular first)
-    result.sort(key=lambda x: x.get("domain_count", 0), reverse=True)
-
-    return jsonify(result[:100])  # Limit to 100
+    result.sort(key=lambda row: row.get("domain_count", 0), reverse=True)
+    return result[:100]

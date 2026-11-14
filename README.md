@@ -81,6 +81,25 @@ https://lists.zachlagden.uk/u/yourname/all_domains.txt?format=plain
 
 That's it. Your blocklist will auto-update weekly.
 
+### Publish a Pi-hole v6 allowlist
+
+On the Config page, opt in to publish the whitelist itself (not only the domains it removes from blocklists). The URL is world-readable on a public instance.
+
+```bash
+# Pi-hole v6 allow-type adlist
+https://lists.zachlagden.uk/u/yourname/allowlist.txt?format=adblock
+
+# Exact domains only. Does not honor @@ or *. subdomain semantics.
+https://lists.zachlagden.uk/u/yourname/allowlist.txt?format=plain
+```
+
+- `example.com` becomes `example.com`
+- `@@example.com` (apex and subdomains) becomes `@@||example.com^`
+- `*.example.com` (subdomains only) becomes `@@||example.com^`, which also allows the apex
+- `/regex/` is not emitted. Add it locally with `pihole --allow-regex`
+
+There is no hosts-format allowlist. The default config uses the same opt-in at `/lists/allowlist.txt?format=adblock`.
+
 ---
 
 ## How It Works
@@ -96,7 +115,7 @@ That's it. Your blocklist will auto-update weekly.
 
 **2. Download** — The Rust worker fetches all sources in parallel (10 concurrent downloads). Smart caching means unchanged sources aren't re-downloaded.
 
-**3. Whitelist** — Your whitelist patterns filter out false positives. Support for exact matches, `*.wildcard.com`, `@@subdomain` matching, and `/regex/` patterns.
+**3. Whitelist** — Your whitelist patterns filter out false positives. Support for exact matches, `*.wildcard.com`, `@@example.com` (apex and subdomains), and `/regex/` patterns. You can opt in to publish that whitelist as a Pi-hole v6 allowlist.
 
 **4. Generate** — Deduplicated domains are output in three formats: hosts file (Pi-hole native), plain text, and Adblock syntax.
 
@@ -147,15 +166,15 @@ That's it. Your blocklist will auto-update weekly.
 
 Works with any DNS blocker or browser extension that accepts blocklists:
 
-| Platform          | Formats               |
-| ----------------- | --------------------- |
-| **Pi-hole**       | hosts, plain          |
-| **AdGuard Home**  | hosts, plain, adblock |
-| **uBlock Origin** | adblock               |
-| **AdBlock Plus**  | adblock               |
-| **Blocky**        | plain                 |
-| **NextDNS**       | plain                 |
-| **ControlD**      | plain                 |
+| Platform          | Formats                                           |
+| ----------------- | ------------------------------------------------- |
+| **Pi-hole**       | hosts, plain; v6 allowlist uses `?format=adblock` |
+| **AdGuard Home**  | hosts, plain, adblock                             |
+| **uBlock Origin** | adblock                                           |
+| **AdBlock Plus**  | adblock                                           |
+| **Blocky**        | plain                                             |
+| **NextDNS**       | plain                                             |
+| **ControlD**      | plain                                             |
 
 If it accepts a URL to a blocklist, it'll work with Zach's Lists.
 
