@@ -28,10 +28,13 @@ struct UserDoc {
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserStats {
     pub total_domains: Option<u64>,
+    #[allow(dead_code)]
     pub total_output_size_bytes: Option<u64>,
+    #[allow(dead_code)]
     pub last_build_at: Option<BsonDateTime>,
     pub config_hash: Option<String>,
     /// Normalized config fingerprint for cross-user matching
+    #[allow(dead_code)]
     pub config_fingerprint: Option<String>,
 }
 
@@ -41,7 +44,6 @@ pub struct MatchedUser {
     pub username: String,
     pub lists: Vec<ListMetadata>,
     pub total_domains: u64,
-    pub total_output_size: u64,
 }
 
 /// Repository for updating user documents after job completion
@@ -135,18 +137,6 @@ impl UserRepository {
         Ok(())
     }
 
-    /// Get existing lists for a user (to preserve is_public settings)
-    pub async fn get_existing_lists(&self, username: &str) -> Result<Vec<ListMetadata>> {
-        if username == "__default__" {
-            return Ok(Vec::new());
-        }
-
-        let filter = doc! { "username": username };
-        let user = self.collection.find_one(filter).await?;
-
-        Ok(user.and_then(|u| u.lists).unwrap_or_default())
-    }
-
     /// Get stored config hash for change detection
     pub async fn get_config_hash(&self, username: &str) -> Result<Option<String>> {
         if username == "__default__" {
@@ -185,9 +175,6 @@ impl UserRepository {
                             lists: Vec::new(), // Lists will be computed from files
                             total_domains: default_build.get_i64("total_domains").unwrap_or(0)
                                 as u64,
-                            total_output_size: default_build
-                                .get_i64("total_output_size_bytes")
-                                .unwrap_or(0) as u64,
                         }));
                     }
                 }
@@ -226,7 +213,6 @@ impl UserRepository {
                 username: u.username,
                 lists: u.lists.unwrap_or_default(),
                 total_domains: stats.total_domains.unwrap_or(0),
-                total_output_size: stats.total_output_size_bytes.unwrap_or(0),
             }));
         }
 

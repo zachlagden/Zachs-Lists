@@ -116,6 +116,7 @@ impl OutputGenerator {
     }
 
     /// Generate a single output file (optimized: zero string allocations per domain)
+    #[cfg(test)]
     pub fn generate_file(
         &self,
         format: OutputFormat,
@@ -150,7 +151,7 @@ impl OutputGenerator {
             Self::write_domain(&mut encoder, format, domain, rules_ref)?;
 
             // Progress callback (sparse)
-            if i as u64 % update_interval == 0 {
+            if (i as u64).is_multiple_of(update_interval) {
                 progress_callback(i as u64, total_domains);
             }
         }

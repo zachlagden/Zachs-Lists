@@ -156,7 +156,7 @@ impl JobProcessor {
         if let Ok(entries) = std::fs::read_dir(&target_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "gz") {
+                if path.extension().is_some_and(|ext| ext == "gz") {
                     let _ = std::fs::remove_file(&path);
                 }
             }
@@ -335,30 +335,13 @@ impl JobProcessor {
                             });
 
                         // Build result indicating this was a copy, with stats from source
-                        let result = if let Some(ref src) = source_stats {
-                            JobResult::copied_from_user(
-                                matched.username.clone(),
-                                src.total_domains,
-                                unique_domains,
-                                output_files.clone(),
-                                src.sources_processed,
-                                src.sources_failed,
-                                src.whitelisted_removed,
-                                src.categories.clone(),
-                            )
-                        } else {
-                            // Fallback if no source job found
-                            JobResult::copied_from_user(
-                                matched.username.clone(),
-                                matched.total_domains,
-                                unique_domains,
-                                output_files.clone(),
-                                0,
-                                0,
-                                0,
-                                std::collections::HashMap::new(),
-                            )
-                        };
+                        let result = JobResult::copied_from_user(
+                            matched.username.clone(),
+                            source_stats.as_ref(),
+                            matched.total_domains,
+                            unique_domains,
+                            output_files.clone(),
+                        );
 
                         // Copy full progress from source job (includes whitelist breakdown, stage snapshots)
                         let progress = if let Ok(Some(mut source_progress)) = self
@@ -376,12 +359,13 @@ impl JobProcessor {
                                 .as_ref()
                                 .map(|s| s.sources_processed + s.sources_failed)
                                 .unwrap_or(0);
-                            let mut p = JobProgress::default();
-                            p.current_step = "completed".to_string();
-                            p.stage = JobStage::Completed;
-                            p.total_sources = sources_count;
-                            p.processed_sources = sources_count;
-                            p
+                            JobProgress {
+                                current_step: "completed".to_string(),
+                                stage: JobStage::Completed,
+                                total_sources: sources_count,
+                                processed_sources: sources_count,
+                                ..JobProgress::default()
+                            }
                         };
                         self.job_repo.update_progress(&job.id, &progress).await?;
 
@@ -792,7 +776,7 @@ impl JobProcessor {
             let category_set = category_domains
                 .by_category
                 .entry(category.clone())
-                .or_insert_with(HashSet::new);
+                .or_default();
             let count_before = category_set.len();
 
             for extraction_result in extraction_results {
@@ -878,7 +862,7 @@ impl JobProcessor {
         // Update progress to whitelist stage
         {
             let mut p = progress.lock().await;
-            p.to_whitelist(domains_before);
+            p.enter_whitelist(domains_before);
         }
         self.update_progress(job_id, &progress).await?;
 
@@ -962,7 +946,7 @@ impl JobProcessor {
         // Update progress to generation stage
         {
             let mut p = progress.lock().await;
-            p.to_generation(total_domains);
+            p.enter_generation(total_domains);
         }
         self.update_progress(job_id, &progress).await?;
 
@@ -1031,7 +1015,7 @@ impl JobProcessor {
         // Final progress update
         {
             let mut p = progress.lock().await;
-            p.to_completed();
+            p.mark_completed();
         }
         self.update_progress(job_id, &progress).await?;
 
@@ -1045,7 +1029,7 @@ impl JobProcessor {
         progress: &Arc<Mutex<JobProgress>>,
     ) -> Result<()> {
         let p = progress.lock().await;
-        self.job_repo.update_progress(job_id, &*p).await?;
+        self.job_repo.update_progress(job_id, &p).await?;
         Ok(())
     }
 }

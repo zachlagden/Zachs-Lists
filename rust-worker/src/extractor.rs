@@ -37,6 +37,7 @@ impl FormatBreakdown {
     }
 
     /// Get the primary (most common) format
+    #[cfg(test)]
     pub fn primary_format(&self) -> Option<&'static str> {
         let max = self.hosts.max(self.plain).max(self.adblock);
         if max == 0 {
@@ -166,15 +167,6 @@ impl DomainExtractor {
         }
 
         None
-    }
-
-    /// Extract domains from file content (parallel processing)
-    /// Returns just the results for backward compatibility
-    pub fn extract_from_content(&self, content: &str) -> Vec<ExtractionResult> {
-        content
-            .par_lines()
-            .filter_map(|line| self.extract_domain(line).map(|(result, _)| result))
-            .collect()
     }
 
     /// Extract domains from file content with format breakdown
