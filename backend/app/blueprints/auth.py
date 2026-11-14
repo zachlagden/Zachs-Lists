@@ -14,7 +14,6 @@ from flask import (
     session,
     jsonify,
     current_app,
-    url_for,
 )
 import requests
 

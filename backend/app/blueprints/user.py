@@ -2,20 +2,16 @@
 User blueprint - config, whitelist, lists, jobs, build.
 """
 
-import os
 import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
-import gevent
 
 from app.blueprints.auth import login_required
 from app.extensions import mongo
 from app.models.user import User
 from app.models.job import Job
 from app.utils.validators import (
-    validate_blocklist_config,
-    validate_blocklist_config_strict,
     validate_whitelist,
     validate_config_urls,
     VALID_CATEGORIES,

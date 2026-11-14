@@ -231,22 +231,6 @@ def emit_job_created(job_data: dict, user_id: str = None):
         _emit("job:created", job_data, f"jobs:{user_id}")
 
 
-def emit_job_updated(job_data: dict, user_id: str = None):
-    """
-    Emit job:updated event (for status changes and progress).
-
-    Args:
-        job_data: Job dictionary from job.to_dict()
-        user_id: User ID for user-specific room
-    """
-    # Emit to all jobs room (for admin)
-    _emit("job:updated", job_data, "jobs:all")
-
-    # Emit to user-specific room
-    if user_id:
-        _emit("job:updated", job_data, f"jobs:{user_id}")
-
-
 def emit_job_completed(job_data: dict, user_id: str = None):
     """
     Emit job:completed event.
@@ -304,115 +288,6 @@ def emit_job_progress(job):
 def emit_stats_updated():
     """Emit stats:updated event to admin stats room."""
     _emit("stats:updated", {}, "stats:admin")
-
-
-# Enhanced progress event emitters
-
-
-def emit_stage_changed(job_id: str, stage: str, progress: dict, user_id: str = None):
-    """
-    Emit job:stage_changed event when job transitions between stages.
-
-    Args:
-        job_id: Job ID
-        stage: New stage (queue, downloading, whitelist, generation, completed)
-        progress: Enhanced progress dictionary
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "stage": stage, "progress": progress}
-    _emit("job:stage_changed", data, "jobs:all")
-    if user_id:
-        _emit("job:stage_changed", data, f"jobs:{user_id}")
-
-
-def emit_source_update(job_id: str, source_progress: dict, user_id: str = None):
-    """
-    Emit job:source_update event for per-source progress updates.
-
-    Args:
-        job_id: Job ID
-        source_progress: Source progress dictionary from SourceProgress.to_dict()
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "source": source_progress}
-    _emit("job:source_update", data, "jobs:all")
-    if user_id:
-        _emit("job:source_update", data, f"jobs:{user_id}")
-
-
-def emit_download_progress(
-    job_id: str,
-    source_id: str,
-    bytes_downloaded: int,
-    bytes_total: int = None,
-    user_id: str = None,
-):
-    """
-    Emit job:download_progress event for byte-level download progress.
-
-    Args:
-        job_id: Job ID
-        source_id: Source URL hash
-        bytes_downloaded: Bytes downloaded so far
-        bytes_total: Total bytes (None if unknown)
-        user_id: User ID for user-specific room
-    """
-    data = {
-        "job_id": job_id,
-        "source_id": source_id,
-        "bytes_downloaded": bytes_downloaded,
-        "bytes_total": bytes_total,
-    }
-    _emit("job:download_progress", data, "jobs:all")
-    if user_id:
-        _emit("job:download_progress", data, f"jobs:{user_id}")
-
-
-def emit_whitelist_update(job_id: str, whitelist_progress: dict, user_id: str = None):
-    """
-    Emit job:whitelist_update event for whitelist filtering progress.
-
-    Args:
-        job_id: Job ID
-        whitelist_progress: Whitelist progress dictionary
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "whitelist": whitelist_progress}
-    _emit("job:whitelist_update", data, "jobs:all")
-    if user_id:
-        _emit("job:whitelist_update", data, f"jobs:{user_id}")
-
-
-def emit_format_update(job_id: str, format_progress: dict, user_id: str = None):
-    """
-    Emit job:format_update event for output format generation progress.
-
-    Args:
-        job_id: Job ID
-        format_progress: Format progress dictionary from FormatProgress.to_dict()
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "format": format_progress}
-    _emit("job:format_update", data, "jobs:all")
-    if user_id:
-        _emit("job:format_update", data, f"jobs:{user_id}")
-
-
-def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
-    """
-    Emit job:skipped event when a job is skipped.
-
-    Args:
-        job_id: Job ID
-        reason: Reason the job was skipped
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "reason": reason}
-    _emit("job:skipped", data, "jobs:all")
-    if user_id:
-        _emit("job:skipped", data, f"jobs:{user_id}")
-    # Also emit stats update for admin dashboard
-    emit_stats_updated()
 
 
 # Config validation events

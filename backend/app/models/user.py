@@ -192,15 +192,6 @@ class User:
         filename = f"{list_name}_{format_type}.txt"
         return os.path.join(self.get_output_dir(), filename)
 
-    def get_config_hash(self) -> str:
-        """Compute SHA256 hash of blocklists.conf + whitelist.txt for change detection."""
-        import hashlib
-
-        blocklists = self.get_config("blocklists.conf") or ""
-        whitelist = self.get_config("whitelist.txt") or ""
-        combined = f"{blocklists}\n---SEPARATOR---\n{whitelist}"
-        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
-
     # Config methods
     CONFIG_SCHEMA_VERSION = 1
     _CONFIG_FIELD_MAP = {
@@ -276,26 +267,7 @@ class User:
                 return lst
         return None
 
-    def update_lists(self, lists_data: List[Dict[str, Any]]) -> None:
-        """Update user's lists."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {"$set": {"lists": lists_data, "updated_at": datetime.utcnow()}},
-        )
-
     # Stats methods
-    def update_stats(
-        self, total_domains: int = None, total_output_size_bytes: int = None
-    ) -> None:
-        """Update user statistics."""
-        update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
-        if total_domains is not None:
-            update["stats.total_domains"] = total_domains
-        if total_output_size_bytes is not None:
-            update["stats.total_output_size_bytes"] = total_output_size_bytes
-        update["stats.last_build_at"] = datetime.utcnow()
-
-        mongo.db[self.COLLECTION].update_one({"_id": self._id}, {"$set": update})
 
     def can_do_manual_update(self) -> bool:
         """Check if user can perform a manual update."""
@@ -664,19 +636,6 @@ class User:
             user_data["_id"] = result.inserted_id
             return cls(user_data)
         raise ValueError("Could not reserve a public list identifier; retry sign-in")
-
-    @classmethod
-    def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:
-        """Get all users with pagination."""
-        skip = (page - 1) * per_page
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find()
-            .sort("created_at", -1)
-            .skip(skip)
-            .limit(per_page)
-        )
-        return [cls(data) for data in cursor]
 
     @classmethod
     def get_all_filtered(
