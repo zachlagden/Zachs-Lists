@@ -43,7 +43,11 @@ impl OutputFormat {
     }
 
     pub fn all() -> Vec<OutputFormat> {
-        vec![OutputFormat::Hosts, OutputFormat::Plain, OutputFormat::Adblock]
+        vec![
+            OutputFormat::Hosts,
+            OutputFormat::Plain,
+            OutputFormat::Adblock,
+        ]
     }
 }
 
@@ -112,6 +116,7 @@ impl OutputGenerator {
     }
 
     /// Generate a single output file (optimized: zero string allocations per domain)
+    #[cfg(test)]
     pub fn generate_file(
         &self,
         format: OutputFormat,
@@ -137,12 +142,16 @@ impl OutputGenerator {
 
         // Write domains directly without String allocation
         let update_interval = (total_domains / 100).max(1000);
-        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
+        let rules_ref = if format == OutputFormat::Adblock {
+            Some(adblock_rules)
+        } else {
+            None
+        };
         for (i, domain) in domains.iter().enumerate() {
             Self::write_domain(&mut encoder, format, domain, rules_ref)?;
 
             // Progress callback (sparse)
-            if i as u64 % update_interval == 0 {
+            if (i as u64).is_multiple_of(update_interval) {
                 progress_callback(i as u64, total_domains);
             }
         }
@@ -188,7 +197,11 @@ impl OutputGenerator {
         encoder.write_all(header.as_bytes())?;
 
         // Write all domains directly
-        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
+        let rules_ref = if format == OutputFormat::Adblock {
+            Some(adblock_rules)
+        } else {
+            None
+        };
         for domain in domains {
             Self::write_domain(&mut encoder, format, domain, rules_ref)?;
         }
@@ -294,7 +307,11 @@ impl OutputGenerator {
         encoder.write_all(header.as_bytes())?;
 
         // Write all domains
-        let rules_ref = if format == OutputFormat::Adblock { Some(adblock_rules) } else { None };
+        let rules_ref = if format == OutputFormat::Adblock {
+            Some(adblock_rules)
+        } else {
+            None
+        };
         for domain in domains {
             Self::write_domain(&mut encoder, format, domain, rules_ref)?;
         }
@@ -330,7 +347,8 @@ impl OutputGenerator {
         let tasks: Vec<(Option<&str>, OutputFormat, &[String])> = category_domains
             .iter()
             .flat_map(|(cat, domains)| {
-                OutputFormat::all().into_iter()
+                OutputFormat::all()
+                    .into_iter()
                     .map(move |fmt| (cat.as_deref(), fmt, domains.as_slice()))
             })
             .collect();
@@ -401,7 +419,8 @@ mod tests {
     fn test_write_domain_adblock_no_rule() {
         let mut buf = Vec::new();
         // No adblock rule stored - generates default format
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", None).unwrap();
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", None)
+            .unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "||example.com^\n");
     }
 
@@ -409,21 +428,35 @@ mod tests {
     fn test_write_domain_adblock_with_rule() {
         let mut buf = Vec::new();
         let mut rules = HashMap::new();
-        rules.insert("example.com".to_string(), "||example.com^$important".to_string());
+        rules.insert(
+            "example.com".to_string(),
+            "||example.com^$important".to_string(),
+        );
 
         // Has adblock rule - preserves original with modifiers
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", Some(&rules)).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "||example.com^$important\n");
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "example.com", Some(&rules))
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "||example.com^$important\n"
+        );
     }
 
     #[test]
     fn test_write_domain_adblock_preserves_complex_rule() {
         let mut buf = Vec::new();
         let mut rules = HashMap::new();
-        rules.insert("tracker.com".to_string(), "||tracker.com^$all,important".to_string());
+        rules.insert(
+            "tracker.com".to_string(),
+            "||tracker.com^$all,important".to_string(),
+        );
 
-        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "tracker.com", Some(&rules)).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "||tracker.com^$all,important\n");
+        OutputGenerator::write_domain(&mut buf, OutputFormat::Adblock, "tracker.com", Some(&rules))
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "||tracker.com^$all,important\n"
+        );
     }
 
     #[test]
@@ -431,7 +464,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let generator = OutputGenerator::new(temp_dir.path());
 
-        let domains = vec!["ads.example.com".to_string(), "tracker.example.com".to_string()];
+        let domains = vec![
+            "ads.example.com".to_string(),
+            "tracker.example.com".to_string(),
+        ];
         let adblock_rules = HashMap::new();
 
         let output = generator
@@ -449,10 +485,16 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let generator = OutputGenerator::new(temp_dir.path());
 
-        let domains = vec!["ads.example.com".to_string(), "plain.example.com".to_string()];
+        let domains = vec![
+            "ads.example.com".to_string(),
+            "plain.example.com".to_string(),
+        ];
         let mut adblock_rules = HashMap::new();
         // Only ads.example.com has an original rule
-        adblock_rules.insert("ads.example.com".to_string(), "||ads.example.com^$important".to_string());
+        adblock_rules.insert(
+            "ads.example.com".to_string(),
+            "||ads.example.com^$important".to_string(),
+        );
         // plain.example.com has no rule (came from hosts/plain source)
 
         let output = generator

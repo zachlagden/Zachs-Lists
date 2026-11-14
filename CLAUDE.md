@@ -25,7 +25,8 @@ pnpm --dir frontend install --frozen-lockfile
 pnpm --dir frontend lint
 pnpm --dir frontend build
 cargo test --manifest-path rust-worker/Cargo.toml --locked
-cargo clippy --manifest-path rust-worker/Cargo.toml --locked -- -D warnings
+cargo fmt --manifest-path rust-worker/Cargo.toml --check
+cargo clippy --manifest-path rust-worker/Cargo.toml --locked --all-targets -- -D warnings
 ```
 
 The mypy command and its file list are in the workflow file. Add each new or changed Python module to that list. Backend tests use mongomock and need no database. The worker needs `pkg-config` and `libssl-dev` to build.

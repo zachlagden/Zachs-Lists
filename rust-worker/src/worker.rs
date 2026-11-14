@@ -76,10 +76,7 @@ impl Worker {
                         error!("Job {} failed with error: {}", job.job_id, e);
 
                         // Mark as failed
-                        if let Err(fail_err) = job_repo
-                            .fail(&job.id, vec![e.to_string()])
-                            .await
-                        {
+                        if let Err(fail_err) = job_repo.fail(&job.id, vec![e.to_string()]).await {
                             error!("Failed to mark job as failed: {}", fail_err);
                         }
                     }

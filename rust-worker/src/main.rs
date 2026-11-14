@@ -10,11 +10,15 @@ mod source_cache_test_server;
 #[cfg(test)]
 mod source_contract_tests;
 mod whitelist;
+#[cfg(test)]
+mod whitelist_contract_tests;
+mod whitelist_validation;
 mod worker;
 
 use anyhow::Result;
 use mongodb::{Client, Database};
 use std::path::Path;
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,8 +29,24 @@ use tracing_subscriber::FmtSubscriber;
 use config::Config;
 use worker::Worker;
 
+fn main() -> ExitCode {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some((subcommand, extra_arguments)) = arguments.split_first() {
+        if subcommand == whitelist_validation::SUBCOMMAND {
+            return ExitCode::from(whitelist_validation::run_subcommand(extra_arguments));
+        }
+    }
+    match run_worker() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_worker() -> Result<()> {
     // Initialize logging
     FmtSubscriber::builder()
         .with_max_level(Level::INFO)
@@ -40,9 +60,9 @@ async fn main() -> Result<()> {
     // Load .env file from project root (parent directory)
     // Try multiple locations for the .env file
     let env_paths = [
-        Path::new("../.env"),           // If running from rust-worker/
-        Path::new(".env"),              // If running from project root
-        Path::new("../../.env"),        // If running from rust-worker/target/release/
+        Path::new("../.env"),    // If running from rust-worker/
+        Path::new(".env"),       // If running from project root
+        Path::new("../../.env"), // If running from rust-worker/target/release/
     ];
 
     for path in env_paths {
@@ -128,8 +148,13 @@ async fn connect_with_retry(config: &Config) -> Result<Database> {
                 backoff = (backoff * 2).min(max_backoff);
             }
             Err(_) => {
-                error!("MongoDB unreachable after {}s", config.mongo_connect_timeout_secs);
-                return Err(anyhow::anyhow!("Database unavailable during worker startup"));
+                error!(
+                    "MongoDB unreachable after {}s",
+                    config.mongo_connect_timeout_secs
+                );
+                return Err(anyhow::anyhow!(
+                    "Database unavailable during worker startup"
+                ));
             }
         }
     }

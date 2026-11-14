@@ -33,12 +33,8 @@ impl Config {
         Self {
             mongo_uri: env::var("MONGO_URI")
                 .unwrap_or_else(|_| "mongodb://localhost:27017".to_string()),
-            database_name: env::var("DATABASE_NAME")
-                .unwrap_or_else(|_| "blocklist".to_string()),
-            data_dir: PathBuf::from(
-                env::var("DATA_DIR")
-                    .unwrap_or_else(|_| "./data".to_string())
-            ),
+            database_name: env::var("DATABASE_NAME").unwrap_or_else(|_| "blocklist".to_string()),
+            data_dir: PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string())),
             worker_id,
             heartbeat_interval_secs: env::var("HEARTBEAT_INTERVAL_SECS")
                 .ok()

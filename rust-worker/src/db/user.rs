@@ -28,10 +28,13 @@ struct UserDoc {
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserStats {
     pub total_domains: Option<u64>,
+    #[allow(dead_code)]
     pub total_output_size_bytes: Option<u64>,
+    #[allow(dead_code)]
     pub last_build_at: Option<BsonDateTime>,
     pub config_hash: Option<String>,
     /// Normalized config fingerprint for cross-user matching
+    #[allow(dead_code)]
     pub config_fingerprint: Option<String>,
 }
 
@@ -41,7 +44,6 @@ pub struct MatchedUser {
     pub username: String,
     pub lists: Vec<ListMetadata>,
     pub total_domains: u64,
-    pub total_output_size: u64,
 }
 
 /// Repository for updating user documents after job completion
@@ -83,8 +85,7 @@ impl UserRepository {
 
         // For __default__, update system_config collection
         if username == "__default__" {
-            let system_config: Collection<bson::Document> =
-                self.db.collection("system_config");
+            let system_config: Collection<bson::Document> = self.db.collection("system_config");
             system_config
                 .update_one(
                     doc! { "_id": "default_build" },
@@ -136,18 +137,6 @@ impl UserRepository {
         Ok(())
     }
 
-    /// Get existing lists for a user (to preserve is_public settings)
-    pub async fn get_existing_lists(&self, username: &str) -> Result<Vec<ListMetadata>> {
-        if username == "__default__" {
-            return Ok(Vec::new());
-        }
-
-        let filter = doc! { "username": username };
-        let user = self.collection.find_one(filter).await?;
-
-        Ok(user.and_then(|u| u.lists).unwrap_or_default())
-    }
-
     /// Get stored config hash for change detection
     pub async fn get_config_hash(&self, username: &str) -> Result<Option<String>> {
         if username == "__default__" {
@@ -173,8 +162,7 @@ impl UserRepository {
     ) -> Result<Option<MatchedUser>> {
         // First check if __default__ matches (and we're not building for default)
         if exclude_username != "__default__" {
-            let system_config: Collection<bson::Document> =
-                self.db.collection("system_config");
+            let system_config: Collection<bson::Document> = self.db.collection("system_config");
             if let Some(default_build) = system_config
                 .find_one(doc! { "_id": "default_build" })
                 .await?
@@ -185,12 +173,8 @@ impl UserRepository {
                         return Ok(Some(MatchedUser {
                             username: "__default__".to_string(),
                             lists: Vec::new(), // Lists will be computed from files
-                            total_domains: default_build
-                                .get_i64("total_domains")
-                                .unwrap_or(0) as u64,
-                            total_output_size: default_build
-                                .get_i64("total_output_size_bytes")
-                                .unwrap_or(0) as u64,
+                            total_domains: default_build.get_i64("total_domains").unwrap_or(0)
+                                as u64,
                         }));
                     }
                 }
@@ -211,7 +195,11 @@ impl UserRepository {
             .sort(doc! { "stats.last_build_at": -1 })
             .build();
 
-        let user = self.collection.find_one(filter).with_options(options).await?;
+        let user = self
+            .collection
+            .find_one(filter)
+            .with_options(options)
+            .await?;
 
         if let Some(u) = user {
             let stats = u.stats.unwrap_or(UserStats {
@@ -225,7 +213,6 @@ impl UserRepository {
                 username: u.username,
                 lists: u.lists.unwrap_or_default(),
                 total_domains: stats.total_domains.unwrap_or(0),
-                total_output_size: stats.total_output_size_bytes.unwrap_or(0),
             }));
         }
 

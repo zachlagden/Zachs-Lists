@@ -281,7 +281,11 @@ impl JobRepository {
             .sort(doc! { "completed_at": -1 })
             .build();
 
-        let job = self.collection.find_one(filter).with_options(options).await?;
+        let job = self
+            .collection
+            .find_one(filter)
+            .with_options(options)
+            .await?;
         Ok(job.and_then(|j| j.result))
     }
 
@@ -300,7 +304,11 @@ impl JobRepository {
             .sort(doc! { "completed_at": -1 })
             .build();
 
-        let job = self.collection.find_one(filter).with_options(options).await?;
+        let job = self
+            .collection
+            .find_one(filter)
+            .with_options(options)
+            .await?;
         Ok(job.map(|j| j.progress))
     }
 }

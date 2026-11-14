@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.job import Job
 from app.services.build_admission import AdmissionError, admit_build
 from app.utils.validators import (
+    WhitelistValidationUnavailable,
     validate_whitelist,
     validate_config_urls,
     VALID_CATEGORIES,
@@ -293,7 +294,17 @@ def update_whitelist(user: User):
         )
 
     # Validate patterns
-    errors = validate_whitelist(whitelist)
+    try:
+        errors = validate_whitelist(whitelist)
+    except WhitelistValidationUnavailable:
+        return (
+            jsonify(
+                {
+                    "error": "The whitelist could not be checked, so it was not saved. Try again shortly."
+                }
+            ),
+            503,
+        )
     if errors:
         return jsonify({"error": "Invalid whitelist", "details": errors}), 400
 

@@ -2,9 +2,10 @@ use crate::extractor::FormatBreakdown;
 use serde::{Deserialize, Serialize};
 
 /// Job stage enum
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum JobStage {
+    #[default]
     Queue,
     Downloading,
     Whitelist,
@@ -12,16 +13,11 @@ pub enum JobStage {
     Completed,
 }
 
-impl Default for JobStage {
-    fn default() -> Self {
-        Self::Queue
-    }
-}
-
 /// Source download status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceStatus {
+    #[default]
     Pending,
     Downloading,
     Processing,
@@ -29,26 +25,15 @@ pub enum SourceStatus {
     Failed,
 }
 
-impl Default for SourceStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
-}
-
 /// Format generation status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FormatStatus {
+    #[default]
     Pending,
     Generating,
     Compressing,
     Completed,
-}
-
-impl Default for FormatStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 /// Progress for a single source
@@ -88,7 +73,7 @@ pub struct SourceProgress {
 }
 
 /// Whitelist pattern match info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhitelistPatternMatch {
     pub pattern: String,
     pub pattern_type: String,
@@ -106,6 +91,8 @@ pub struct WhitelistProgress {
     pub processing: bool,
     #[serde(default)]
     pub patterns: Vec<WhitelistPatternMatch>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Single format generation progress
@@ -210,13 +197,17 @@ impl JobProgress {
             sources: Vec::new(),
             whitelist: None,
             generation: None,
-            stage_started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+            stage_started_at: Some(
+                chrono::Utc::now()
+                    .format("%Y-%m-%dT%H:%M:%S%.6f")
+                    .to_string(),
+            ),
             stage_snapshots: std::collections::HashMap::new(),
         }
     }
 
     /// Update to whitelist stage
-    pub fn to_whitelist(&mut self, domains_before: u64) {
+    pub fn enter_whitelist(&mut self, domains_before: u64) {
         self.current_step = "whitelist".to_string();
         self.stage = JobStage::Whitelist;
         self.whitelist = Some(WhitelistProgress {
@@ -225,12 +216,17 @@ impl JobProgress {
             total_removed: 0,
             processing: true,
             patterns: Vec::new(),
+            warnings: Vec::new(),
         });
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 
     /// Update to generation stage
-    pub fn to_generation(&mut self, total_domains: u64) {
+    pub fn enter_generation(&mut self, total_domains: u64) {
         self.current_step = "generation".to_string();
         self.stage = JobStage::Generation;
         self.generation = Some(GenerationProgress {
@@ -265,14 +261,22 @@ impl JobProgress {
                 },
             ],
         });
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 
     /// Mark as completed
-    pub fn to_completed(&mut self) {
+    pub fn mark_completed(&mut self) {
         self.current_step = "completed".to_string();
         self.stage = JobStage::Completed;
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 }
 
@@ -351,22 +355,23 @@ impl JobResult {
     /// Copies all build stats from the source user's last job, except build time.
     pub fn copied_from_user(
         source_username: String,
-        total_domains: u64,
+        source_result: Option<&JobResult>,
+        total_domains_without_source_result: u64,
         unique_domains: u64,
         output_files: Vec<OutputFile>,
-        sources_processed: u64,
-        sources_failed: u64,
-        whitelisted_removed: u64,
-        categories: std::collections::HashMap<String, u64>,
     ) -> Self {
         Self {
-            sources_processed,
-            sources_failed,
-            total_domains,
+            sources_processed: source_result.map_or(0, |source| source.sources_processed),
+            sources_failed: source_result.map_or(0, |source| source.sources_failed),
+            total_domains: source_result.map_or(total_domains_without_source_result, |source| {
+                source.total_domains
+            }),
             unique_domains,
-            whitelisted_removed,
+            whitelisted_removed: source_result.map_or(0, |source| source.whitelisted_removed),
             output_files,
-            categories,
+            categories: source_result
+                .map(|source| source.categories.clone())
+                .unwrap_or_default(),
             errors: Vec::new(),
             skip_reason: None,
             copied_from: Some(source_username),

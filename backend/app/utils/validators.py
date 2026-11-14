@@ -1,5 +1,7 @@
-import functools
+import json
+import logging
 import re
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,19 +9,21 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from flask import current_app
 from gevent.pool import Pool
 
 from app.utils.safe_http import UnsafeSource, parse_source_url, source_headers
 
-MAX_DOMAIN_LENGTH = 253
 MAX_SOURCE_SIZE_BYTES = 100 * 1024 * 1024
 MAX_CONFIG_SOURCES = 1000
 VALID_CATEGORIES = frozenset(
     {"comprehensive", "malicious", "advertising", "tracking", "suspicious", "nsfw"}
 )
-DOMAIN_PATTERN = re.compile(
-    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]$"
-)
+WHITELIST_VALIDATOR_SUBCOMMAND = "validate-whitelist"
+WHITELIST_VALIDATOR_TIMEOUT_SECONDS = 5
+
+
+logger = logging.getLogger(__name__)
 
 
 class ValidationSeverity(Enum):
@@ -89,19 +93,6 @@ class ParsedConfigLine:
     category: str
     raw: str
     error: str | None = None
-
-
-@functools.lru_cache(maxsize=10000)
-def validate_domain(domain: str) -> bool:
-    if (
-        not domain
-        or len(domain) > MAX_DOMAIN_LENGTH
-        or domain == "localhost"
-        or domain.endswith(".local")
-    ):
-        return False
-    candidate = domain[2:] if domain.startswith("*.") else domain
-    return bool(DOMAIN_PATTERN.fullmatch(candidate))
 
 
 def normalize_domain(domain: str) -> str:
@@ -263,20 +254,86 @@ def validate_config_urls(
     return result
 
 
-def validate_whitelist(whitelist: str) -> list[str]:
-    errors = []
-    for number, line in enumerate(whitelist.splitlines(), 1):
-        line = line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        if line.startswith("/") and line.endswith("/"):
-            try:
-                re.compile(line[1:-1])
-            except re.error:
-                errors.append(f"Line {number}: Invalid regex pattern")
-        elif "*" in line:
-            if line.count("*") > 5 or not re.fullmatch(r"[\w\-.*]+", line):
-                errors.append(f"Line {number}: Invalid wildcard pattern")
-        elif not validate_domain(line):
-            errors.append(f"Line {number}: Invalid domain")
-    return errors
+class WhitelistValidationUnavailable(Exception):
+    pass
+
+
+def _whitelist_report(completed: subprocess.CompletedProcess[bytes]) -> dict[str, Any]:
+    if completed.returncode not in (0, 1):
+        raise WhitelistValidationUnavailable(
+            f"validator exited with code {completed.returncode}"
+        )
+    try:
+        report = json.loads(completed.stdout)
+    except ValueError as error:
+        raise WhitelistValidationUnavailable("validator output is not JSON") from error
+    if not isinstance(report, dict) or not isinstance(report.get("valid"), bool):
+        raise WhitelistValidationUnavailable("validator output has no verdict")
+    errors = report.get("errors")
+    error_counts = report.get("error_counts")
+    well_formed = (
+        isinstance(errors, list)
+        and isinstance(error_counts, dict)
+        and all(
+            isinstance(count, int) and not isinstance(count, bool)
+            for count in error_counts.values()
+        )
+        and all(
+            isinstance(error, dict)
+            and isinstance(error.get("message"), str)
+            and isinstance(error.get("code"), str)
+            and (error.get("line") is None or type(error.get("line")) is int)
+            for error in errors
+        )
+    )
+    if not well_formed:
+        raise WhitelistValidationUnavailable("validator output has malformed errors")
+    valid = report["valid"]
+    if valid != (completed.returncode == 0) or valid == bool(errors):
+        raise WhitelistValidationUnavailable("validator verdict contradicts itself")
+    return report
+
+
+def run_whitelist_validator(whitelist: bytes, worker_bin: str) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            [worker_bin, WHITELIST_VALIDATOR_SUBCOMMAND],
+            input=whitelist,
+            capture_output=True,
+            timeout=WHITELIST_VALIDATOR_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise WhitelistValidationUnavailable("validator timed out") from error
+    except OSError as error:
+        raise WhitelistValidationUnavailable("validator could not be run") from error
+    return _whitelist_report(completed)
+
+
+def whitelist_error_messages(report: dict[str, Any]) -> list[str]:
+    messages = [
+        (
+            f"Line {error['line']}: {error['message']}"
+            if error["line"] is not None
+            else error["message"]
+        )
+        for error in report["errors"]
+    ]
+    unlisted = sum(report["error_counts"].values()) - len(messages)
+    if unlisted > 0:
+        messages.append(f"{unlisted} more lines have problems")
+    return messages
+
+
+def validate_whitelist(whitelist: str, worker_bin: str | None = None) -> list[str]:
+    try:
+        encoded = whitelist.encode("utf-8")
+    except UnicodeEncodeError:
+        return ["Whitelist must be valid UTF-8 text"]
+    try:
+        report = run_whitelist_validator(
+            encoded, worker_bin or current_app.config["WORKER_BIN"]
+        )
+    except WhitelistValidationUnavailable:
+        logger.exception("Whitelist validator is unavailable")
+        raise
+    return whitelist_error_messages(report)
