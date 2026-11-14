@@ -20,6 +20,7 @@ import requests
 
 from app.models.user import User
 from app.utils.client_ip import get_client_ip
+from app.utils.time import utc_iso
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -52,7 +53,7 @@ def login_required(f):
             if user.ban_reason:
                 ban_info["reason"] = user.ban_reason
             if user.banned_until:
-                ban_info["until"] = user.banned_until.isoformat()
+                ban_info["until"] = utc_iso(user.banned_until)
             return jsonify(ban_info), 403
 
         return f(user, *args, **kwargs)

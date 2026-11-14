@@ -9,6 +9,7 @@ from bson import ObjectId
 from pymongo import ReturnDocument
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class Job:
@@ -217,11 +218,9 @@ class Job:
             "priority": self.priority,
             "progress": self.progress,
             "result": self.result,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (
-                self.completed_at.isoformat() if self.completed_at else None
-            ),
-            "created_at": self.created_at.isoformat(),
+            "started_at": utc_iso(self.started_at),
+            "completed_at": utc_iso(self.completed_at),
+            "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
         }
 

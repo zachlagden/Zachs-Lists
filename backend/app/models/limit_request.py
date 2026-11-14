@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from bson import ObjectId
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class LimitRequest:
@@ -106,8 +107,8 @@ class LimitRequest:
             "approved_limit": self.approved_limit,
             "admin_response": self.admin_response,
             "reviewed_by": self.reviewed_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "created_at": utc_iso(self.created_at),
+            "reviewed_at": utc_iso(self.reviewed_at),
         }
 
     def approve(

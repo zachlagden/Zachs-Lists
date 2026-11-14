@@ -13,6 +13,7 @@ from flask import current_app
 
 from app.extensions import mongo
 from app.utils.config_revision import ConfigRevisionConflict
+from app.utils.time import utc_iso
 
 
 class User:
@@ -515,9 +516,7 @@ class User:
                 "message": n.get("message"),
                 "data": n.get("data", {}),
                 "read": n.get("read", False),
-                "created_at": (
-                    n["created_at"].isoformat() if n.get("created_at") else None
-                ),
+                "created_at": utc_iso(n.get("created_at")),
             }
             for n in notifications
         ]
@@ -537,21 +536,13 @@ class User:
             "limits": self.limits,
             "stats": {
                 **self.stats,
-                "last_build_at": (
-                    self.stats["last_build_at"].isoformat()
-                    if self.stats.get("last_build_at")
-                    else None
-                ),
-                "week_reset_at": (
-                    self.stats["week_reset_at"].isoformat()
-                    if self.stats.get("week_reset_at")
-                    else None
-                ),
+                "last_build_at": utc_iso(self.stats.get("last_build_at")),
+                "week_reset_at": utc_iso(self.stats.get("week_reset_at")),
             },
             "lists": self.lists,
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
-            "created_at": self.created_at.isoformat(),
+            "created_at": utc_iso(self.created_at),
         }
 
     def to_admin_dict(self) -> Dict[str, Any]:
@@ -559,20 +550,14 @@ class User:
         base = self.to_dict()
         base["github_id"] = self.github_id
         base["is_banned"] = self.is_banned
-        base["banned_until"] = (
-            self.banned_until.isoformat() if self.banned_until else None
-        )
+        base["banned_until"] = utc_iso(self.banned_until)
         base["ban_reason"] = self.ban_reason
         # Serialize IP log with proper datetime formatting
         base["ip_log"] = [
             {
                 "ip_hash": entry.get("ip_hash"),
-                "first_seen": (
-                    entry["first_seen"].isoformat() if entry.get("first_seen") else None
-                ),
-                "last_seen": (
-                    entry["last_seen"].isoformat() if entry.get("last_seen") else None
-                ),
+                "first_seen": utc_iso(entry.get("first_seen")),
+                "last_seen": utc_iso(entry.get("last_seen")),
                 "access_count": entry.get("access_count", 0),
             }
             for entry in self.ip_log

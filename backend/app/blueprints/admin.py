@@ -14,6 +14,7 @@ from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
+from app.utils.time import utc_iso
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -178,7 +179,7 @@ def ban_user(admin: User, user_id: str):
         {
             "success": True,
             "message": f"User {target_user.username} banned until {ban_until.isoformat()}",
-            "banned_until": ban_until.isoformat(),
+            "banned_until": utc_iso(ban_until),
         }
     )
 
@@ -247,12 +248,8 @@ def get_user_ips(admin: User, user_id: str):
     ip_log = [
         {
             "ip_hash": entry.get("ip_hash"),
-            "first_seen": (
-                entry["first_seen"].isoformat() if entry.get("first_seen") else None
-            ),
-            "last_seen": (
-                entry["last_seen"].isoformat() if entry.get("last_seen") else None
-            ),
+            "first_seen": utc_iso(entry.get("first_seen")),
+            "last_seen": utc_iso(entry.get("last_seen")),
             "access_count": entry.get("access_count", 0),
         }
         for entry in target_user.ip_log
