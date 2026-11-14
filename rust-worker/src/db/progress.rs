@@ -106,6 +106,8 @@ pub struct WhitelistPatternMatch {
 pub struct WhitelistProgress {
     pub domains_before: u64,
     pub domains_after: u64,
+    #[serde(default)]
+    pub domains_checked: u64,
     pub total_removed: u64,
     pub processing: bool,
     #[serde(default)]
@@ -317,6 +319,7 @@ impl JobProgress {
         self.whitelist = Some(WhitelistProgress {
             domains_before,
             domains_after: domains_before,
+            domains_checked: 0,
             total_removed: 0,
             processing: true,
             patterns_total,

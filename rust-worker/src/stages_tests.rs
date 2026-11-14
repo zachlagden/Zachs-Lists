@@ -168,13 +168,17 @@ fn whitelist_counts_each_removed_domain_once_across_categories() {
     assert_eq!(plan.domains_before, 7);
     assert_eq!(plan.parsed.whitelist.pattern_count(), 1);
     let reported = AtomicU64::new(0);
+    let checked = AtomicU64::new(0);
 
-    let outcome = apply_whitelist(plan, &cancellation, &|newly_removed| {
-        reported.fetch_add(newly_removed, Ordering::Relaxed);
+    let outcome = apply_whitelist(plan, &cancellation, &|tick| {
+        reported.fetch_add(tick.newly_removed, Ordering::Relaxed);
+        checked.fetch_add(tick.checked, Ordering::Relaxed);
     })
     .unwrap();
 
     assert_eq!(reported.into_inner(), 3);
+    assert_eq!(checked.into_inner(), 9);
+    assert_eq!(outcome.progress.domains_checked, 7);
     assert_eq!(outcome.progress.total_removed, 3);
     assert_eq!(outcome.progress.domains_after, 4);
     assert_eq!(outcome.progress.patterns_total, 1);

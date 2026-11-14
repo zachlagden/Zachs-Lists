@@ -242,9 +242,11 @@ impl ProgressTracker {
         Ok(())
     }
 
-    pub fn whitelist_removed(&self, newly_removed: u64) {
+    pub fn whitelist_checked(&self, checked: u64, newly_removed: u64) {
         let mut tracked = self.lock();
         if let Some(whitelist) = tracked.progress.whitelist.as_mut() {
+            whitelist.domains_checked =
+                (whitelist.domains_checked + checked).min(whitelist.domains_before);
             whitelist.total_removed += newly_removed;
             whitelist.domains_after = whitelist
                 .domains_before

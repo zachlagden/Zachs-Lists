@@ -573,8 +573,8 @@ impl JobProcessor {
         let filtered = self
             .stage_thread
             .run(move || {
-                Ok(apply_whitelist(plan, &cancellation, &|newly_removed| {
-                    reporting.whitelist_removed(newly_removed)
+                Ok(apply_whitelist(plan, &cancellation, &|tick| {
+                    reporting.whitelist_checked(tick.checked, tick.newly_removed)
                 })?)
             })
             .await?;

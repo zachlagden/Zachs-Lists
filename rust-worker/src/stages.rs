@@ -197,10 +197,16 @@ pub struct WhitelistOutcome {
     pub generation: GenerationPlan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WhitelistTick {
+    pub checked: u64,
+    pub newly_removed: u64,
+}
+
 pub fn apply_whitelist(
     plan: WhitelistPlan,
     cancellation: &Cancellation,
-    report_removed: &(dyn Fn(u64) + Send + Sync),
+    report: &(dyn Fn(WhitelistTick) + Send + Sync),
 ) -> Result<WhitelistOutcome, Cancelled> {
     let WhitelistPlan {
         domains,
@@ -218,14 +224,15 @@ pub fn apply_whitelist(
     let mut removed_domains: HashSet<String> = HashSet::new();
     for (category, category_domains) in domains.by_category {
         let removed_before = &removed_domains;
-        let report_new_removals = |removed: &[String]| {
+        let report_new_removals = |checked: usize, removed: &[String]| {
             let new = removed
                 .iter()
                 .filter(|domain| !removed_before.contains(*domain))
                 .count();
-            if new > 0 {
-                report_removed(new as u64);
-            }
+            report(WhitelistTick {
+                checked: checked as u64,
+                newly_removed: new as u64,
+            });
         };
         let (remaining, removed) =
             whitelist.partition_reporting(category_domains, cancellation, &report_new_removals)?;

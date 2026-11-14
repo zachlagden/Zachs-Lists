@@ -527,6 +527,7 @@ async fn completed_build_writes_the_whole_schema_and_nothing_after_the_terminal_
     assert_eq!(progress["processed_sources"], 3);
     assert_eq!(progress["whitelist"]["domains_before"], 4);
     assert_eq!(progress["whitelist"]["domains_after"], 3);
+    assert_eq!(progress["whitelist"]["domains_checked"], 4);
     assert_eq!(progress["whitelist"]["patterns_total"], 1);
     assert_eq!(progress["whitelist"]["processing"], false);
     assert_eq!(progress["generation"]["files_total"], 9);

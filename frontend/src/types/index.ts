@@ -122,6 +122,7 @@ export interface WhitelistPatternProgress {
 export interface WhitelistProgress {
   domains_before: number;
   domains_after: number;
+  domains_checked: number;
   total_removed: number;
   processing: boolean;
   patterns_total: number;

@@ -175,6 +175,7 @@
       "whitelist": {
         "domains_before": 3050,
         "domains_after": 3000,
+        "domains_checked": 3050,
         "total_removed": 50,
         "processing": false,
         "patterns_total": 4,
@@ -328,6 +329,7 @@
           "data": {
             "domains_before": 3050,
             "domains_after": 3000,
+            "domains_checked": 3050,
             "total_removed": 50,
             "processing": false,
             "patterns_total": 4,
@@ -436,6 +438,7 @@
       "whitelist": {
         "domains_before": 3050,
         "domains_after": 3000,
+        "domains_checked": 3050,
         "total_removed": 50,
         "processing": false,
         "patterns_total": 4,
@@ -589,6 +592,7 @@
           "data": {
             "domains_before": 3050,
             "domains_after": 3000,
+            "domains_checked": 3050,
             "total_removed": 50,
             "processing": false,
             "patterns_total": 4,
