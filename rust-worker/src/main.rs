@@ -6,6 +6,8 @@ mod generator;
 mod processor;
 mod safe_http;
 #[cfg(test)]
+mod source_cache_test_server;
+#[cfg(test)]
 mod source_contract_tests;
 mod whitelist;
 mod worker;

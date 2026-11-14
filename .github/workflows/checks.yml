@@ -21,7 +21,7 @@ jobs:
       - run: uv run --no-project pytest backend/tests --disable-warnings
         env:
           PYTHONPATH: backend
-      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/tests
+      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/app/models/cache.py backend/app/services/cache_manager.py backend/app/scheduled_tasks/tasks.py backend/tests
         env:
           PYTHONPATH: backend
   frontend:
@@ -39,7 +39,20 @@ jobs:
       - run: pnpm --dir frontend build
   worker:
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install 1.95.0 --profile minimal
       - run: cargo +1.95.0 test --manifest-path rust-worker/Cargo.toml --locked
+      - run: cargo +1.95.0 test --manifest-path rust-worker/Cargo.toml --locked -- --ignored
+        env:
+          SOURCE_CACHE_TEST_MONGO_URI: mongodb://127.0.0.1:27017

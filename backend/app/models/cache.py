@@ -5,12 +5,15 @@ Stores blocklist cache content in GridFS and metadata in a separate collection.
 GridFS allows storing files larger than MongoDB's 16MB document limit.
 """
 
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 from gridfs import GridFS
 
 from app.extensions import mongo
+
+logger = logging.getLogger(__name__)
 
 
 class CacheMetadata:
@@ -25,7 +28,7 @@ class CacheMetadata:
 
     @property
     def url_hash(self) -> str:
-        return self._data.get("url_hash")
+        return self._data["url_hash"]
 
     @property
     def stats(self) -> Dict[str, Any]:
@@ -51,30 +54,33 @@ class CacheMetadata:
         return result[0]["total"] if result else 0
 
     @classmethod
-    def get_stale_entries(cls, days: int = 30) -> list:
-        """Get cache entries not updated in specified days."""
-        from datetime import timedelta
-
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        cursor = mongo.db[cls.COLLECTION].find({"updated_at": {"$lt": cutoff}})
-        return [cls(data) for data in cursor]
-
-    @classmethod
-    def delete_by_url_hash(cls, url_hash: str) -> bool:
-        """Delete cache metadata entry and associated GridFS file."""
-        # Get gridfs_id before deleting metadata
-        data = mongo.db[cls.COLLECTION].find_one(
-            {"url_hash": url_hash}, {"gridfs_id": 1}
+    def delete_unchecked_since(cls, cutoff: datetime) -> int:
+        collection = mongo.db[cls.COLLECTION]
+        stale = collection.find(
+            {
+                "$or": [
+                    {"last_checked_at": {"$lt": cutoff}},
+                    {"last_checked_at": None},
+                ]
+            },
+            {"gridfs_id": 1, "last_checked_at": 1},
         )
-
-        # Delete GridFS file if exists
-        if data and data.get("gridfs_id"):
-            try:
-                fs = cls._get_gridfs()
-                fs.delete(data["gridfs_id"])
-            except Exception:
-                pass  # Ignore if file already deleted
-
-        # Delete metadata document
-        result = mongo.db[cls.COLLECTION].delete_one({"url_hash": url_hash})
-        return result.deleted_count > 0
+        deleted = 0
+        for data in stale:
+            gridfs_id = data.get("gridfs_id")
+            result = collection.delete_one(
+                {
+                    "_id": data["_id"],
+                    "gridfs_id": gridfs_id,
+                    "last_checked_at": data.get("last_checked_at"),
+                }
+            )
+            if result.deleted_count == 0:
+                continue
+            deleted += 1
+            if gridfs_id is not None:
+                try:
+                    cls._get_gridfs().delete(gridfs_id)
+                except Exception:
+                    logger.exception("Could not remove an expired cached source body")
+        return deleted

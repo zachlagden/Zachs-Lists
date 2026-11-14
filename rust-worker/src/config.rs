@@ -20,6 +20,7 @@ pub struct Config {
     pub http_timeout_secs: u64,
     /// Cache TTL in days
     pub cache_ttl_days: u64,
+    pub source_fresh_secs: u64,
     /// How long to keep retrying the initial MongoDB connection, in seconds
     pub mongo_connect_timeout_secs: u64,
 }
@@ -55,6 +56,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7),
+            source_fresh_secs: env::var("SOURCE_FRESH_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3600),
             mongo_connect_timeout_secs: env::var("MONGO_CONNECT_TIMEOUT_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
