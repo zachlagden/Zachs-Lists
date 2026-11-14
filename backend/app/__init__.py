@@ -90,6 +90,9 @@ def init_extensions(app: Flask) -> None:
     else:
         ensure_indexes(mongo.db)
     limiter.init_app(app)
+    from app.utils.rate_limits import register_rate_limit_responses
+
+    register_rate_limit_responses(app, limiter)
     cors.init_app(
         app,
         supports_credentials=True,

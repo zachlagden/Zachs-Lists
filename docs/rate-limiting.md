@@ -1,8 +1,46 @@
 # Client IP detection and rate limiting
 
-Flask-Limiter applies the existing limit of 100 requests per hour per client IP to each non-exempt endpoint. Default list downloads share one endpoint across list names. The health endpoint remains exempt. Account-based build quotas and cooldowns are separate and do not change with the client IP.
+## Limits
 
-Rate limiting, download analytics and the user IP access log all use `app.utils.client_ip.get_client_ip`. Analytics and user access logs retain their existing hashed-IP storage. The user access log records calls to `/api/auth/me`, not every request.
+Flask-Limiter counts requests per route and per client. A route without its own limit gets the default, `RATELIMIT_DEFAULT`, which is 100 requests per hour. Default list downloads share one route across list names. The health endpoint is exempt. Account-based build quotas and cooldowns are separate and do not depend on these limits.
+
+These routes are called repeatedly by one open browser session, so each has its own limit, set in `backend/app/config.py`:
+
+| Route                                                                                                                               | Config key               | Limit          |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | -------------- |
+| `GET /api/auth/me`                                                                                                                  | `RATELIMIT_AUTH_ME`      | 60 per minute  |
+| `GET /api/user/jobs`, `GET /api/user/jobs/<id>`, `POST /api/user/jobs/mark-read`, `GET /api/admin/jobs`, `GET /api/admin/jobs/<id>` | `RATELIMIT_JOBS`         | 120 per minute |
+| `POST /api/user/config/url-metadata`                                                                                                | `RATELIMIT_URL_METADATA` | 60 per minute  |
+| `GET /api/admin/stats`                                                                                                              | `RATELIMIT_ADMIN_STATS`  | 60 per minute  |
+
+A route's own limit replaces the default for that route. Routes that share a config key still count separately.
+
+## Who a limit applies to
+
+`app.utils.rate_limits.rate_limit_key` chooses the client a request counts against:
+
+- A request to a path under `/api/` that carries a session with a user id counts against that user, whatever address it comes from. Two people behind one address do not use up each other's allowance, and one person on two networks has one allowance.
+- Every other request counts against the client IP. This covers requests without a session and list downloads under `/lists/` and `/u/`, which ignore the session.
+
+The session cookie is signed, so a client cannot choose another user's id. The key is read before the route checks that the account still exists and is allowed in.
+
+## Refused requests
+
+A request over its limit gets status 429 with a JSON body and a `Retry-After` header holding the seconds until the limit resets:
+
+```json
+{ "error": "Too many requests. Try again shortly.", "code": "rate_limited", "retry_after": 42 }
+```
+
+## Storage
+
+Counters are kept in process memory by default. Restarting Gunicorn resets them, and each Gunicorn worker or application replica counts on its own. Production runs one web worker and has no Redis, so it uses memory.
+
+To share counters, set `RATELIMIT_STORAGE_URL`, or `REDIS_URL` when the first is unset, to a Redis URL such as `redis://localhost:6379/0`. If Redis becomes unreachable the limiter falls back to counting in memory until it returns.
+
+## Client IP
+
+Rate limiting, download analytics and the user IP access log all use `app.utils.client_ip.get_client_ip`. Analytics and the user access log store a keyed hash of the address, never the address. The user access log records calls to `/api/auth/me`, not every request, and keeps the 50 most recently added addresses for each user.
 
 ## Production configuration
 
@@ -39,6 +77,4 @@ From the repository root, with the backend dependencies installed through uv:
 PYTHONPATH=backend uv run --no-project --with-requirements backend/requirements.txt pytest backend/tests
 ```
 
-The tests cover independent visitor limits on default downloads, user downloads and an API endpoint. They also cover forged headers, IPv6, missing headers, proxy DNS failure and address changes, analytics and the user IP access log. They do not need MongoDB or a running web server.
-
-The limiter still uses in-process memory. Restarting Gunicorn resets its counters. Running multiple Gunicorn workers or application replicas requires shared rate-limit storage as a separate change.
+The tests cover independent visitor limits on default downloads, user downloads and an API endpoint. They also cover forged headers, IPv6, missing headers, proxy DNS failure and address changes, analytics and the user IP access log. `backend/tests/test_rate_limits.py` covers the configured storage and default, each route's own limit, counting by user and by address, and the 429 response. The tests do not need MongoDB, Redis or a running web server, and they do not exercise Redis storage.
