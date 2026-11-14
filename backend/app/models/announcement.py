@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 from bson import ObjectId
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class Announcement:
@@ -64,10 +65,10 @@ class Announcement:
             "message": self.message,
             "type": self.type,
             "is_active": self.is_active,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "expires_at": utc_iso(self.expires_at),
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": utc_iso(self.created_at),
+            "updated_at": utc_iso(self.updated_at),
         }
 
     def update(self, **kwargs) -> None:

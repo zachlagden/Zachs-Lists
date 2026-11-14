@@ -13,6 +13,7 @@ from flask import current_app
 
 from app.extensions import mongo
 from app.utils.config_revision import ConfigRevisionConflict
+from app.utils.time import utc_iso
 
 
 class User:
@@ -191,15 +192,6 @@ class User:
         filename = f"{list_name}_{format_type}.txt"
         return os.path.join(self.get_output_dir(), filename)
 
-    def get_config_hash(self) -> str:
-        """Compute SHA256 hash of blocklists.conf + whitelist.txt for change detection."""
-        import hashlib
-
-        blocklists = self.get_config("blocklists.conf") or ""
-        whitelist = self.get_config("whitelist.txt") or ""
-        combined = f"{blocklists}\n---SEPARATOR---\n{whitelist}"
-        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
-
     # Config methods
     CONFIG_SCHEMA_VERSION = 1
     _CONFIG_FIELD_MAP = {
@@ -275,26 +267,7 @@ class User:
                 return lst
         return None
 
-    def update_lists(self, lists_data: List[Dict[str, Any]]) -> None:
-        """Update user's lists."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {"$set": {"lists": lists_data, "updated_at": datetime.utcnow()}},
-        )
-
     # Stats methods
-    def update_stats(
-        self, total_domains: int = None, total_output_size_bytes: int = None
-    ) -> None:
-        """Update user statistics."""
-        update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
-        if total_domains is not None:
-            update["stats.total_domains"] = total_domains
-        if total_output_size_bytes is not None:
-            update["stats.total_output_size_bytes"] = total_output_size_bytes
-        update["stats.last_build_at"] = datetime.utcnow()
-
-        mongo.db[self.COLLECTION].update_one({"_id": self._id}, {"$set": update})
 
     def can_do_manual_update(self) -> bool:
         """Check if user can perform a manual update."""
@@ -515,9 +488,7 @@ class User:
                 "message": n.get("message"),
                 "data": n.get("data", {}),
                 "read": n.get("read", False),
-                "created_at": (
-                    n["created_at"].isoformat() if n.get("created_at") else None
-                ),
+                "created_at": utc_iso(n.get("created_at")),
             }
             for n in notifications
         ]
@@ -537,21 +508,13 @@ class User:
             "limits": self.limits,
             "stats": {
                 **self.stats,
-                "last_build_at": (
-                    self.stats["last_build_at"].isoformat()
-                    if self.stats.get("last_build_at")
-                    else None
-                ),
-                "week_reset_at": (
-                    self.stats["week_reset_at"].isoformat()
-                    if self.stats.get("week_reset_at")
-                    else None
-                ),
+                "last_build_at": utc_iso(self.stats.get("last_build_at")),
+                "week_reset_at": utc_iso(self.stats.get("week_reset_at")),
             },
             "lists": self.lists,
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
-            "created_at": self.created_at.isoformat(),
+            "created_at": utc_iso(self.created_at),
         }
 
     def to_admin_dict(self) -> Dict[str, Any]:
@@ -559,20 +522,14 @@ class User:
         base = self.to_dict()
         base["github_id"] = self.github_id
         base["is_banned"] = self.is_banned
-        base["banned_until"] = (
-            self.banned_until.isoformat() if self.banned_until else None
-        )
+        base["banned_until"] = utc_iso(self.banned_until)
         base["ban_reason"] = self.ban_reason
         # Serialize IP log with proper datetime formatting
         base["ip_log"] = [
             {
                 "ip_hash": entry.get("ip_hash"),
-                "first_seen": (
-                    entry["first_seen"].isoformat() if entry.get("first_seen") else None
-                ),
-                "last_seen": (
-                    entry["last_seen"].isoformat() if entry.get("last_seen") else None
-                ),
+                "first_seen": utc_iso(entry.get("first_seen")),
+                "last_seen": utc_iso(entry.get("last_seen")),
                 "access_count": entry.get("access_count", 0),
             }
             for entry in self.ip_log
@@ -679,19 +636,6 @@ class User:
             user_data["_id"] = result.inserted_id
             return cls(user_data)
         raise ValueError("Could not reserve a public list identifier; retry sign-in")
-
-    @classmethod
-    def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:
-        """Get all users with pagination."""
-        skip = (page - 1) * per_page
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find()
-            .sort("created_at", -1)
-            .skip(skip)
-            .limit(per_page)
-        )
-        return [cls(data) for data in cursor]
 
     @classmethod
     def get_all_filtered(

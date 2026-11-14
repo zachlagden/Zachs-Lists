@@ -4,18 +4,12 @@ import type { Job } from '../types';
 import { getSocket, socket } from './socketConnection';
 export { disconnectSocket } from './socketConnection';
 
-interface JobSkippedData {
-  job_id: string;
-  reason: string;
-}
-
 interface UseJobSocketOptions {
   userId?: string;
   isAdmin?: boolean;
   onJobCreated?: (job: Job) => void;
   onJobProgress?: (job: Job) => void;
   onJobCompleted?: (job: Job) => void;
-  onJobSkipped?: (data: JobSkippedData) => void;
 }
 
 /**
@@ -25,7 +19,6 @@ interface UseJobSocketOptions {
  * - job:created - New job was created
  * - job:progress - Job progress updated (every 500ms when state changes)
  * - job:completed - Job finished (success/fail/skip)
- * - job:skipped - Job was skipped
  */
 export function useJobSocket({
   userId,
@@ -33,7 +26,6 @@ export function useJobSocket({
   onJobCreated,
   onJobProgress,
   onJobCompleted,
-  onJobSkipped,
 }: UseJobSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
   const subscribedRef = useRef(false);
@@ -43,7 +35,6 @@ export function useJobSocket({
     onJobCreated,
     onJobProgress,
     onJobCompleted,
-    onJobSkipped,
   });
 
   // Update the ref on every render so handlers always call latest callbacks
@@ -52,7 +43,6 @@ export function useJobSocket({
       onJobCreated,
       onJobProgress,
       onJobCompleted,
-      onJobSkipped,
     };
   });
 
@@ -102,15 +92,10 @@ export function useJobSocket({
       callbacksRef.current.onJobCompleted?.(job);
     };
 
-    const handleJobSkipped = (data: JobSkippedData) => {
-      callbacksRef.current.onJobSkipped?.(data);
-    };
-
     // Register event listeners
     s.on('job:created', handleJobCreated);
     s.on('job:progress', handleJobProgress);
     s.on('job:completed', handleJobCompleted);
-    s.on('job:skipped', handleJobSkipped);
     const handleConnect = () => {
       subscribedRef.current = false;
       subscribe();
@@ -123,7 +108,6 @@ export function useJobSocket({
       s.off('job:created', handleJobCreated);
       s.off('job:progress', handleJobProgress);
       s.off('job:completed', handleJobCompleted);
-      s.off('job:skipped', handleJobSkipped);
       s.off('connect', handleConnect);
       unsubscribe();
     };

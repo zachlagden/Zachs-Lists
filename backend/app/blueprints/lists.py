@@ -6,12 +6,13 @@ import os
 import gzip
 import hashlib
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Blueprint, Response, send_file, request, abort, jsonify, current_app
 
 from app.models.user import User
 from app.models.analytics import Analytics
 from app.utils.client_ip import get_client_ip
+from app.utils.time import utc_iso
 
 # Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
 lists_public_bp = Blueprint(
@@ -301,7 +302,7 @@ def list_default_lists():
                 "name": name,
                 "formats": set(),
                 "size_bytes": 0,
-                "last_updated": datetime.fromtimestamp(mtime).isoformat(),
+                "last_updated": utc_iso(datetime.fromtimestamp(mtime, tz=timezone.utc)),
             }
 
         lists[name]["formats"].add(format_type)
@@ -365,11 +366,7 @@ def get_featured_lists():
                 "list_name": f.get("list_name"),
                 "description": f.get("description", ""),
                 "domain_count": list_info.get("domain_count", 0),
-                "last_updated": (
-                    list_info.get("last_updated", "").isoformat()
-                    if list_info.get("last_updated")
-                    else None
-                ),
+                "last_updated": utc_iso(list_info.get("last_updated")),
                 "display_order": f.get("display_order", 0),
             }
         )
@@ -396,11 +393,7 @@ def get_community_lists():
                     "username": username,
                     "name": list_info.get("name"),
                     "domain_count": list_info.get("domain_count", 0),
-                    "last_updated": (
-                        list_info.get("last_updated", "").isoformat()
-                        if list_info.get("last_updated")
-                        else None
-                    ),
+                    "last_updated": utc_iso(list_info.get("last_updated")),
                 }
             )
 

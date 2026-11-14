@@ -254,32 +254,3 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed to prune dead workers: {e}")
 
     logger.info("Registered scheduled tasks")
-
-
-def trigger_default_rebuild(app):
-    """Manually trigger default lists rebuild."""
-    with app.app_context():
-        from app.services.job_queue import JobQueue
-        from app.models.job import Job
-
-        job = JobQueue.queue_default_job(job_type=Job.TYPE_ADMIN)
-        return job
-
-
-def trigger_all_user_rebuilds(app):
-    """Manually trigger rebuild for all users."""
-    with app.app_context():
-        from app.models.user import User
-        from app.services.job_queue import JobQueue
-        from app.models.job import Job
-
-        users = User.get_all_enabled()
-        jobs = []
-
-        for user in users:
-            config = user.get_config("blocklists.conf")
-            if config and config.strip():
-                job = JobQueue.queue_job(user, job_type=Job.TYPE_ADMIN)
-                jobs.append(job)
-
-        return jobs

@@ -2,20 +2,16 @@
 User blueprint - config, whitelist, lists, jobs, build.
 """
 
-import os
 import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
-import gevent
 
 from app.blueprints.auth import login_required
 from app.extensions import mongo
 from app.models.user import User
 from app.models.job import Job
 from app.utils.validators import (
-    validate_blocklist_config,
-    validate_blocklist_config_strict,
     validate_whitelist,
     validate_config_urls,
     VALID_CATEGORIES,
@@ -24,6 +20,7 @@ from app.socketio import emit_validation_progress, emit_validation_complete
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.cache import CacheMetadata
 from app.utils.config_revision import ConfigRevisionConflict
+from app.utils.time import utc_iso
 
 user_bp = Blueprint("user", __name__)
 
@@ -320,16 +317,8 @@ def get_lists(user: User):
             "lists": user.lists,
             "stats": {
                 **user.stats,
-                "last_build_at": (
-                    user.stats["last_build_at"].isoformat()
-                    if user.stats.get("last_build_at")
-                    else None
-                ),
-                "week_reset_at": (
-                    user.stats["week_reset_at"].isoformat()
-                    if user.stats.get("week_reset_at")
-                    else None
-                ),
+                "last_build_at": utc_iso(user.stats.get("last_build_at")),
+                "week_reset_at": utc_iso(user.stats.get("week_reset_at")),
             },
             "limits": user.limits,
             "remaining_updates": user.get_remaining_manual_updates(),
@@ -355,7 +344,7 @@ def trigger_build(user: User):
                 {
                     "error": "Weekly manual update limit reached",
                     "remaining": 0,
-                    "resets_at": user.stats["week_reset_at"].isoformat(),
+                    "resets_at": utc_iso(user.stats["week_reset_at"]),
                 }
             ),
             429,

@@ -20,9 +20,6 @@ VALID_CATEGORIES = frozenset(
 DOMAIN_PATTERN = re.compile(
     r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]$"
 )
-ADBLOCK_PATTERN = re.compile(r"^\|\|(.+?)\^(?:\$.*)?$")
-IP_DOMAIN_PATTERN = re.compile(r"^\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s+(\S+)$")
-COMMENT_PATTERN = re.compile(r"(#|!).*$")
 
 
 class ValidationSeverity(Enum):
@@ -181,10 +178,6 @@ def validate_blocklist_config(config: str, max_sources: int) -> list[str]:
     ]
 
 
-def validate_blocklist_config_strict(config: str, max_sources: int) -> list[str]:
-    return validate_blocklist_config(config, max_sources)
-
-
 def validate_config_urls(
     config: str,
     max_sources: int,
@@ -287,18 +280,3 @@ def validate_whitelist(whitelist: str) -> list[str]:
         elif not validate_domain(line):
             errors.append(f"Line {number}: Invalid domain")
     return errors
-
-
-def extract_domain_from_line(line: str) -> str | None:
-    line = line.strip()
-    if not line or line.startswith(("#", "!")):
-        return None
-    line = COMMENT_PATTERN.sub("", line).strip()
-    if not line:
-        return None
-    match = IP_DOMAIN_PATTERN.match(line) or ADBLOCK_PATTERN.match(line)
-    if match:
-        return match.group(1)
-    if not any(character in line for character in (" ", "/", "?")):
-        return line
-    return None

@@ -6,9 +6,9 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
-from pymongo import ReturnDocument
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class Job:
@@ -99,111 +99,6 @@ class Job:
     def heartbeat_at(self) -> Optional[datetime]:
         return self._data.get("heartbeat_at")
 
-    # Status methods
-    def start(self) -> None:
-        """Mark job as processing."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_PROCESSING,
-                    "started_at": datetime.utcnow(),
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_PROCESSING
-        self._data["started_at"] = datetime.utcnow()
-        self._emit_update()
-
-    def update_progress(self, progress: Dict[str, Any]) -> None:
-        """Update job progress in MongoDB. WebSocket updates are handled by JobStatusPoller."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id}, {"$set": {"progress": progress}}
-        )
-        self._data["progress"] = progress
-        # Note: We no longer emit here - JobStatusPoller polls and emits consolidated updates
-
-    def complete(self, result: Dict[str, Any]) -> None:
-        """Mark job as completed."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_COMPLETED,
-                    "completed_at": datetime.utcnow(),
-                    "result": result,
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_COMPLETED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = result
-        self._emit_completed()
-
-    def fail(self, errors: List[str]) -> None:
-        """Mark job as failed."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_FAILED,
-                    "completed_at": datetime.utcnow(),
-                    "result": {"errors": errors},
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_FAILED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = {"errors": errors}
-        self._emit_completed()
-
-    def skip(self, reason: str) -> None:
-        """Mark job as skipped (e.g., when another job is already running)."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_SKIPPED,
-                    "completed_at": datetime.utcnow(),
-                    "result": {"skip_reason": reason},
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_SKIPPED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = {"skip_reason": reason}
-        self._emit_skipped(reason)
-
-    def _emit_skipped(self, reason: str) -> None:
-        """Emit job skipped via Socket.IO."""
-        try:
-            from app.socketio import emit_job_skipped
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_skipped(self.job_id, reason, user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
-
-    def _emit_update(self) -> None:
-        """Emit job update via Socket.IO."""
-        try:
-            from app.socketio import emit_job_updated
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_updated(self.to_dict(), user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
-
-    def _emit_completed(self) -> None:
-        """Emit job completed via Socket.IO."""
-        try:
-            from app.socketio import emit_job_completed
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_completed(self.to_dict(), user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
-
     # Serialization
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -217,12 +112,13 @@ class Job:
             "priority": self.priority,
             "progress": self.progress,
             "result": self.result,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (
-                self.completed_at.isoformat() if self.completed_at else None
-            ),
-            "created_at": self.created_at.isoformat(),
+            "started_at": utc_iso(self.started_at),
+            "completed_at": utc_iso(self.completed_at),
+            "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
+            "read": bool(self._data.get("read", False)),
+            "force_rebuild": bool(self._data.get("force_rebuild", False)),
+            "attempts": int(self._data.get("stale_attempts") or 0),
         }
 
     def get_progress_snapshot(self) -> Dict[str, Any]:
@@ -403,93 +299,6 @@ class Job:
         )
 
     # Worker-related methods for distributed processing
-
-    @classmethod
-    def claim_next(cls, worker_id: str) -> Optional["Job"]:
-        """
-        Atomically claim the highest priority unclaimed job.
-        Uses MongoDB's findOneAndUpdate for distributed locking.
-
-        Args:
-            worker_id: Unique identifier of the worker claiming the job
-
-        Returns:
-            The claimed Job if one was available, None otherwise
-        """
-        now = datetime.utcnow()
-        doc = mongo.db[cls.COLLECTION].find_one_and_update(
-            {
-                "status": cls.STATUS_QUEUED,
-                "worker_id": None,
-            },
-            {
-                "$set": {
-                    "status": cls.STATUS_PROCESSING,
-                    "worker_id": worker_id,
-                    "claimed_at": now,
-                    "heartbeat_at": now,
-                    "started_at": now,
-                }
-            },
-            sort=[
-                ("priority", 1),
-                ("created_at", 1),
-            ],  # priority ASC (1=high), then FIFO
-            return_document=ReturnDocument.AFTER,
-        )
-        return cls(doc) if doc else None
-
-    @classmethod
-    def heartbeat(cls, job_id: str, worker_id: str) -> bool:
-        """
-        Update heartbeat timestamp for a job being processed.
-
-        Args:
-            job_id: The job_id of the job
-            worker_id: The worker's unique identifier
-
-        Returns:
-            True if heartbeat was updated, False if job not found or not owned by worker
-        """
-        result = mongo.db[cls.COLLECTION].update_one(
-            {
-                "job_id": job_id,
-                "worker_id": worker_id,
-                "status": cls.STATUS_PROCESSING,
-            },
-            {"$set": {"heartbeat_at": datetime.utcnow()}},
-        )
-        return result.modified_count > 0
-
-    @classmethod
-    def release(cls, job_id: str, worker_id: str) -> bool:
-        """
-        Release a job back to the queue (e.g., on worker shutdown or error).
-
-        Args:
-            job_id: The job_id of the job
-            worker_id: The worker's unique identifier
-
-        Returns:
-            True if job was released, False if job not found or not owned by worker
-        """
-        result = mongo.db[cls.COLLECTION].update_one(
-            {
-                "job_id": job_id,
-                "worker_id": worker_id,
-                "status": cls.STATUS_PROCESSING,
-            },
-            {
-                "$set": {
-                    "status": cls.STATUS_QUEUED,
-                    "worker_id": None,
-                    "claimed_at": None,
-                    "heartbeat_at": None,
-                    "started_at": None,
-                }
-            },
-        )
-        return result.modified_count > 0
 
     @classmethod
     def reset_stale(
