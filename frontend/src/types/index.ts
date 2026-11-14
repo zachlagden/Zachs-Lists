@@ -63,7 +63,7 @@ export interface Job {
   queue_info?: QueueInfo; // Present for queued jobs
   result?: JobResult;
   started_at?: string;
-  attempt_started_at: string | null;
+  attempt_started_at?: string | null;
   completed_at?: string;
   created_at: string;
   read?: boolean;
