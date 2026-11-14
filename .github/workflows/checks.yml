@@ -51,7 +51,9 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install 1.95.0 --profile minimal
+      - run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - run: cargo +1.95.0 fmt --manifest-path rust-worker/Cargo.toml --check
+      - run: cargo +1.95.0 clippy --manifest-path rust-worker/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo +1.95.0 test --manifest-path rust-worker/Cargo.toml --locked
       - run: cargo +1.95.0 test --manifest-path rust-worker/Cargo.toml --locked -- --ignored
         env:
