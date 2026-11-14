@@ -9,10 +9,12 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::cancellation::{Cancellation, Cancelled};
 use crate::config::Config;
-use crate::db::job::{Job, JobRepository, JobType};
+use crate::db::job::{Job, JobRepository, JobType, JobWriteError};
 use crate::db::progress::{
-    JobProgress, JobResult, JobStage, OutputFile, SourceProgress, SourceStatus, StageSnapshot,
+    error_code, JobProgress, JobResult, JobStage, OutputFile, SourceProgress, SourceStatus,
+    StageSnapshot,
 };
 use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
 use crate::db::user_config::UserConfigRepository;
@@ -64,8 +66,65 @@ impl CategoryDomains {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error("the build was cancelled")]
+    Cancelled,
+    #[error("the job lease was lost")]
+    LeaseLost,
+    #[error("{message}")]
+    Rejected { code: &'static str, message: String },
+    #[error("{0:#}")]
+    Internal(anyhow::Error),
+}
+
+impl BuildError {
+    fn rejected(code: &'static str, message: &str) -> Self {
+        Self::Rejected {
+            code,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl From<anyhow::Error> for BuildError {
+    fn from(error: anyhow::Error) -> Self {
+        if error.downcast_ref::<Cancelled>().is_some() {
+            return Self::Cancelled;
+        }
+        if matches!(
+            error.downcast_ref::<JobWriteError>(),
+            Some(JobWriteError::LeaseLost)
+        ) {
+            return Self::LeaseLost;
+        }
+        Self::Internal(error)
+    }
+}
+
+impl From<JobWriteError> for BuildError {
+    fn from(error: JobWriteError) -> Self {
+        match error {
+            JobWriteError::LeaseLost => Self::LeaseLost,
+            other => Self::Internal(other.into()),
+        }
+    }
+}
+
+impl From<Cancelled> for BuildError {
+    fn from(_: Cancelled) -> Self {
+        Self::Cancelled
+    }
+}
+
+struct BuildConfig {
+    blocklists: String,
+    whitelist: String,
+}
+
 /// Main job processor that orchestrates the entire pipeline
 pub struct JobProcessor {
+    cancellation: Cancellation,
     config: Config,
     job_repo: JobRepository,
     user_config_repo: UserConfigRepository,
@@ -76,13 +135,19 @@ pub struct JobProcessor {
 
 impl JobProcessor {
     /// Create a new job processor
-    pub fn new(config: Config, job_repo: JobRepository, db: &Database) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        job_repo: JobRepository,
+        db: &Database,
+        cancellation: Cancellation,
+    ) -> Result<Self> {
         let downloader = Downloader::new(config.clone(), db)?;
         let extractor = DomainExtractor::new();
         let user_config_repo = UserConfigRepository::new(db);
         let user_repo = UserRepository::new(db);
 
         Ok(Self {
+            cancellation,
             config,
             job_repo,
             user_config_repo,
@@ -216,8 +281,22 @@ impl JobProcessor {
         Ok(output_files)
     }
 
+    async fn build_config(&self, job: &Job) -> Result<BuildConfig> {
+        if let Some(snapshot) = &job.config_snapshot {
+            return Ok(BuildConfig {
+                blocklists: snapshot.blocklists.clone(),
+                whitelist: snapshot.whitelist.clone().unwrap_or_default(),
+            });
+        }
+        let stored = self.user_config_repo.get_config(&job.username).await?;
+        Ok(BuildConfig {
+            blocklists: stored.blocklists.unwrap_or_default(),
+            whitelist: stored.whitelist.unwrap_or_default(),
+        })
+    }
+
     /// Process a single job
-    pub async fn process_job(&self, job: &Job) -> Result<()> {
+    pub async fn process_job(&self, job: &Job) -> Result<(), BuildError> {
         let start_time = Instant::now();
         info!("Processing job {} for user {}", job.job_id, job.username);
 
@@ -225,23 +304,25 @@ impl JobProcessor {
             info!("Force rebuild requested - bypassing all caching optimizations");
         }
 
-        // Load config from MongoDB
-        let config_content = match self.user_config_repo.get_blocklists(&job.username).await {
-            Ok(content) => content,
-            Err(e) => {
-                self.job_repo
-                    .fail(&job.id, vec![format!("Failed to load config: {}", e)])
-                    .await?;
-                return Ok(());
-            }
-        };
+        self.cancellation.check()?;
 
-        // Load whitelist content early for config hash calculation
-        let whitelist_content = self
-            .user_config_repo
-            .get_whitelist(&job.username)
-            .await
-            .unwrap_or_default();
+        let BuildConfig {
+            blocklists: config_content,
+            whitelist: whitelist_content,
+        } = self.build_config(job).await?;
+
+        // Parse sources
+        let sources =
+            Downloader::parse_config(&config_content).map_err(|invalid| BuildError::Rejected {
+                code: error_code::INVALID_CONFIG,
+                message: format!("Blocklist configuration is invalid: {invalid}"),
+            })?;
+        if sources.is_empty() {
+            return Err(BuildError::rejected(
+                error_code::NO_SOURCES,
+                "No valid sources in config",
+            ));
+        }
 
         // Compute current config hash
         let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
@@ -249,15 +330,6 @@ impl JobProcessor {
         // Compute normalized fingerprint for cross-user matching
         let config_fingerprint =
             Self::compute_config_fingerprint(&config_content, &whitelist_content)?;
-
-        // Parse sources
-        let sources = Downloader::parse_config(&config_content)?;
-        if sources.is_empty() {
-            self.job_repo
-                .fail(&job.id, vec!["No valid sources in config".to_string()])
-                .await?;
-            return Ok(());
-        }
 
         info!("Found {} sources to process", sources.len());
 
@@ -276,7 +348,7 @@ impl JobProcessor {
                         self.job_repo
                             .skip(
                                 &job.id,
-                                "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
+                                "No changes detected since last build. All sources are cached and configuration unchanged.",
                             )
                             .await?;
                         return Ok(());
@@ -284,6 +356,8 @@ impl JobProcessor {
                 }
             }
         }
+
+        self.cancellation.check()?;
 
         // Check for matching config fingerprint in other users (copy-on-match optimization)
         if job.job_type != JobType::Scheduled && !job.force_rebuild {
@@ -370,7 +444,7 @@ impl JobProcessor {
                         self.job_repo.update_progress(&job.id, &progress).await?;
 
                         // Mark job as completed
-                        self.job_repo.complete(&job.id, result).await?;
+                        self.job_repo.complete(&job.id, &result).await?;
 
                         // Build list metadata from output files
                         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
@@ -493,10 +567,10 @@ impl JobProcessor {
             .count();
 
         if successful_downloads == 0 {
-            self.job_repo
-                .fail(&job.id, vec!["All source downloads failed".to_string()])
-                .await?;
-            return Ok(());
+            return Err(BuildError::rejected(
+                error_code::ALL_SOURCES_FAILED,
+                "All source downloads failed",
+            ));
         }
 
         info!(
@@ -506,17 +580,20 @@ impl JobProcessor {
         );
 
         if category_domains.is_empty() {
-            self.job_repo
-                .fail(&job.id, vec!["No domains extracted".to_string()])
-                .await?;
-            return Ok(());
+            return Err(BuildError::rejected(
+                error_code::NO_DOMAINS,
+                "No domains extracted",
+            ));
         }
+
+        self.cancellation.check()?;
 
         // Stage 3: Whitelist filtering
         let (filtered_domains, whitelist_removed, _whitelist_progress) = self
             .whitelist_stage(
                 &job.id,
                 &job.username,
+                &whitelist_content,
                 category_domains,
                 Arc::clone(&progress),
             )
@@ -527,6 +604,8 @@ impl JobProcessor {
             filtered_domains.total_count(),
             whitelist_removed
         );
+
+        self.cancellation.check()?;
 
         // Stage 4: Generate output files (per-category + combined)
         let output_files = self
@@ -571,8 +650,10 @@ impl JobProcessor {
             output_files.clone(),
         );
 
+        self.cancellation.check()?;
+
         // Mark job as completed
-        self.job_repo.complete(&job.id, result).await?;
+        self.job_repo.complete(&job.id, &result).await?;
 
         // Update user document with lists and stats
         // Build list metadata for all categories + all_domains
@@ -680,6 +761,8 @@ impl JobProcessor {
         let mut category_domains = CategoryDomains::new();
 
         for batch in sources.chunks(batch_size) {
+            self.cancellation.check()?;
+
             // Progress updates are handled after all downloads complete
             // to avoid frequent DB writes during parallel downloads
             let mut batch_results = self
@@ -733,6 +816,8 @@ impl JobProcessor {
         progress: Arc<Mutex<JobProgress>>,
     ) -> Result<()> {
         for result in download_results.iter_mut() {
+            self.cancellation.check()?;
+
             if result.error.is_some() {
                 continue;
             }
@@ -834,6 +919,7 @@ impl JobProcessor {
         &self,
         job_id: &bson::oid::ObjectId,
         username: &str,
+        whitelist_content: &str,
         category_domains: CategoryDomains,
         progress: Arc<Mutex<JobProgress>>,
     ) -> Result<(CategoryDomains, u64, crate::db::progress::WhitelistProgress)> {
@@ -866,12 +952,10 @@ impl JobProcessor {
         }
         self.update_progress(job_id, &progress).await?;
 
-        // Load whitelist from MongoDB
-        let whitelist_content = self.user_config_repo.get_whitelist(username).await?;
         let ParsedWhitelist {
             whitelist,
             problems,
-        } = WhitelistManager::parse(&whitelist_content);
+        } = WhitelistManager::parse(whitelist_content);
         if !problems.is_empty() {
             warn!(
                 "Ignored {} unusable whitelist lines for {}",
@@ -1033,3 +1117,7 @@ impl JobProcessor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "processor_tests.rs"]
+mod tests;

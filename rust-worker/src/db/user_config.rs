@@ -79,18 +79,4 @@ impl UserConfigRepository {
             whitelist: config.whitelist,
         })
     }
-
-    /// Get blocklist config content for a user
-    pub async fn get_blocklists(&self, username: &str) -> Result<String> {
-        let config = self.get_config(username).await?;
-        config
-            .blocklists
-            .ok_or_else(|| anyhow!("No blocklist config found for: {}", username))
-    }
-
-    /// Get whitelist content for a user (returns empty string if none)
-    pub async fn get_whitelist(&self, username: &str) -> Result<String> {
-        let config = self.get_config(username).await?;
-        Ok(config.whitelist.unwrap_or_default())
-    }
 }

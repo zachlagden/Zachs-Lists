@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 
 from app.extensions import mongo
+from app.utils.job_document import initial_progress, revision_bump
 from app.utils.time import utc_iso
 
 
@@ -119,6 +120,21 @@ class Job:
     def heartbeat_at(self) -> Optional[datetime]:
         return self._data.get("heartbeat_at")
 
+    @property
+    def rev(self) -> int:
+        return int(self._data.get("rev") or 0)
+
+    @property
+    def attempts(self) -> int:
+        attempt = self._data.get("attempt")
+        if isinstance(attempt, int) and not isinstance(attempt, bool):
+            return attempt
+        return int(self._data.get("stale_attempts") or 0)
+
+    @property
+    def updated_at(self) -> Optional[datetime]:
+        return self._data.get("updated_at")
+
     # Serialization
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -139,7 +155,9 @@ class Job:
             "worker_id": self.worker_id,
             "read": bool(self._data.get("read", False)),
             "force_rebuild": bool(self._data.get("force_rebuild", False)),
-            "attempts": int(self._data.get("stale_attempts") or 0),
+            "attempts": self.attempts,
+            "rev": self.rev,
+            "updated_at": utc_iso(self.updated_at),
         }
 
     def get_progress_snapshot(self) -> Dict[str, Any]:
@@ -227,8 +245,12 @@ class Job:
     def mark_failures_read(cls, user_id: ObjectId) -> None:
         """Mark all user's failed jobs as read."""
         mongo.db[cls.COLLECTION].update_many(
-            {"user_id": user_id, "status": cls.STATUS_FAILED},
-            {"$set": {"read": True}},
+            {
+                "user_id": user_id,
+                "status": cls.STATUS_FAILED,
+                "read": {"$ne": True},
+            },
+            {"$set": {"read": True}, **revision_bump()},
         )
 
     # Worker-related methods for distributed processing
@@ -282,7 +304,8 @@ class Job:
                         ],
                         "error_code": cls.ERROR_WORKER_ABANDONED,
                     },
-                }
+                },
+                **revision_bump(),
             },
         )
 
@@ -294,9 +317,10 @@ class Job:
                     "worker_id": None,
                     "claimed_at": None,
                     "heartbeat_at": None,
-                    "started_at": None,
+                    "progress": initial_progress(),
                 },
-                "$inc": {"stale_attempts": 1},
+                "$inc": {"stale_attempts": 1, "rev": 1},
+                "$currentDate": {"updated_at": True},
             },
         )
 

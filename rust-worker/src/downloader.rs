@@ -54,6 +54,11 @@ impl Downloader {
         })
     }
 
+    #[cfg(test)]
+    pub fn route_to_test_server(&mut self, address: std::net::SocketAddr) {
+        self.test_address = Some(address);
+    }
+
     pub fn hash_url(url: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(url.as_bytes());

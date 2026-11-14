@@ -10,6 +10,7 @@ from app.extensions import mongo
 from app.models.job import Job
 from app.models.system_config import SystemConfig
 from app.models.user import User
+from app.utils.job_document import initial_progress, revision_bump
 from app.utils.time import next_week_start, utc_iso, week_start
 from app.utils.validators import MAX_CONFIG_SOURCES, validate_blocklist_config
 
@@ -64,7 +65,7 @@ def refund_quota_if_due(job_id: str) -> bool:
                 },
             ],
         },
-        {"$set": {"quota_refunded": True}},
+        {"$set": {"quota_refunded": True}, **revision_bump()},
     )
     if job is None:
         return False
@@ -298,19 +299,7 @@ def _job_document(
         "force_rebuild": force_rebuild,
         "config_snapshot": config_snapshot,
         "quota_charged": quota_charged,
-        "progress": {
-            "current_step": "queued",
-            "stage": "queue",
-            "total_sources": 0,
-            "processed_sources": 0,
-            "current_source": None,
-            "sources": [],
-            "whitelist": None,
-            "generation": None,
-            "queue_position": None,
-            "queue_delay_remaining_ms": None,
-            "stage_started_at": None,
-        },
+        "progress": initial_progress(),
         "result": None,
         "started_at": None,
         "completed_at": None,
@@ -318,6 +307,8 @@ def _job_document(
         "worker_id": None,
         "claimed_at": None,
         "heartbeat_at": None,
+        "rev": 0,
+        "updated_at": created_at,
     }
 
 
