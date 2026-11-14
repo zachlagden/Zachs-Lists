@@ -7,6 +7,7 @@ from typing import Any
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure, PyMongoError
 
+from app.models.analytics import Analytics
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.job import Job
 from app.utils.job_document import revision_bump
@@ -77,6 +78,8 @@ def prepare_active_job_targets(db: Database) -> None:
                 )
 
 
+ANALYTICS_RETENTION_SECONDS = Analytics.RETENTION_DAYS * 24 * 60 * 60
+
 INDEXES: tuple[IndexSpec, ...] = (
     IndexSpec("users", "github_identity_unique", (("github_id", 1),), {"unique": True}),
     IndexSpec(
@@ -115,6 +118,34 @@ INDEXES: tuple[IndexSpec, ...] = (
         {"expireAfterSeconds": 0},
     ),
     IndexSpec("validation_tokens", "user_id_1", (("user_id", 1),)),
+    IndexSpec(
+        Analytics.COLLECTION,
+        "analytics_scope_date",
+        (("list_type", 1), ("username", 1), ("list_name", 1), ("date", 1)),
+    ),
+    IndexSpec(
+        Analytics.COLLECTION,
+        "analytics_retention",
+        (("date", 1),),
+        {"expireAfterSeconds": ANALYTICS_RETENTION_SECONDS},
+    ),
+    IndexSpec(
+        Analytics.VISITORS_COLLECTION,
+        "analytics_visitor_scope_date",
+        (
+            ("list_type", 1),
+            ("username", 1),
+            ("list_name", 1),
+            ("date", 1),
+            ("visitor", 1),
+        ),
+    ),
+    IndexSpec(
+        Analytics.VISITORS_COLLECTION,
+        "analytics_visitor_retention",
+        (("date", 1),),
+        {"expireAfterSeconds": ANALYTICS_RETENTION_SECONDS},
+    ),
 )
 
 

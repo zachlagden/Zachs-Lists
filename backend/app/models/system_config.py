@@ -15,6 +15,17 @@ class SystemConfig:
 
     COLLECTION = "system_config"
     DOC_ID = "default_config"
+    BUILD_DOC_ID = "default_build"
+
+    @classmethod
+    def get_default_build_total_domains(cls) -> int:
+        build = mongo.db[cls.COLLECTION].find_one(
+            {"_id": cls.BUILD_DOC_ID}, {"total_domains": 1}
+        )
+        total = build.get("total_domains") if build else None
+        if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+            return 0
+        return total
 
     @classmethod
     def get_default_config(cls) -> dict:

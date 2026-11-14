@@ -198,26 +198,61 @@ export interface OutputFile {
 }
 
 // Analytics types
-export interface AnalyticsStats {
-  total_requests: number;
-  total_unique_ips: number;
-  total_bandwidth: number;
-  formats: {
-    hosts: number;
-    plain: number;
-    adblock: number;
-  };
-}
-
-export interface DailyStats {
-  date: string;
+export interface AnalyticsTotals {
   requests: number;
-  unique_ips: number;
-  bandwidth: number;
+  unique_visitors: number;
+  bandwidth_bytes: number;
 }
 
-export interface GeoStats {
-  countries: Record<string, number>;
+export interface AnalyticsDay extends AnalyticsTotals {
+  date: string;
+}
+
+export interface AnalyticsFormats {
+  hosts: number;
+  plain: number;
+  adblock: number;
+}
+
+export interface AnalyticsCountry {
+  code: string;
+  requests: number;
+}
+
+export interface AnalyticsCity {
+  country: string;
+  city: string;
+  requests: number;
+}
+
+export interface AnalyticsReferrer {
+  host: string;
+  requests: number;
+}
+
+export interface PublicAnalyticsReport {
+  period_days: number;
+  totals: AnalyticsTotals;
+  daily: AnalyticsDay[];
+  formats: AnalyticsFormats;
+}
+
+export interface AnalyticsReport extends PublicAnalyticsReport {
+  hourly: number[];
+  top_countries: AnalyticsCountry[];
+  top_cities: AnalyticsCity[];
+  top_referrers: AnalyticsReferrer[];
+}
+
+export interface ListAnalyticsReport extends AnalyticsReport {
+  list_name: string;
+}
+
+export interface AdminAnalytics {
+  period_days: number;
+  overall: AnalyticsReport;
+  default_lists: AnalyticsReport;
+  user_lists: AnalyticsReport;
 }
 
 export interface PublicStats {
@@ -225,6 +260,7 @@ export interface PublicStats {
   total_requests: number;
   total_bandwidth_bytes: number;
   user_count: number;
+  period_days: number;
 }
 
 // Default list types
@@ -268,6 +304,7 @@ export interface AdminStats {
   analytics: {
     total_requests: number;
     total_bandwidth: number;
+    period_days: number;
   };
 }
 
