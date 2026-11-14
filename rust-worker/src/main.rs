@@ -18,6 +18,7 @@ mod worker;
 use anyhow::Result;
 use mongodb::{Client, Database};
 use std::path::Path;
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,8 +29,24 @@ use tracing_subscriber::FmtSubscriber;
 use config::Config;
 use worker::Worker;
 
+fn main() -> ExitCode {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some((subcommand, extra_arguments)) = arguments.split_first() {
+        if subcommand == whitelist_validation::SUBCOMMAND {
+            return ExitCode::from(whitelist_validation::run_subcommand(extra_arguments));
+        }
+    }
+    match run_worker() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_worker() -> Result<()> {
     // Initialize logging
     FmtSubscriber::builder()
         .with_max_level(Level::INFO)
