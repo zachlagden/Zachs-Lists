@@ -65,3 +65,31 @@ def test_unset_timestamps_stay_null() -> None:
     assert payload["started_at"] is None
     assert payload["completed_at"] is None
     assert payload["created_at"].endswith("Z")
+
+
+def test_revision_and_update_time_are_serialised() -> None:
+    payload = Job(
+        stored_job(rev=12, updated_at=datetime(2026, 1, 2, 3, 5, 7, 9000))
+    ).to_dict()
+
+    assert payload["rev"] == 12
+    assert payload["updated_at"] == "2026-01-02T03:05:07.009Z"
+
+
+def test_revision_and_update_time_default_for_jobs_stored_without_them() -> None:
+    payload = Job(stored_job()).to_dict()
+
+    assert payload["rev"] == 0
+    assert payload["updated_at"] is None
+
+
+def test_attempts_come_from_the_claim_counter_when_it_is_stored() -> None:
+    payload = Job(stored_job(attempt=3, stale_attempts=1)).to_dict()
+
+    assert payload["attempts"] == 3
+
+
+def test_attempts_fall_back_to_stale_resets_when_the_counter_is_unusable() -> None:
+    payload = Job(stored_job(attempt="many", stale_attempts=2)).to_dict()
+
+    assert payload["attempts"] == 2
