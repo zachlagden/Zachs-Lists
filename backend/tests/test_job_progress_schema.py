@@ -1,18 +1,21 @@
 import copy
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
+import mongomock
 import pytest
 from bson import ObjectId
 
+from app.extensions import mongo
 from app.models.job import Job
 from app.utils.job_document import initial_progress
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures"
 UTC_MILLISECONDS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+HEARTBEAT_INTERVAL_SECONDS = 10
 
 
 def shared_fixture(name: str) -> Any:
@@ -47,6 +50,13 @@ def timestamps(value: Any, key: str = "") -> Iterator[str]:
             yield from timestamps(item, key)
     elif isinstance(value, str) and key.endswith("_at"):
         yield value
+
+
+@pytest.fixture
+def jobs(monkeypatch: pytest.MonkeyPatch) -> Any:
+    db: Any = mongomock.MongoClient().default
+    monkeypatch.setattr(mongo, "db", db)
+    return db.jobs
 
 
 @pytest.mark.parametrize("name", ["mid_download", "mid_generation", "completed"])
@@ -91,3 +101,36 @@ def test_attempt_start_is_serialised_as_utc_with_milliseconds() -> None:
 
 def test_attempt_start_is_null_for_jobs_stored_without_it() -> None:
     assert Job(stored_job()).to_dict()["attempt_started_at"] is None
+
+
+def test_job_is_requeued_two_minutes_after_its_last_heartbeat(jobs: Any) -> None:
+    now = datetime.utcnow()
+    missed_heartbeats = 5
+    jobs.insert_many(
+        [
+            stored_job(
+                job_id="silent",
+                heartbeat_at=now - timedelta(minutes=2, seconds=5),
+            ),
+            stored_job(
+                job_id="late",
+                heartbeat_at=now
+                - timedelta(seconds=missed_heartbeats * HEARTBEAT_INTERVAL_SECONDS),
+            ),
+            stored_job(job_id="alive", heartbeat_at=now - timedelta(seconds=10)),
+        ]
+    )
+
+    assert Job.STALE_AFTER_MINUTES == 2
+    assert Job.STALE_AFTER_MINUTES * 60 >= 10 * HEARTBEAT_INTERVAL_SECONDS
+    assert Job.reset_stale() == (1, 0)
+
+    statuses = {job["job_id"]: job["status"] for job in jobs.find()}
+    assert statuses == {
+        "silent": Job.STATUS_QUEUED,
+        "late": Job.STATUS_PROCESSING,
+        "alive": Job.STATUS_PROCESSING,
+    }
+    requeued = jobs.find_one({"job_id": "silent"})
+    assert requeued["progress"] == shared_fixture("job-initial-progress.json")
+    assert requeued["worker_id"] is None
