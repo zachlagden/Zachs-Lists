@@ -14,6 +14,7 @@ from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
+from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
 from app.utils.time import utc_iso
 
 admin_bp = Blueprint("admin", __name__)
@@ -280,14 +281,12 @@ def trigger_rebuild(admin: User, user_id: str):
     if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
         return jsonify({"error": "Only root can manage admins"}), 403
 
-    # Check if user has config
-    config = target_user.get_config("blocklists.conf")
-    if not config:
-        return jsonify({"error": "User has no blocklist configuration"}), 400
-
-    from app.services.job_queue import JobQueue
-
-    job = JobQueue.queue_job(target_user, job_type=Job.TYPE_ADMIN, force_rebuild=True)
+    try:
+        job = admit_build(
+            target_user, Job.TYPE_ADMIN, requested_by=admin, force_rebuild=True
+        )
+    except AdmissionError as refusal:
+        return jsonify(refusal.to_response()), refusal.status
 
     current_app.logger.info(
         f"Admin {admin.username} triggered rebuild for user {target_user.username}: {job.job_id}"
@@ -300,9 +299,12 @@ def trigger_rebuild(admin: User, user_id: str):
 @admin_required
 def trigger_default_rebuild(admin: User):
     """Trigger rebuild for default lists."""
-    from app.services.job_queue import JobQueue
-
-    job = JobQueue.queue_default_job(job_type=Job.TYPE_ADMIN, force_rebuild=True)
+    try:
+        job = admit_build(
+            DEFAULT_TARGET, Job.TYPE_ADMIN, requested_by=admin, force_rebuild=True
+        )
+    except AdmissionError as refusal:
+        return jsonify(refusal.to_response()), refusal.status
 
     current_app.logger.info(
         f"Admin {admin.username} triggered default lists rebuild: {job.job_id}"

@@ -11,6 +11,7 @@ from app.blueprints.auth import login_required
 from app.extensions import mongo
 from app.models.user import User
 from app.models.job import Job
+from app.services.build_admission import AdmissionError, admit_build
 from app.utils.validators import (
     WhitelistValidationUnavailable,
     validate_whitelist,
@@ -341,71 +342,21 @@ def get_lists(user: User):
 @login_required
 def trigger_build(user: User):
     """Trigger manual build."""
-    from bson import ObjectId
-
-    # Check if user has a config
-    config = user.get_config("blocklists.conf")
-    if not config or not config.strip():
-        return jsonify({"error": "No blocklist configuration found"}), 400
-
-    # Check manual update limit
-    if not user.can_do_manual_update():
-        return (
-            jsonify(
-                {
-                    "error": "Weekly manual update limit reached",
-                    "remaining": 0,
-                    "resets_at": utc_iso(user.stats["week_reset_at"]),
-                }
-            ),
-            429,
-        )
-
-    # Check if user already has an active job
-    if Job.has_active_job_for_user(ObjectId(user.id)):
-        return (
-            jsonify(
-                {
-                    "error": "A build is already in progress",
-                    "remaining_updates": user.get_remaining_manual_updates(),
-                }
-            ),
-            429,
-        )
-
-    # Check cooldown (5 minutes between manual builds)
-    cooldown_remaining = Job.get_cooldown_remaining(
-        ObjectId(user.id), cooldown_minutes=5
-    )
-    if cooldown_remaining > 0:
-        minutes = cooldown_remaining // 60
-        seconds = cooldown_remaining % 60
-        return (
-            jsonify(
-                {
-                    "error": f"Please wait {minutes}m {seconds}s before triggering another build",
-                    "cooldown_remaining": cooldown_remaining,
-                    "remaining_updates": user.get_remaining_manual_updates(),
-                }
-            ),
-            429,
-        )
-
-    # Queue job
-    from app.services.job_queue import JobQueue
-
-    job = JobQueue.queue_job(user, job_type=Job.TYPE_MANUAL)
-    user.increment_manual_updates()
+    try:
+        job = admit_build(user, Job.TYPE_MANUAL, requested_by=user)
+    except AdmissionError as refusal:
+        return jsonify(refusal.to_response()), refusal.status
 
     current_app.logger.info(
         f"User {user.username} triggered manual build: {job.job_id}"
     )
+    current = User.get_by_id(user.id) or user
 
     return jsonify(
         {
             "job_id": job.job_id,
             "status": job.status,
-            "remaining_updates": user.get_remaining_manual_updates(),
+            "remaining_updates": current.get_remaining_manual_updates(),
         }
     )
 

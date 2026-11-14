@@ -4,7 +4,6 @@ Scheduled tasks for the application.
 Tasks:
 - Weekly rebuild of all user lists (Sunday 2 AM UTC)
 - Weekly rebuild of default lists (Sunday 1 AM UTC)
-- Reset weekly manual update counters (Sunday midnight UTC)
 - Daily cache cleanup (3 AM UTC)
 """
 
@@ -34,13 +33,22 @@ def register_scheduled_tasks(app, scheduler):
         """Rebuild default lists every Sunday at 1 AM UTC."""
         with app.app_context():
             try:
-                from app.services.job_queue import JobQueue
                 from app.models.job import Job
+                from app.services.build_admission import (
+                    DEFAULT_TARGET,
+                    AdmissionError,
+                    admit_build,
+                )
 
                 logger.info("Starting weekly default lists rebuild")
-                job = JobQueue.queue_default_job(job_type=Job.TYPE_SCHEDULED)
+                job = admit_build(DEFAULT_TARGET, Job.TYPE_SCHEDULED, None)
                 logger.info(f"Queued default rebuild job: {job.job_id}")
 
+            except AdmissionError as refusal:
+                logger.warning(
+                    f"Weekly default rebuild not queued ({refusal.code}): "
+                    f"{refusal.message}"
+                )
             except Exception as e:
                 logger.exception(f"Failed to queue default rebuild: {e}")
 
@@ -53,80 +61,16 @@ def register_scheduled_tasks(app, scheduler):
         """Rebuild all user lists every Sunday at 2 AM UTC."""
         with app.app_context():
             try:
-                from bson import ObjectId
-                from app.models.user import User
-                from app.services.job_queue import JobQueue
-                from app.models.job import Job
+                from app.services.build_admission import queue_scheduled_user_builds
 
                 logger.info("Starting weekly user lists rebuild")
-
-                # Get all enabled users with configs
-                users = User.get_all_enabled()
-                queued = 0
-                skipped = 0
-
-                for user in users:
-                    # Check if user has a config
-                    config = user.get_config("blocklists.conf")
-                    if not config or not config.strip():
-                        continue
-
-                    user_id = ObjectId(user.id)
-
-                    # Skip if user has an active job (queued or processing)
-                    if Job.has_active_job_for_user(user_id):
-                        logger.info(f"Skipping {user.username}: active job in progress")
-                        skipped += 1
-                        continue
-
-                    # Skip if user completed a manual build in last 30 minutes
-                    if Job.user_completed_recently(
-                        user_id, minutes=30, job_type=Job.TYPE_MANUAL
-                    ):
-                        logger.info(f"Skipping {user.username}: recent manual build")
-                        skipped += 1
-                        continue
-
-                    try:
-                        JobQueue.queue_job(user, job_type=Job.TYPE_SCHEDULED)
-                        queued += 1
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to queue rebuild for {user.username}: {e}"
-                        )
-
+                queued, skipped = queue_scheduled_user_builds()
                 logger.info(
                     f"Queued weekly rebuild for {queued} users, skipped {skipped}"
                 )
 
             except Exception as e:
                 logger.exception(f"Failed to queue user rebuilds: {e}")
-
-    @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=0, minute=0),
-        id="reset_weekly_limits",
-        name="Reset Weekly Manual Update Limits",
-    )
-    def reset_weekly_limits():
-        """Reset weekly manual update counters every Sunday at midnight UTC."""
-        with app.app_context():
-            try:
-                from app.extensions import mongo
-
-                result = mongo.db.users.update_many(
-                    {},
-                    {
-                        "$set": {
-                            "stats.manual_updates_this_week": 0,
-                            "stats.week_reset_at": datetime.utcnow(),
-                        }
-                    },
-                )
-
-                logger.info(f"Reset weekly limits for {result.modified_count} users")
-
-            except Exception as e:
-                logger.exception(f"Failed to reset weekly limits: {e}")
 
     @scheduler.scheduled_job(
         CronTrigger(hour=3, minute=0),
