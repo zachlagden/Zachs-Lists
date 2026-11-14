@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { adminApi } from '../api/client';
+import { apiErrorMessage } from '../api/apiError';
 import LoadingSpinner from '../components/LoadingSpinner';
+
+interface UserLimits {
+  max_source_lists: number;
+  max_domains: number;
+  max_config_size_mb: number;
+  manual_updates_per_week: number;
+}
 
 interface UserDetail {
   id: string;
@@ -16,12 +24,8 @@ interface UserDetail {
   is_banned: boolean;
   banned_until?: string;
   ban_reason?: string;
-  limits: {
-    max_source_lists: number;
-    max_domains: number;
-    max_config_size_mb: number;
-    manual_updates_per_week: number;
-  };
+  limits: UserLimits;
+  default_limits: UserLimits;
   stats: {
     total_domains: number;
     total_output_size_bytes: number;
@@ -51,13 +55,7 @@ export default function AdminUserDetailPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Editable limits
-  const [limits, setLimits] = useState({
-    max_source_lists: 20,
-    max_domains: 2000000,
-    max_config_size_mb: 5,
-    manual_updates_per_week: 3,
-  });
+  const [editedLimits, setLimits] = useState<UserLimits | null>(null);
 
   // Ban form
   const [banDuration, setBanDuration] = useState('7d');
@@ -70,7 +68,7 @@ export default function AdminUserDetailPage() {
       try {
         const userData = await adminApi.getUser(userId);
         setUser(userData);
-        setLimits(userData.limits);
+        setLimits(null);
       } catch (error) {
         console.error('Failed to fetch user:', error);
         setMessage({ type: 'error', text: 'Failed to load user' });
@@ -82,16 +80,17 @@ export default function AdminUserDetailPage() {
   }, [userId]);
 
   const handleSaveLimits = async () => {
-    if (!userId) return;
+    if (!userId || !editedLimits) return;
     setSaving(true);
     try {
-      await adminApi.updateUser(userId, { limits });
+      await adminApi.updateUser(userId, { limits: { ...editedLimits } });
       const updatedUser = await adminApi.getUser(userId);
       setUser(updatedUser);
+      setLimits(null);
       setMessage({ type: 'success', text: 'Limits updated' });
     } catch (error) {
       console.error('Failed to update limits:', error);
-      setMessage({ type: 'error', text: 'Failed to update limits' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to update limits') });
     } finally {
       setSaving(false);
     }
@@ -192,6 +191,8 @@ export default function AdminUserDetailPage() {
       </div>
     );
   }
+
+  const limits = editedLimits ?? user.limits;
 
   return (
     <div className="space-y-6">
@@ -354,7 +355,7 @@ export default function AdminUserDetailPage() {
               </div>
               <button
                 onClick={handleSaveLimits}
-                disabled={saving}
+                disabled={saving || !editedLimits}
                 className="btn btn-primary w-full"
               >
                 {saving ? 'Saving...' : 'Save Limits'}

@@ -13,7 +13,7 @@ interface FeaturedList {
   description: string;
   domain_count: number;
   last_updated: string;
-  display_order: number;
+  order: number;
 }
 
 interface DefaultList {
