@@ -32,7 +32,7 @@ The mypy command and its file list are in the workflow file. Add each new or cha
 
 ## Deploying
 
-Coolify builds the root `Dockerfile` and deploys on every push to `main`, through a GitHub webhook. A merge to `main` is a production release, and the restart interrupts any build in progress.
+Coolify builds the root `Dockerfile` and is set to deploy on every push to `main`, through a GitHub webhook. A merge to `main` is a production release, and the restart interrupts any build in progress. The webhook has missed a push before, so after merging, confirm in Coolify that a deployment for the new commit started, and trigger one through the Coolify API if none did.
 
 - Multi-step work goes through an integration branch, with each step a pull request into it. The integration branch merges to `main` once, when the release is ready.
 - Back up the production database before a release that changes stored data.
