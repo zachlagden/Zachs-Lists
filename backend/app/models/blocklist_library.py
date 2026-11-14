@@ -234,9 +234,12 @@ class BlocklistLibrary:
         return cls.get_collection().count_documents(query) > 0
 
     @classmethod
-    def ensure_indexes(cls):
+    def ensure_indexes(cls) -> None:
         """Create indexes for the collection."""
         collection = cls.get_collection()
-        collection.create_index("url", unique=True)
-        collection.create_index("category")
-        collection.create_index([("category", 1), ("recommended", -1), ("name", 1)])
+        collection.create_index("url", unique=True, name="url_1")
+        collection.create_index("category", name="category_1")
+        collection.create_index(
+            [("category", 1), ("recommended", -1), ("name", 1)],
+            name="category_1_recommended_-1_name_1",
+        )
