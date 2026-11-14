@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuthStore, useUserDataStore, useJobsStore } from '../store';
 import { userApi, analyticsApi } from '../api/client';
 import { useJobSocket } from '../hooks/useSocket';
-import type { Job, Notification } from '../types';
+import type { AnalyticsReport, Job, Notification } from '../types';
 import { buildRefusalMessage, type BuildRefusal } from '../api/buildRefusal';
 import {
   Chart as ChartJS,
@@ -32,13 +32,6 @@ ChartJS.register(
   Filler,
 );
 
-interface UserAnalytics {
-  total_requests: number;
-  total_bandwidth: number;
-  requests_over_time: { date: string; count: number }[];
-  format_breakdown: Record<string, number>;
-}
-
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const {
@@ -53,7 +46,7 @@ export default function DashboardPage() {
   } = useUserDataStore();
   const { jobs, hasUnreadFailures, mergeFetchedJobs, addJob, updateJob, setHasUnreadFailures } =
     useJobsStore();
-  const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [buildLoading, setBuildLoading] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
@@ -183,10 +176,10 @@ export default function DashboardPage() {
   };
 
   const chartData = {
-    labels: analytics?.requests_over_time?.map((d) => d.date) || [],
+    labels: analytics?.daily.map((d) => d.date) || [],
     datasets: [
       {
-        data: analytics?.requests_over_time?.map((d) => d.count) || [],
+        data: analytics?.daily.map((d) => d.requests) || [],
         borderColor: '#d93025',
         backgroundColor: 'rgba(217, 48, 37, 0.1)',
         fill: true,
@@ -296,7 +289,7 @@ export default function DashboardPage() {
         <div className="card">
           <div className="text-sm text-pihole-text-muted mb-1">Total Requests</div>
           <div className="text-2xl font-bold text-pihole-text">
-            {analytics?.total_requests?.toLocaleString() || 0}
+            {analytics?.totals.requests.toLocaleString() || 0}
           </div>
         </div>
       </div>
@@ -435,7 +428,7 @@ export default function DashboardPage() {
         {/* Analytics Chart */}
         <div className="card">
           <h2 className="text-lg font-semibold text-pihole-text mb-4">Requests (30 days)</h2>
-          {analytics?.requests_over_time?.length ? (
+          {analytics?.totals.requests ? (
             <div className="h-48">
               <Line data={chartData} options={chartOptions} />
             </div>

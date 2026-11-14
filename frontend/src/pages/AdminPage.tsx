@@ -33,7 +33,7 @@ ChartJS.register(
   Filler,
 );
 
-import type { LimitRequest, Announcement } from '../types';
+import type { AdminAnalytics, AdminStats, LimitRequest, Announcement } from '../types';
 import { INTENDED_USE_LABELS } from '../types';
 
 type TabType =
@@ -45,14 +45,6 @@ type TabType =
   | 'jobs'
   | 'library'
   | 'announcements';
-
-interface AdminStats {
-  total_users: number;
-  active_users: number;
-  total_jobs: number;
-  total_domains: number;
-  total_requests: number;
-}
 
 interface AdminUser {
   id: string;
@@ -134,10 +126,7 @@ export default function AdminPage() {
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
   const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
   const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
-  const [analytics, setAnalytics] = useState<{
-    requests_over_time: { date: string; count: number }[];
-    geo_distribution: Record<string, number>;
-  } | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [jobsPerDay, setJobsPerDay] = useState<
     { date: string; total: number; completed: number; failed: number }[]
   >([]);
@@ -754,7 +743,7 @@ export default function AdminPage() {
               <div>
                 <div className="font-semibold text-pihole-text">Manage Users</div>
                 <div className="text-sm text-pihole-text-muted">
-                  {stats?.total_users || 0} registered users
+                  {stats?.users.total || 0} registered users
                 </div>
               </div>
             </button>
@@ -765,47 +754,47 @@ export default function AdminPage() {
             <div className="card">
               <div className="text-sm text-pihole-text-muted mb-1">Total Users</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_users?.toLocaleString() || 0}
+                {stats?.users.total.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
               <div className="text-sm text-pihole-text-muted mb-1">Active Users</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.active_users?.toLocaleString() || 0}
+                {stats?.users.active.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Jobs</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Jobs Today</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_jobs?.toLocaleString() || 0}
+                {stats?.jobs.today.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Domains</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Visitors (30 days)</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_domains?.toLocaleString() || 0}
+                {analytics?.overall.totals.unique_visitors.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Requests</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Requests (30 days)</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_requests?.toLocaleString() || 0}
+                {analytics?.overall.totals.requests.toLocaleString() || 0}
               </div>
             </div>
           </div>
 
           {/* Charts - Row 1: Requests & Geographic */}
           <div className="grid md:grid-cols-2 gap-6">
-            {(analytics?.requests_over_time?.length ?? 0) > 0 && analytics && (
+            {analytics && analytics.overall.totals.requests > 0 && (
               <div className="card">
                 <h3 className="font-semibold text-pihole-text mb-4">Requests (30 days)</h3>
                 <div className="h-48">
                   <Line
                     data={{
-                      labels: analytics.requests_over_time.map((d) => d.date),
+                      labels: analytics.overall.daily.map((d) => d.date),
                       datasets: [
                         {
-                          data: analytics.requests_over_time.map((d) => d.count),
+                          data: analytics.overall.daily.map((d) => d.requests),
                           borderColor: '#d93025',
                           backgroundColor: 'rgba(217, 48, 37, 0.1)',
                           fill: true,
@@ -818,16 +807,16 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
-            {Object.keys(analytics?.geo_distribution || {}).length > 0 && (
+            {analytics && analytics.overall.top_countries.length > 0 && (
               <div className="card">
                 <h3 className="font-semibold text-pihole-text mb-4">Top Countries</h3>
                 <div className="h-48">
                   <Bar
                     data={{
-                      labels: Object.keys(analytics!.geo_distribution).slice(0, 10),
+                      labels: analytics.overall.top_countries.slice(0, 10).map((c) => c.code),
                       datasets: [
                         {
-                          data: Object.values(analytics!.geo_distribution).slice(0, 10),
+                          data: analytics.overall.top_countries.slice(0, 10).map((c) => c.requests),
                           backgroundColor: '#d93025',
                           borderRadius: 4,
                         },

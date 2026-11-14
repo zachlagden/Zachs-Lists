@@ -11,6 +11,16 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -21,7 +31,8 @@ jobs:
       - run: uv run --no-project pytest backend/tests --disable-warnings
         env:
           PYTHONPATH: backend
-      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/app/models/cache.py backend/app/services/cache_manager.py backend/app/scheduled_tasks/tasks.py backend/app/services/build_admission.py backend/app/config.py backend/app/utils/__init__.py backend/app/utils/job_document.py backend/app/services/job_poller.py backend/app/services/job_feed.py backend/scripts/audit_whitelists.py backend/tests
+          ANALYTICS_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/app/models/cache.py backend/app/services/cache_manager.py backend/app/scheduled_tasks/tasks.py backend/app/services/build_admission.py backend/app/config.py backend/app/utils/__init__.py backend/app/utils/job_document.py backend/app/services/job_poller.py backend/app/services/job_feed.py backend/app/models/analytics.py backend/app/blueprints/analytics.py backend/app/models/system_config.py backend/app/services/download_recorder.py backend/app/services/geoip.py backend/app/services/site_stats.py backend/app/utils/timed_cache.py backend/scripts/audit_whitelists.py backend/scripts/remove_legacy_analytics.py backend/tests
         env:
           PYTHONPATH: backend
   frontend:

@@ -2,7 +2,6 @@
 Admin blueprint - user management, system stats, default list management.
 """
 
-import os
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
 
@@ -16,6 +15,7 @@ from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
 from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
 from app.services.job_feed import job_payload, job_payloads
+from app.services.site_stats import storage_bytes
 from app.utils.time import utc_iso
 
 admin_bp = Blueprint("admin", __name__)
@@ -356,9 +356,7 @@ def get_stats(admin: User):
     # Analytics stats
     analytics = Analytics.get_default_list_totals()
 
-    # Disk usage
-    data_dir = current_app.config["DATA_DIR"]
-    disk_usage = get_directory_size(data_dir)
+    disk_usage = storage_bytes(current_app.config["DATA_DIR"])
 
     return jsonify(
         {
@@ -577,22 +575,6 @@ def remove_featured_list(admin: User, featured_id: str):
     )
 
     return jsonify({"success": True})
-
-
-def get_directory_size(path: str) -> int:
-    """Get total size of a directory."""
-    total = 0
-    try:
-        for dirpath, dirnames, filenames in os.walk(path):
-            for filename in filenames:
-                filepath = os.path.join(dirpath, filename)
-                try:
-                    total += os.path.getsize(filepath)
-                except OSError:
-                    pass
-    except Exception:
-        pass
-    return total
 
 
 # Limit Request Management
