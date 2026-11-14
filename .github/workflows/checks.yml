@@ -36,6 +36,7 @@ jobs:
           node-version: '22'
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend lint
+      - run: pnpm --dir frontend test
       - run: pnpm --dir frontend build
   worker:
     runs-on: ubuntu-latest

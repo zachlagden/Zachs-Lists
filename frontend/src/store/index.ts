@@ -9,6 +9,8 @@ import type {
   WhitelistProgress,
   FormatProgress,
 } from '../types';
+import type { ConnectionState } from '../realtime/backoff';
+import { isStale, mergeFetchedList, mergeJob } from '../realtime/jobMerge';
 
 // Auth store
 interface AuthState {
@@ -99,7 +101,8 @@ interface JobsState {
   formatProgress: Record<string, Record<string, FormatProgress>>;
 
   // Basic setters
-  setJobs: (jobs: Job[]) => void;
+  mergeFetchedJobs: (jobs: Job[]) => void;
+  mergeJobs: (jobs: Job[]) => void;
   setActiveJob: (job: Job | null) => void;
   addJob: (job: Job) => void;
   updateJob: (job: Job) => void;
@@ -130,30 +133,23 @@ export const useJobsStore = create<JobsState>((set, get) => ({
   whitelistProgress: {},
   formatProgress: {},
 
-  setJobs: (jobs) => set({ jobs }),
+  mergeFetchedJobs: (jobs) => set((state) => ({ jobs: mergeFetchedList(state.jobs, jobs) })),
+  mergeJobs: (jobs) => jobs.forEach((job) => get().updateJob(job)),
   setActiveJob: (job) => set({ activeJob: job }),
 
-  addJob: (job) =>
-    set((state) => {
-      // Don't add if already exists
-      if (state.jobs.some((j) => j.job_id === job.job_id)) {
-        return state;
-      }
-      return { jobs: [job, ...state.jobs] };
-    }),
+  addJob: (job) => get().updateJob(job),
 
   updateJob: (job) =>
     set((state) => {
-      const existingIndex = state.jobs.findIndex((j) => j.job_id === job.job_id);
-      let updatedJobs: Job[];
-
-      if (existingIndex === -1) {
-        // Job doesn't exist, add it
-        updatedJobs = [job, ...state.jobs];
-      } else {
-        // Update existing job
-        updatedJobs = state.jobs.map((j) => (j.job_id === job.job_id ? job : j));
+      if (
+        isStale(
+          job,
+          state.jobs.find((stored) => stored.job_id === job.job_id),
+        )
+      ) {
+        return state;
       }
+      const updatedJobs = mergeJob(state.jobs, job);
 
       // Update granular progress state from job.progress for compatibility
       const newSourceProgress = { ...state.sourceProgress };
@@ -230,6 +226,16 @@ export const useJobsStore = create<JobsState>((set, get) => ({
       whitelistProgress: {},
       formatProgress: {},
     }),
+}));
+
+interface ConnectionStoreState {
+  state: ConnectionState;
+  setState: (state: ConnectionState) => void;
+}
+
+export const useConnectionStore = create<ConnectionStoreState>((set) => ({
+  state: 'connecting',
+  setState: (state) => set({ state }),
 }));
 
 // UI store (theme, sidebar, etc.)

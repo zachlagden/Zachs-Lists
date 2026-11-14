@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminApi } from '../api/client';
 import { useAuthStore } from '../store';
 import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { JobList, JobDetailView } from '../components/jobs';
+import { mergeFetchedList, mergeJobs } from '../realtime/jobMerge';
 import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../types';
 import {
   Chart as ChartJS,
@@ -127,7 +128,9 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const selectedJob = jobs.find((job) => job.job_id === selectedJobId) ?? null;
+  const jobsRef = useRef<Job[]>([]);
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
   const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
   const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
@@ -192,30 +195,34 @@ export default function AdminPage() {
   const [totalPages, setTotalPages] = useState(1);
 
   // Handle real-time job updates (admin sees all jobs)
-  const handleJobCreated = useCallback((job: Job) => {
-    setJobs((prev) => [job, ...prev.slice(0, 49)]); // Keep 50 most recent
-    // Auto-select newly created jobs
-    setSelectedJob(job);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  const applyJobs = useCallback((incoming: Job[]) => {
+    setJobs((prev) => mergeJobs(prev, incoming, 50));
   }, []);
 
-  const handleJobProgress = useCallback((job: Job) => {
-    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
-    // Update selected job if it matches
-    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
-  }, []);
+  const applyJob = useCallback((job: Job) => applyJobs([job]), [applyJobs]);
 
-  const handleJobCompleted = useCallback((job: Job) => {
-    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
-    // Update selected job if it matches
-    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
+  const refetchJobs = useCallback(async () => {
+    try {
+      const jobsData = await adminApi.getAllJobs();
+      setJobs((prev) => mergeFetchedList(prev, jobsData.jobs || []));
+    } catch (error) {
+      console.error('Failed to refresh jobs:', error);
+    }
   }, []);
 
   // Subscribe to all jobs (admin view)
   useJobSocket({
     isAdmin: true,
-    onJobCreated: handleJobCreated,
-    onJobProgress: handleJobProgress,
-    onJobCompleted: handleJobCompleted,
+    onJobCreated: applyJob,
+    onJobProgress: applyJob,
+    onJobCompleted: applyJob,
+    onReconnect: refetchJobs,
+    knownJobs: () => jobsRef.current,
+    onJobsSynced: applyJobs,
   });
 
   // Refresh stats when stats:updated event received
@@ -306,7 +313,7 @@ export default function AdminPage() {
         ]);
 
         setStats(statsData);
-        setJobs(jobsData.jobs || []);
+        setJobs((prev) => mergeFetchedList(prev, jobsData.jobs || []));
         setFeatured(featuredData?.featured || []);
         setDefaultConfig(configData);
         setLocalConfig(configData);
@@ -1411,7 +1418,7 @@ export default function AdminPage() {
                     <JobList
                       jobs={jobs}
                       selectedJobId={selectedJob?.job_id || null}
-                      onSelectJob={setSelectedJob}
+                      onSelectJob={(job) => setSelectedJobId(job.job_id)}
                       showUsername={true}
                     />
                   </div>
@@ -1422,6 +1429,7 @@ export default function AdminPage() {
               <div className="md:col-span-2">
                 {selectedJob ? (
                   <JobDetailView
+                    key={selectedJob.job_id}
                     job={selectedJob}
                     sources={selectedJobSources}
                     whitelist={selectedJobWhitelist}

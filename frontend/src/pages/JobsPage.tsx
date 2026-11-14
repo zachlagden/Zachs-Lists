@@ -4,64 +4,48 @@ import { userApi } from '../api/client';
 import { useJobSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { JobList, JobDetailView } from '../components/jobs';
+import { isActive } from '../realtime/jobMerge';
 import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../types';
+
+function defaultSelection(jobs: Job[]): Job | null {
+  return jobs.find(isActive) ?? jobs[0] ?? null;
+}
 
 export default function JobsPage() {
   const { user } = useAuthStore();
-  const { jobs, setJobs, addJob, updateJob, setHasUnreadFailures, clearJobProgress } =
+  const { jobs, mergeFetchedJobs, addJob, updateJob, setHasUnreadFailures, clearJobProgress } =
     useJobsStore();
   const [loading, setLoading] = useState(true);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const selectedJob =
+    jobs.find((job) => job.job_id === selectedJobId) ?? defaultSelection(jobs);
 
   const fetchJobs = useCallback(async () => {
     try {
       const data = await userApi.getJobs(50);
-      setJobs(data.jobs || []);
-
-      // Check for unread failures
-      const hasFailures = (data.jobs || []).some(
-        (job: Job) => job.status === 'failed' && !job.read,
-      );
-      setHasUnreadFailures(hasFailures);
-
-      // Auto-select first active job or most recent
-      if (data.jobs && data.jobs.length > 0 && !selectedJob) {
-        const activeJob = data.jobs.find(
-          (j: Job) => j.status === 'queued' || j.status === 'processing',
-        );
-        setSelectedJob(activeJob || data.jobs[0]);
-      }
+      const fetched: Job[] = data.jobs || [];
+      mergeFetchedJobs(fetched);
+      setHasUnreadFailures(fetched.some((job) => job.status === 'failed' && !job.read));
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
     } finally {
       setLoading(false);
     }
-  }, [setJobs, setHasUnreadFailures, selectedJob]);
+  }, [mergeFetchedJobs, setHasUnreadFailures]);
 
   // Handle real-time job events
   const handleJobCreated = useCallback(
     (job: Job) => {
       addJob(job);
       // Auto-select newly created jobs
-      setSelectedJob(job);
+      setSelectedJobId(job.job_id);
     },
     [addJob],
-  );
-
-  const handleJobProgress = useCallback(
-    (job: Job) => {
-      // Update job in store
-      updateJob(job);
-      // Update selected job if it matches
-      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
-    },
-    [updateJob],
   );
 
   const handleJobCompleted = useCallback(
     (job: Job) => {
       updateJob(job);
-      setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
       if (job.status === 'failed') {
         setHasUnreadFailures(true);
       }
@@ -77,8 +61,9 @@ export default function JobsPage() {
   useJobSocket({
     userId: user?.id,
     onJobCreated: handleJobCreated,
-    onJobProgress: handleJobProgress,
+    onJobProgress: updateJob,
     onJobCompleted: handleJobCompleted,
+    onReconnect: fetchJobs,
   });
 
   useEffect(() => {
@@ -99,7 +84,7 @@ export default function JobsPage() {
   }, [setHasUnreadFailures]);
 
   const handleSelectJob = (job: Job) => {
-    setSelectedJob(job);
+    setSelectedJobId(job.job_id);
   };
 
   // Get progress data from the selected job's progress field
@@ -156,6 +141,7 @@ export default function JobsPage() {
         <div className="md:col-span-2">
           {selectedJob ? (
             <JobDetailView
+              key={selectedJob.job_id}
               job={selectedJob}
               sources={selectedJobSources}
               whitelist={selectedJobWhitelist}
