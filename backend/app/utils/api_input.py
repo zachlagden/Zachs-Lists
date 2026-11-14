@@ -31,19 +31,39 @@ def register_input_checks(app: Flask) -> None:
                 400,
             )
         for name in ("config", "whitelist"):
-            if name in data and not isinstance(data[name], str):
+            if name not in data:
+                continue
+            if not isinstance(data[name], str):
                 return (
                     jsonify(
-                        {"error": f"{name} must be a string", "code": "invalid_field"}
+                        {
+                            "error": f"{name} must be a string",
+                            "code": "invalid_field",
+                            "field": name,
+                        }
                     ),
                     400,
                 )
-            if name in data and len(data[name].encode("utf-8")) > 10 * 1024 * 1024:
+            try:
+                size = len(data[name].encode("utf-8"))
+            except UnicodeEncodeError:
+                return (
+                    jsonify(
+                        {
+                            "error": f"{name} must be valid UTF-8 text",
+                            "code": "invalid_field",
+                            "field": name,
+                        }
+                    ),
+                    400,
+                )
+            if size > 10 * 1024 * 1024:
                 return (
                     jsonify(
                         {
                             "error": f"{name} exceeds the size limit",
                             "code": "input_too_large",
+                            "field": name,
                         }
                     ),
                     413,

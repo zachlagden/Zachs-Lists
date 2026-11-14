@@ -8,11 +8,24 @@ Tasks:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+JOB_HISTORY_DAYS = 30
+
+
+def delete_finished_jobs_before(cutoff: datetime) -> int:
+    from app.extensions import mongo
+    from app.models.job import Job
+
+    finished = [Job.STATUS_COMPLETED, Job.STATUS_FAILED, Job.STATUS_SKIPPED]
+    result = mongo.db[Job.COLLECTION].delete_many(
+        {"created_at": {"$lt": cutoff}, "status": {"$in": finished}}
+    )
+    return result.deleted_count
 
 
 def register_scheduled_tasks(app, scheduler):
@@ -101,45 +114,14 @@ def register_scheduled_tasks(app, scheduler):
         """Clean up old job records daily at 4 AM UTC."""
         with app.app_context():
             try:
-                from app.extensions import mongo
-                from datetime import timedelta
+                cutoff = datetime.utcnow() - timedelta(days=JOB_HISTORY_DAYS)
+                deleted = delete_finished_jobs_before(cutoff)
 
-                # Delete jobs older than 30 days
-                cutoff = datetime.utcnow() - timedelta(days=30)
-
-                result = mongo.db.jobs.delete_many({"created_at": {"$lt": cutoff}})
-
-                if result.deleted_count > 0:
-                    logger.info(f"Cleaned up {result.deleted_count} old job records")
+                if deleted > 0:
+                    logger.info(f"Cleaned up {deleted} old job records")
 
             except Exception as e:
                 logger.exception(f"Failed job cleanup: {e}")
-
-    @scheduler.scheduled_job(
-        CronTrigger(day=1, hour=5, minute=0),
-        id="monthly_analytics_aggregation",
-        name="Monthly Analytics Aggregation",
-    )
-    def monthly_analytics_aggregation():
-        """Aggregate old analytics data monthly (1st of month, 5 AM UTC)."""
-        with app.app_context():
-            try:
-                from app.extensions import mongo
-                from datetime import timedelta
-
-                # Keep daily granularity for last 90 days, aggregate older data
-                cutoff = datetime.utcnow() - timedelta(days=90)
-
-                # Remove old daily analytics (we could aggregate first if needed)
-                result = mongo.db.analytics.delete_many({"date": {"$lt": cutoff}})
-
-                if result.deleted_count > 0:
-                    logger.info(
-                        f"Cleaned up {result.deleted_count} old analytics records"
-                    )
-
-            except Exception as e:
-                logger.exception(f"Failed analytics aggregation: {e}")
 
     @scheduler.scheduled_job(
         "interval",

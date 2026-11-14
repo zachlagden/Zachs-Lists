@@ -2,11 +2,14 @@
 Admin blueprint - user management, system stats, default list management.
 """
 
-import os
+from datetime import datetime, timedelta
+
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 
 from app.blueprints.auth import admin_required
+from app.extensions import limiter, mongo
 from app.models.user import User
 from app.models.job import Job
 from app.models.cache import CacheMetadata
@@ -14,35 +17,71 @@ from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
+from app.models.featured_list import FeaturedList
+from app.models.limit_request import LimitRequest
+from app.services.admin_forms import (
+    MAX_DESCRIPTION_LENGTH,
+    DefaultConfigCheckUnavailable,
+    announcement_fields,
+    approved_limit,
+    default_config_fields,
+    library_entry_fields,
+    limit_changes,
+    review_response,
+)
 from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
+from app.services.job_feed import job_payload, job_payloads
+from app.services.site_stats import storage_bytes
+from app.utils.rate_limits import configured_limit
+from app.utils.request_fields import (
+    json_object,
+    object_id,
+    optional_bool,
+    optional_string,
+    pagination,
+    query_flag,
+    query_int,
+    register_field_errors,
+    required_bool,
+    required_choice,
+    required_string,
+)
 from app.utils.time import utc_iso
 
 admin_bp = Blueprint("admin", __name__)
+register_field_errors(admin_bp)
+
+MAX_SEARCH_LENGTH = 100
+MAX_BAN_REASON_LENGTH = 500
+BAN_DURATIONS = {
+    "1d": timedelta(days=1),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+    "permanent": User.PERMANENT_BAN,
+}
+ALREADY_HANDLED = {
+    "error": "This request was already handled",
+    "code": "already_handled",
+}
 
 
 @admin_bp.route("/users", methods=["GET"])
 @admin_required
 def list_users(user: User):
     """List users with server-side pagination, search, and filtering."""
-    # Pagination
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 25, type=int)
-    per_page = min(per_page, 100)  # Cap at 100
+    page, per_page = pagination()
+    search = request.args.get("search", "", type=str).strip()[:MAX_SEARCH_LENGTH]
 
-    # Search
-    search = request.args.get("search", "", type=str).strip() or None
-
-    # Filters (default all True)
-    show_admins = request.args.get("show_admins", "true").lower() == "true"
-    show_regular = request.args.get("show_regular", "true").lower() == "true"
-    show_enabled = request.args.get("show_enabled", "true").lower() == "true"
-    show_disabled = request.args.get("show_disabled", "true").lower() == "true"
+    show_admins = query_flag("show_admins", True)
+    show_regular = query_flag("show_regular", True)
+    show_enabled = query_flag("show_enabled", True)
+    show_disabled = query_flag("show_disabled", True)
 
     # Get filtered users (exclude current user)
     users, total = User.get_all_filtered(
         page=page,
         per_page=per_page,
-        search=search,
+        search=search or None,
         show_admins=show_admins,
         show_regular=show_regular,
         show_enabled=show_enabled,
@@ -88,24 +127,25 @@ def update_user(admin: User, user_id: str):
     if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
         return jsonify({"error": "Only root can manage admins"}), 403
 
-    data = request.get_json()
+    data = json_object()
+    is_enabled = optional_bool(data, "is_enabled")
+    changes = limit_changes(data["limits"]) if data.get("limits") is not None else None
 
-    # Update enabled status
-    if "is_enabled" in data:
-        target_user.set_enabled(data["is_enabled"])
+    if is_enabled is not None:
+        target_user.set_enabled(is_enabled)
         current_app.logger.info(
-            f"Admin {admin.username} set user {target_user.username} enabled={data['is_enabled']}"
+            f"Admin {admin.username} set user {target_user.username} enabled={is_enabled}"
         )
 
-    # Update limits
-    if "limits" in data:
-        target_user.set_limits(data["limits"])
+    if changes is not None:
+        target_user.apply_limits(changes)
         current_app.logger.info(
             f"Admin {admin.username} updated limits for user {target_user.username}"
         )
 
-    # Refresh user data
     target_user = User.get_by_id(user_id)
+    if target_user is None:
+        return jsonify({"error": "User not found"}), 404
     return jsonify(target_user.to_admin_dict())
 
 
@@ -137,8 +177,6 @@ def delete_user(admin: User, user_id: str):
 @admin_required
 def ban_user(admin: User, user_id: str):
     """Ban a user."""
-    from datetime import datetime, timedelta
-
     target_user = User.get_by_id(user_id)
     if not target_user:
         return jsonify({"error": "User not found"}), 404
@@ -151,25 +189,11 @@ def ban_user(admin: User, user_id: str):
     if not admin.is_root and (target_user.is_admin or target_user.id == admin.id):
         return jsonify({"error": "Only root can manage admins"}), 403
 
-    data = request.get_json()
-    duration = data.get("duration")  # "1d", "7d", "30d", "permanent"
-    reason = data.get("reason")
+    data = json_object()
+    duration = required_choice(data, "duration", BAN_DURATIONS)
+    reason = optional_string(data, "reason", MAX_BAN_REASON_LENGTH) or None
 
-    # Calculate ban expiration
-    duration_map = {
-        "1d": timedelta(days=1),
-        "7d": timedelta(days=7),
-        "30d": timedelta(days=30),
-        "permanent": timedelta(days=36500),  # ~100 years
-    }
-
-    if duration not in duration_map:
-        return (
-            jsonify({"error": "Invalid duration. Use: 1d, 7d, 30d, or permanent"}),
-            400,
-        )
-
-    ban_until = datetime.utcnow() + duration_map[duration]
+    ban_until = datetime.utcnow() + BAN_DURATIONS[duration]
     target_user.ban(until=ban_until, reason=reason)
 
     current_app.logger.info(
@@ -223,8 +247,7 @@ def toggle_user_admin(admin: User, user_id: str):
     if target_user.is_root:
         return jsonify({"error": "Cannot modify root user"}), 403
 
-    data = request.get_json()
-    is_admin = data.get("is_admin", False)
+    is_admin = required_bool(json_object(), "is_admin")
 
     target_user.set_admin(is_admin)
 
@@ -232,8 +255,9 @@ def toggle_user_admin(admin: User, user_id: str):
         f"Root {admin.username} set admin status for {target_user.username} to {is_admin}"
     )
 
-    # Refresh and return updated user
     target_user = User.get_by_id(user_id)
+    if target_user is None:
+        return jsonify({"error": "User not found"}), 404
     return jsonify(target_user.to_admin_dict())
 
 
@@ -245,16 +269,7 @@ def get_user_ips(admin: User, user_id: str):
     if not target_user:
         return jsonify({"error": "User not found"}), 404
 
-    # Serialize IP log with proper datetime formatting
-    ip_log = [
-        {
-            "ip_hash": entry.get("ip_hash"),
-            "first_seen": utc_iso(entry.get("first_seen")),
-            "last_seen": utc_iso(entry.get("last_seen")),
-            "access_count": entry.get("access_count", 0),
-        }
-        for entry in target_user.ip_log
-    ]
+    ip_log = target_user.serialized_ip_log()
 
     return jsonify(
         {
@@ -314,16 +329,18 @@ def trigger_default_rebuild(admin: User):
 
 
 @admin_bp.route("/jobs", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
 @admin_required
 def list_all_jobs(admin: User):
     """List all jobs."""
-    limit = request.args.get("limit", 50, type=int)
+    limit = query_int("limit", 50, 1, 200)
     jobs = Job.get_recent(limit=limit)
 
-    return jsonify({"jobs": [j.to_dict() for j in jobs]})
+    return jsonify({"jobs": job_payloads(jobs)})
 
 
 @admin_bp.route("/jobs/<job_id>", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
 @admin_required
 def get_admin_job(admin: User, job_id: str):
     """Get job details for admin."""
@@ -331,10 +348,11 @@ def get_admin_job(admin: User, job_id: str):
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
-    return jsonify(job.to_dict())
+    return jsonify(job_payload(job))
 
 
 @admin_bp.route("/stats", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_ADMIN_STATS"))
 @admin_required
 def get_stats(admin: User):
     """Get system-wide statistics."""
@@ -355,9 +373,7 @@ def get_stats(admin: User):
     # Analytics stats
     analytics = Analytics.get_default_list_totals()
 
-    # Disk usage
-    data_dir = current_app.config["DATA_DIR"]
-    disk_usage = get_directory_size(data_dir)
+    disk_usage = storage_bytes(current_app.config["DATA_DIR"])
 
     return jsonify(
         {
@@ -385,10 +401,7 @@ def get_stats(admin: User):
 @admin_required
 def get_jobs_per_day(admin: User):
     """Get jobs per day for the last N days."""
-    from datetime import datetime, timedelta
-    from app.extensions import mongo
-
-    days = request.args.get("days", 30, type=int)
+    days = query_int("days", 30, 1, 365)
     start_date = datetime.utcnow() - timedelta(days=days)
 
     pipeline = [
@@ -427,10 +440,7 @@ def get_jobs_per_day(admin: User):
 @admin_required
 def get_user_growth(admin: User):
     """Get user signup growth over time."""
-    from datetime import datetime, timedelta
-    from app.extensions import mongo
-
-    days = request.args.get("days", 30, type=int)
+    days = query_int("days", 30, 1, 365)
     start_date = datetime.utcnow() - timedelta(days=days)
 
     pipeline = [
@@ -477,16 +487,27 @@ def get_default_config(admin: User):
 @admin_required
 def update_default_config(admin: User):
     """Update default lists configuration in MongoDB."""
-    data = request.get_json()
+    try:
+        fields = default_config_fields(json_object())
+    except DefaultConfigCheckUnavailable:
+        return (
+            jsonify(
+                {
+                    "error": "The whitelist could not be checked, so nothing was saved. Try again shortly.",
+                    "code": "validation_unavailable",
+                }
+            ),
+            503,
+        )
 
-    if "config" in data:
-        SystemConfig.update_default_blocklists(data["config"], admin.username)
+    SystemConfig.update_default_config(
+        fields["blocklists"], fields["whitelist"], admin.username
+    )
+    if fields["blocklists"] is not None:
         current_app.logger.info(
             f"Admin {admin.username} updated default blocklist config"
         )
-
-    if "whitelist" in data:
-        SystemConfig.update_default_whitelist(data["whitelist"], admin.username)
+    if fields["whitelist"] is not None:
         current_app.logger.info(f"Admin {admin.username} updated default whitelist")
 
     return jsonify({"success": True})
@@ -496,23 +517,8 @@ def update_default_config(admin: User):
 @admin_required
 def get_featured_lists(admin: User):
     """Get featured community lists."""
-    from app.extensions import mongo
-
-    featured = list(mongo.db.featured_lists.find().sort("order", 1))
-
     return jsonify(
-        {
-            "featured": [
-                {
-                    "id": str(f["_id"]),
-                    "username": f["username"],
-                    "list_name": f["list_name"],
-                    "description": f.get("description", ""),
-                    "order": f.get("order", 0),
-                }
-                for f in featured
-            ]
-        }
+        {"featured": [entry.to_dict() for entry in FeaturedList.all_ordered()]}
     )
 
 
@@ -520,55 +526,41 @@ def get_featured_lists(admin: User):
 @admin_required
 def add_featured_list(admin: User):
     """Add a list to featured."""
-    from app.extensions import mongo
-    from datetime import datetime
+    data = json_object()
+    username = required_string(data, "username", 100)
+    list_name = required_string(data, "list_name", 100)
+    description = optional_string(data, "description", MAX_DESCRIPTION_LENGTH) or ""
 
-    data = request.get_json()
-    username = data.get("username")
-    list_name = data.get("list_name")
-    description = data.get("description", "")
-
-    # Validate user and list exist
     target_user = User.get_by_username(username)
     if not target_user:
         return jsonify({"error": "User not found"}), 404
 
-    list_info = target_user.get_list(list_name)
-    if not list_info:
+    if not target_user.get_list(list_name):
         return jsonify({"error": "List not found"}), 404
 
-    # Get next order number
-    max_order = mongo.db.featured_lists.find_one(sort=[("order", -1)])
-    next_order = (max_order.get("order", 0) + 1) if max_order else 1
+    if FeaturedList.exists(username, list_name):
+        return (
+            jsonify(
+                {"error": "This list is already featured", "code": "already_featured"}
+            ),
+            409,
+        )
 
-    # Insert
-    result = mongo.db.featured_lists.insert_one(
-        {
-            "username": username,
-            "list_name": list_name,
-            "description": description,
-            "order": next_order,
-            "created_at": datetime.utcnow(),
-            "created_by": admin.username,
-        }
-    )
+    entry = FeaturedList.add(username, list_name, description, admin.username)
 
     current_app.logger.info(
         f"Admin {admin.username} added featured list: {username}/{list_name}"
     )
 
-    return jsonify({"success": True, "id": str(result.inserted_id)})
+    featured = entry.to_dict()
+    return jsonify({"success": True, "id": featured["id"], "featured": featured})
 
 
 @admin_bp.route("/featured/<featured_id>", methods=["DELETE"])
 @admin_required
 def remove_featured_list(admin: User, featured_id: str):
     """Remove a list from featured."""
-    from app.extensions import mongo
-
-    result = mongo.db.featured_lists.delete_one({"_id": ObjectId(featured_id)})
-
-    if result.deleted_count == 0:
+    if not FeaturedList.remove(object_id(featured_id, "featured_id")):
         return jsonify({"error": "Featured list not found"}), 404
 
     current_app.logger.info(
@@ -578,22 +570,6 @@ def remove_featured_list(admin: User, featured_id: str):
     return jsonify({"success": True})
 
 
-def get_directory_size(path: str) -> int:
-    """Get total size of a directory."""
-    total = 0
-    try:
-        for dirpath, dirnames, filenames in os.walk(path):
-            for filename in filenames:
-                filepath = os.path.join(dirpath, filename)
-                try:
-                    total += os.path.getsize(filepath)
-                except OSError:
-                    pass
-    except Exception:
-        pass
-    return total
-
-
 # Limit Request Management
 
 
@@ -601,8 +577,6 @@ def get_directory_size(path: str) -> int:
 @admin_required
 def get_limit_requests(admin: User):
     """Get all limit requests (optionally filtered by status)."""
-    from app.models.limit_request import LimitRequest
-
     status = request.args.get("status")  # pending, approved, denied
 
     if status:
@@ -631,84 +605,45 @@ def get_limit_requests(admin: User):
 @admin_required
 def approve_limit_request(admin: User, request_id: str):
     """Approve a limit request."""
-    from app.models.limit_request import LimitRequest
-
     limit_request = LimitRequest.get_by_id(request_id)
     if not limit_request:
         return jsonify({"error": "Request not found"}), 404
 
-    if limit_request.status != LimitRequest.STATUS_PENDING:
-        return jsonify({"error": "Request is not pending"}), 400
+    data = json_object()
+    custom_limit = approved_limit(data, limit_request)
+    response_message = review_response(data)
 
-    data = request.get_json() or {}
-    custom_limit = data.get("custom_limit")
-    response_message = data.get("response")
-
-    # Validate custom limit if provided
-    if custom_limit is not None:
-        max_limit = current_app.config.get("MAX_DOMAINS_LIMIT", 10_000_000)
-        if custom_limit < limit_request.current_limit:
-            return (
-                jsonify({"error": "Custom limit cannot be lower than current limit"}),
-                400,
-            )
-        if custom_limit > max_limit:
-            return jsonify({"error": f"Custom limit cannot exceed {max_limit:,}"}), 400
-
-    # Approve the request
-    limit_request.approve(
+    if not limit_request.approve(
         admin_username=admin.username,
         approved_limit=custom_limit,
         response=response_message,
-    )
+    ):
+        return jsonify(ALREADY_HANDLED), 409
 
     current_app.logger.info(
         f"Admin {admin.username} approved limit request {request_id} "
-        f"(limit: {custom_limit or limit_request.requested_tier:,})"
+        f"(limit: {limit_request.approved_limit:,})"
     )
 
-    # Return updated request
-    limit_request = LimitRequest.get_by_id(request_id)
-    return jsonify(
-        {
-            "success": True,
-            "request": limit_request.to_dict(),
-        }
-    )
+    return jsonify({"success": True, "request": limit_request.to_dict()})
 
 
 @admin_bp.route("/limit-requests/<request_id>/deny", methods=["POST"])
 @admin_required
 def deny_limit_request(admin: User, request_id: str):
     """Deny a limit request."""
-    from app.models.limit_request import LimitRequest
-
     limit_request = LimitRequest.get_by_id(request_id)
     if not limit_request:
         return jsonify({"error": "Request not found"}), 404
 
-    if limit_request.status != LimitRequest.STATUS_PENDING:
-        return jsonify({"error": "Request is not pending"}), 400
+    response_message = review_response(json_object())
 
-    data = request.get_json() or {}
-    response_message = data.get("response")
-
-    # Deny the request
-    limit_request.deny(
-        admin_username=admin.username,
-        response=response_message,
-    )
+    if not limit_request.deny(admin_username=admin.username, response=response_message):
+        return jsonify(ALREADY_HANDLED), 409
 
     current_app.logger.info(f"Admin {admin.username} denied limit request {request_id}")
 
-    # Return updated request
-    limit_request = LimitRequest.get_by_id(request_id)
-    return jsonify(
-        {
-            "success": True,
-            "request": limit_request.to_dict(),
-        }
-    )
+    return jsonify({"success": True, "request": limit_request.to_dict()})
 
 
 # Blocklist Library Management
@@ -737,70 +672,21 @@ def get_library(admin: User):
 @admin_required
 def add_library_entry(admin: User):
     """Add a new entry to the blocklist library."""
-    data = request.get_json()
+    fields = library_entry_fields(json_object(), partial=False)
 
-    url = data.get("url", "").strip()
-    name = data.get("name", "").strip()
-    category = data.get("category", "").strip()
-    description = data.get("description", "").strip()
-    recommended = data.get("recommended", False)
-    aggressiveness = data.get("aggressiveness", 3)
-    domain_count = data.get("domain_count", 0)
-
-    # Validate required fields
-    if not url:
-        return jsonify({"error": "URL is required"}), 400
-    if not name:
-        return jsonify({"error": "Name is required"}), 400
-    if not category:
-        return jsonify({"error": "Category is required"}), 400
-
-    # Validate category
-    if category not in BlocklistLibrary.VALID_CATEGORIES:
-        return (
-            jsonify(
-                {
-                    "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
-                }
-            ),
-            400,
-        )
-
-    # Validate URL format
-    from app.utils.validators import validate_url
-
-    if not validate_url(url):
-        return jsonify({"error": "Invalid or unsafe URL"}), 400
-
-    # Check for duplicate URL
-    if BlocklistLibrary.url_exists(url):
+    if BlocklistLibrary.url_exists(fields["url"]):
         return jsonify({"error": "URL already exists in library"}), 409
 
-    # Create entry
-    entry = BlocklistLibrary.create(
-        url=url,
-        name=name,
-        category=category,
-        description=description,
-        recommended=recommended,
-        aggressiveness=aggressiveness,
-        domain_count=domain_count,
-        added_by=admin.username,
-    )
+    try:
+        entry = BlocklistLibrary.create(**fields, added_by=admin.username)
+    except DuplicateKeyError:
+        return jsonify({"error": "URL already exists in library"}), 409
 
     current_app.logger.info(
-        f"Admin {admin.username} added library entry: {name} ({category})"
+        f"Admin {admin.username} added library entry: {entry.name} ({entry.category})"
     )
 
-    return (
-        jsonify(
-            {
-                "success": True,
-                "entry": entry.to_dict(),
-            }
-        ),
-        201,
-    )
+    return jsonify({"success": True, "entry": entry.to_dict()}), 201
 
 
 @admin_bp.route("/library/<entry_id>", methods=["GET"])
@@ -822,44 +708,23 @@ def update_library_entry(admin: User, entry_id: str):
     if not entry:
         return jsonify({"error": "Entry not found"}), 404
 
-    data = request.get_json()
+    fields = library_entry_fields(json_object(), partial=True)
 
-    # Validate category if provided
-    if "category" in data and data["category"] not in BlocklistLibrary.VALID_CATEGORIES:
-        return (
-            jsonify(
-                {
-                    "error": f"Invalid category. Must be one of: {', '.join(sorted(BlocklistLibrary.VALID_CATEGORIES))}"
-                }
-            ),
-            400,
-        )
+    if "url" in fields and BlocklistLibrary.url_exists(
+        fields["url"], exclude_id=entry_id
+    ):
+        return jsonify({"error": "URL already exists in library"}), 409
 
-    # Validate URL if provided
-    if "url" in data:
-        from app.utils.validators import validate_url
-
-        if not validate_url(data["url"]):
-            return jsonify({"error": "Invalid or unsafe URL"}), 400
-        # Check for duplicate URL (excluding current entry)
-        if BlocklistLibrary.url_exists(data["url"], exclude_id=entry_id):
-            return jsonify({"error": "URL already exists in library"}), 409
-
-    # Update entry
-    entry.update(
-        url=data.get("url"),
-        name=data.get("name"),
-        category=data.get("category"),
-        description=data.get("description"),
-        recommended=data.get("recommended"),
-        aggressiveness=data.get("aggressiveness"),
-        domain_count=data.get("domain_count"),
-    )
+    try:
+        entry.update(**fields)
+    except DuplicateKeyError:
+        return jsonify({"error": "URL already exists in library"}), 409
 
     current_app.logger.info(f"Admin {admin.username} updated library entry: {entry_id}")
 
-    # Return updated entry
     entry = BlocklistLibrary.get_by_id(entry_id)
+    if entry is None:
+        return jsonify({"error": "Entry not found"}), 404
     return jsonify(
         {
             "success": True,
@@ -893,7 +758,7 @@ def delete_library_entry(admin: User, entry_id: str):
 @admin_required
 def list_announcements(admin: User):
     """List all announcements for admin management."""
-    limit = request.args.get("limit", 50, type=int)
+    limit = query_int("limit", 50, 1, 200)
     announcements = Announcement.get_all(limit=limit)
     return jsonify({"announcements": [a.to_dict() for a in announcements]})
 
@@ -902,42 +767,14 @@ def list_announcements(admin: User):
 @admin_required
 def create_announcement(admin: User):
     """Create a new announcement."""
-    from datetime import datetime
-
-    data = request.get_json()
-    title = data.get("title", "").strip()
-    message = data.get("message", "").strip()
-    ann_type = data.get("type", "info")
-    expires_at_str = data.get("expires_at")
-
-    if not title:
-        return jsonify({"error": "Title is required"}), 400
-    if not message:
-        return jsonify({"error": "Message is required"}), 400
-    if ann_type not in Announcement.VALID_TYPES:
-        return (
-            jsonify(
-                {
-                    "error": f"Invalid type. Must be one of: {', '.join(Announcement.VALID_TYPES)}"
-                }
-            ),
-            400,
-        )
-
-    expires_at = None
-    if expires_at_str:
-        try:
-            expires_at = datetime.fromisoformat(
-                expires_at_str.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-        except (ValueError, AttributeError):
-            return jsonify({"error": "Invalid expires_at format"}), 400
+    fields = announcement_fields(json_object(), partial=False)
+    title = fields["title"]
 
     announcement = Announcement.create(
         title=title,
-        message=message,
-        type=ann_type,
-        expires_at=expires_at,
+        message=fields["message"],
+        type=fields.get("type", "info"),
+        expires_at=fields["expires_at"],
         created_by=admin.username,
     )
 
@@ -950,50 +787,19 @@ def create_announcement(admin: User):
 @admin_required
 def update_announcement(admin: User, announcement_id: str):
     """Update an announcement."""
-    from datetime import datetime
-
     announcement = Announcement.get_by_id(announcement_id)
     if not announcement:
         return jsonify({"error": "Announcement not found"}), 404
 
-    data = request.get_json()
-    update_kwargs = {}
-
-    if "title" in data:
-        update_kwargs["title"] = data["title"].strip()
-    if "message" in data:
-        update_kwargs["message"] = data["message"].strip()
-    if "type" in data:
-        if data["type"] not in Announcement.VALID_TYPES:
-            return (
-                jsonify(
-                    {
-                        "error": f"Invalid type. Must be one of: {', '.join(Announcement.VALID_TYPES)}"
-                    }
-                ),
-                400,
-            )
-        update_kwargs["type"] = data["type"]
-    if "is_active" in data:
-        update_kwargs["is_active"] = bool(data["is_active"])
-    if "expires_at" in data:
-        if data["expires_at"] is None:
-            update_kwargs["expires_at"] = None
-        else:
-            try:
-                update_kwargs["expires_at"] = datetime.fromisoformat(
-                    data["expires_at"].replace("Z", "+00:00")
-                ).replace(tzinfo=None)
-            except (ValueError, AttributeError):
-                return jsonify({"error": "Invalid expires_at format"}), 400
-
-    announcement.update(**update_kwargs)
+    announcement.update(**announcement_fields(json_object(), partial=True))
 
     current_app.logger.info(
         f"Admin {admin.username} updated announcement {announcement_id}"
     )
 
     announcement = Announcement.get_by_id(announcement_id)
+    if announcement is None:
+        return jsonify({"error": "Announcement not found"}), 404
     return jsonify({"success": True, "announcement": announcement.to_dict()})
 
 

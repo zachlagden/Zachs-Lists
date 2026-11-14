@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { adminApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useJobSocket } from '../hooks/useSocket';
+import { isStale } from '../realtime/jobMerge';
 import type { Job, OutputFile } from '../types';
 
 function formatBytes(bytes: number): string {
@@ -27,21 +29,53 @@ export default function AdminJobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const jobRef = useRef<Job | null>(null);
+
   useEffect(() => {
-    const fetchJob = async () => {
-      if (!jobId) return;
-      try {
-        const data = await adminApi.getJob(jobId);
-        setJob(data);
-      } catch (err) {
-        console.error('Failed to fetch job:', err);
-        setError('Failed to load job details');
-      } finally {
-        setLoading(false);
-      }
-    };
+    jobRef.current = job;
+  }, [job]);
+
+  const applyJobs = useCallback(
+    (incoming: Job[]) => {
+      setJob((current) =>
+        incoming.reduce<Job | null>(
+          (latest, candidate) =>
+            candidate.job_id === jobId && !isStale(candidate, latest) ? candidate : latest,
+          current?.job_id === jobId ? current : null,
+        ),
+      );
+    },
+    [jobId],
+  );
+
+  const applyJob = useCallback((incoming: Job) => applyJobs([incoming]), [applyJobs]);
+
+  const fetchJob = useCallback(async () => {
+    if (!jobId) return;
+    try {
+      applyJobs([await adminApi.getJob(jobId)]);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch job:', err);
+      setError('Failed to load job details');
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId, applyJobs]);
+
+  useJobSocket({
+    isAdmin: true,
+    onJobCreated: applyJob,
+    onJobProgress: applyJob,
+    onJobCompleted: applyJob,
+    onReconnect: fetchJob,
+    knownJobs: () => (jobRef.current ? [jobRef.current] : []),
+    onJobsSynced: applyJobs,
+  });
+
+  useEffect(() => {
     fetchJob();
-  }, [jobId]);
+  }, [fetchJob]);
 
   if (loading) {
     return (

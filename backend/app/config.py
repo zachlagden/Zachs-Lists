@@ -51,6 +51,9 @@ class Config:
     DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers
     DEFAULT_MAX_CONFIG_SIZE_MB = 10
     DEFAULT_MANUAL_UPDATES_PER_WEEK = 3
+    MAX_SOURCE_LISTS_LIMIT = 1000
+    MAX_CONFIG_SIZE_MB_LIMIT = 10
+    MAX_MANUAL_UPDATES_PER_WEEK_LIMIT = 100
 
     # Processing
     MAX_CONCURRENT_JOBS = 5
@@ -59,9 +62,22 @@ class Config:
     MAX_RETRIES = 3
     RETRY_BACKOFF = 0.5
 
+    # Job relay
+    JOB_POLL_ACTIVE_SECONDS = float(os.environ.get("JOB_POLL_ACTIVE_SECONDS", "0.5"))
+    JOB_POLL_IDLE_SECONDS = float(os.environ.get("JOB_POLL_IDLE_SECONDS", "2"))
+
     # Rate limiting
-    RATELIMIT_DEFAULT = "100/hour"
-    RATELIMIT_STORAGE_URL = os.environ.get("REDIS_URL", "memory://")
+    RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "100 per hour")
+    RATELIMIT_STORAGE_URI = (
+        os.environ.get("RATELIMIT_STORAGE_URL")
+        or os.environ.get("REDIS_URL")
+        or "memory://"
+    )
+    RATELIMIT_IN_MEMORY_FALLBACK_ENABLED = True
+    RATELIMIT_AUTH_ME = "60 per minute"
+    RATELIMIT_JOBS = "120 per minute"
+    RATELIMIT_URL_METADATA = "60 per minute"
+    RATELIMIT_ADMIN_STATS = "60 per minute"
     TRUSTED_PROXY_HOSTS = tuple(
         host.strip()
         for host in os.environ.get("TRUSTED_PROXY_HOSTS", "").split(",")

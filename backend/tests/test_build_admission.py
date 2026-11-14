@@ -22,7 +22,7 @@ from app.extensions import mongo
 from app.models.job import Job
 from app.models.system_config import SystemConfig
 from app.models.user import User
-from app.services import build_admission
+from app.services import build_admission, job_feed
 from app.services.build_admission import (
     DEFAULT_TARGET,
     AdmissionError,
@@ -31,7 +31,7 @@ from app.services.build_admission import (
     refund_quota_if_due,
 )
 from app.services.job_poller import JobStatusPoller
-from app.utils.job_document import initial_progress
+from app.utils.job_document import initial_progress, revision_bump
 from app.utils.time import next_week_start, utc_iso, week_start
 
 realtime: Any = importlib.import_module("app.socketio")
@@ -533,16 +533,24 @@ def test_refund_never_takes_the_counter_below_zero(site: Site) -> None:
     assert site.used(site.sam) == 0
 
 
-def test_poller_refunds_a_skipped_build_and_reports_it_once(site: Site) -> None:
-    poller = object.__new__(JobStatusPoller)
-    poller.active_jobs = {}
-    poller.completed_emitted = set()
+def test_poller_refunds_a_skipped_build_and_reports_it_once(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(job_feed, "database_time", datetime.utcnow)
+    poller = JobStatusPoller()
+    poller.poll_once()
     job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
-    poller._check_jobs()
-    site.finish(job, Job.STATUS_SKIPPED)
+    poller.poll_once()
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {
+            "$set": {"status": Job.STATUS_SKIPPED, "result": {"errors": []}},
+            **revision_bump(),
+        },
+    )
 
-    poller._check_jobs()
-    poller._check_jobs()
+    poller.poll_once()
+    poller.poll_once()
 
     assert site.used(site.sam) == 0
     completed = [event for event in site.emitted if event[0] == "job:completed"]
@@ -589,13 +597,34 @@ def test_requeued_stale_job_still_blocks_a_second_build(site: Site) -> None:
     assert refusal(site.sam, Job.TYPE_SCHEDULED, None).details["job_id"] == job.job_id
 
 
-def test_no_client_payload_carries_the_config_snapshot(site: Site) -> None:
+def test_no_client_payload_carries_the_config_snapshot(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(job_feed, "database_time", datetime.utcnow)
+    poller = JobStatusPoller()
+    poller.poll_once()
     job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
     stored = Job.get_by_id(job.job_id)
     assert stored is not None
-
-    realtime.emit_job_progress(stored)
-    realtime.emit_job_completed(stored.to_dict(), site.sam.id)
+    poller.poll_once()
+    for path in (f"/api/user/jobs/{job.job_id}", "/api/user/jobs"):
+        body = site.client(site.sam).get(path).get_data(as_text=True)
+        assert job.job_id in body
+        assert "queue_info" in body
+        assert "config_snapshot" not in body
+    for path in (f"/api/admin/jobs/{job.job_id}", "/api/admin/jobs"):
+        body = site.client(site.admin).get(path).get_data(as_text=True)
+        assert job.job_id in body
+        assert "queue_info" in body
+        assert "config_snapshot" not in body
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {
+            "$set": {"status": Job.STATUS_COMPLETED, "result": {"errors": []}},
+            **revision_bump(),
+        },
+    )
+    poller.poll_once()
 
     assert stored.to_dict()["target_id"] == site.sam.id
     assert "config_snapshot" not in stored.to_dict()
@@ -605,14 +634,6 @@ def test_no_client_payload_carries_the_config_snapshot(site: Site) -> None:
     for _, payload, _ in site.emitted:
         assert VALID_CONFIG not in repr(payload)
         assert "config_snapshot" not in repr(payload)
-    for path in (f"/api/user/jobs/{job.job_id}", "/api/user/jobs"):
-        body = site.client(site.sam).get(path).get_data(as_text=True)
-        assert job.job_id in body
-        assert "config_snapshot" not in body
-    for path in (f"/api/admin/jobs/{job.job_id}", "/api/admin/jobs"):
-        body = site.client(site.admin).get(path).get_data(as_text=True)
-        assert job.job_id in body
-        assert "config_snapshot" not in body
 
 
 def test_target_id_is_derived_for_jobs_stored_before_the_field_existed() -> None:

@@ -47,7 +47,10 @@ def test_ensure_indexes_creates_every_named_index_and_is_repeatable(
     }
     assert index_names(database, "cache") == {"url_hash_1"}
     assert index_names(database, "workers") == {"worker_id_1"}
-    assert index_names(database, "limit_requests") == {"user_id_1_status_1"}
+    assert index_names(database, "limit_requests") == {
+        "user_id_1_status_1",
+        "one_pending_request_per_user",
+    }
     assert index_names(database, "validation_tokens") == {"expires_at_1", "user_id_1"}
     assert index_names(database, "blocklist_library") == LIBRARY_INDEXES
 
@@ -157,3 +160,31 @@ def test_unreachable_database_stops_after_the_first_attempt(
 
     assert attempts == [INDEXES[0].name]
     assert len([record for record in caplog.records if record.exc_info]) == 1
+
+
+def test_analytics_indexes_cover_scoped_reads_and_retention(database: Any) -> None:
+    ensure_indexes(database)
+
+    days = database.analytics.index_information()
+    assert set(days) - {"_id_"} == {"analytics_scope_date", "analytics_retention"}
+    assert days["analytics_scope_date"]["key"] == [
+        ("list_type", 1),
+        ("username", 1),
+        ("list_name", 1),
+        ("date", 1),
+    ]
+    assert days["analytics_retention"]["key"] == [("date", 1)]
+    assert days["analytics_retention"]["expireAfterSeconds"] == 90 * 24 * 60 * 60
+
+    visitors = database.analytics_visitors.index_information()
+    assert set(visitors) - {"_id_"} == {
+        "analytics_visitor_scope_date",
+        "analytics_visitor_retention",
+    }
+    assert visitors["analytics_visitor_scope_date"]["key"][-2:] == [
+        ("date", 1),
+        ("visitor", 1),
+    ]
+    assert visitors["analytics_visitor_retention"]["expireAfterSeconds"] == (
+        90 * 24 * 60 * 60
+    )

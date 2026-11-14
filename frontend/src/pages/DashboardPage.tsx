@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuthStore, useUserDataStore, useJobsStore } from '../store';
 import { userApi, analyticsApi } from '../api/client';
 import { useJobSocket } from '../hooks/useSocket';
-import type { Job, Notification } from '../types';
+import type { AnalyticsReport, Job, Notification } from '../types';
+import { buildRefusalMessage, type BuildRefusal } from '../api/buildRefusal';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -31,13 +32,6 @@ ChartJS.register(
   Filler,
 );
 
-interface UserAnalytics {
-  total_requests: number;
-  total_bandwidth: number;
-  requests_over_time: { date: string; count: number }[];
-  format_breakdown: Record<string, number>;
-}
-
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const {
@@ -50,29 +44,25 @@ export default function DashboardPage() {
     remainingUpdates,
     setRemainingUpdates,
   } = useUserDataStore();
-  const { jobs, hasUnreadFailures, setJobs, updateJob, setHasUnreadFailures } = useJobsStore();
-  const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
+  const { jobs, hasUnreadFailures, mergeFetchedJobs, addJob, updateJob, setHasUnreadFailures } =
+    useJobsStore();
+  const [analytics, setAnalytics] = useState<AnalyticsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [buildLoading, setBuildLoading] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showLimitRequestModal, setShowLimitRequestModal] = useState(false);
   const [availableTiers, setAvailableTiers] = useState<number[]>([]);
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
 
-  // Handle real-time job updates
-  const handleJobCreated = useCallback(
-    (job: Job) => {
-      setJobs([job, ...jobs.slice(0, 4)]); // Keep only 5 most recent
-    },
-    [jobs, setJobs],
-  );
-
-  const handleJobProgress = useCallback(
-    (job: Job) => {
-      updateJob(job);
-    },
-    [updateJob],
-  );
+  const refreshJobs = useCallback(async () => {
+    try {
+      const jobsData = await userApi.getJobs(5);
+      mergeFetchedJobs(jobsData.jobs || []);
+    } catch (error) {
+      console.error('Failed to refresh jobs:', error);
+    }
+  }, [mergeFetchedJobs]);
 
   const handleJobCompleted = useCallback(
     (job: Job) => {
@@ -97,9 +87,10 @@ export default function DashboardPage() {
   // Subscribe to real-time updates
   useJobSocket({
     userId: user?.id,
-    onJobCreated: handleJobCreated,
-    onJobProgress: handleJobProgress,
+    onJobCreated: addJob,
+    onJobProgress: updateJob,
     onJobCompleted: handleJobCompleted,
+    onReconnect: refreshJobs,
   });
 
   useEffect(() => {
@@ -118,7 +109,7 @@ export default function DashboardPage() {
         setStats(listsData.stats || null);
         setLimits(listsData.limits || null);
         setRemainingUpdates(listsData.remaining_updates ?? 3);
-        setJobs(jobsData.jobs || []);
+        mergeFetchedJobs(jobsData.jobs || []);
 
         // Check for unread failures
         const hasFailures = (jobsData.jobs || []).some(
@@ -137,20 +128,30 @@ export default function DashboardPage() {
       }
     };
     fetchData();
-  }, [setLists, setStats, setLimits, setRemainingUpdates, setJobs, setHasUnreadFailures]);
+  }, [
+    setLists,
+    setStats,
+    setLimits,
+    setRemainingUpdates,
+    mergeFetchedJobs,
+    setHasUnreadFailures,
+  ]);
 
   const handleTriggerBuild = async () => {
-    if (buildLoading || remainingUpdates <= 0) return;
+    if (buildLoading || (!user?.is_admin && remainingUpdates <= 0)) return;
 
     setBuildLoading(true);
+    setBuildError(null);
     try {
       const result = await userApi.triggerBuild();
       setRemainingUpdates(result.remaining_updates);
-      // Refresh jobs
-      const jobsData = await userApi.getJobs(5);
-      setJobs(jobsData.jobs || []);
+      await refreshJobs();
     } catch (error) {
-      console.error('Failed to trigger build:', error);
+      const refusal = (error as { response?: { data?: BuildRefusal } }).response?.data;
+      if (typeof refusal?.remaining_updates === 'number') {
+        setRemainingUpdates(refusal.remaining_updates);
+      }
+      setBuildError(buildRefusalMessage(refusal));
     } finally {
       setBuildLoading(false);
     }
@@ -175,10 +176,10 @@ export default function DashboardPage() {
   };
 
   const chartData = {
-    labels: analytics?.requests_over_time?.map((d) => d.date) || [],
+    labels: analytics?.daily.map((d) => d.date) || [],
     datasets: [
       {
-        data: analytics?.requests_over_time?.map((d) => d.count) || [],
+        data: analytics?.daily.map((d) => d.requests) || [],
         borderColor: '#d93025',
         backgroundColor: 'rgba(217, 48, 37, 0.1)',
         fill: true,
@@ -240,6 +241,23 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {buildError && (
+        <div
+          role="alert"
+          className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg flex items-center justify-between"
+        >
+          <span>{buildError}</span>
+          <button
+            type="button"
+            onClick={() => setBuildError(null)}
+            aria-label="Dismiss build message"
+            className="text-red-400 hover:text-red-300 underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Failed jobs notification */}
       {hasUnreadFailures && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg flex items-center justify-between">
@@ -271,7 +289,7 @@ export default function DashboardPage() {
         <div className="card">
           <div className="text-sm text-pihole-text-muted mb-1">Total Requests</div>
           <div className="text-2xl font-bold text-pihole-text">
-            {analytics?.total_requests?.toLocaleString() || 0}
+            {analytics?.totals.requests.toLocaleString() || 0}
           </div>
         </div>
       </div>
@@ -410,7 +428,7 @@ export default function DashboardPage() {
         {/* Analytics Chart */}
         <div className="card">
           <h2 className="text-lg font-semibold text-pihole-text mb-4">Requests (30 days)</h2>
-          {analytics?.requests_over_time?.length ? (
+          {analytics?.totals.requests ? (
             <div className="h-48">
               <Line data={chartData} options={chartOptions} />
             </div>

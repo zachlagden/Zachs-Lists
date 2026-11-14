@@ -1,4 +1,12 @@
 import axios from 'axios';
+import type {
+  AdminAnalytics,
+  AdminStats,
+  AnalyticsReport,
+  ListAnalyticsReport,
+  PublicAnalyticsReport,
+  PublicStats,
+} from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -161,27 +169,27 @@ export const userApi = {
 
 // Analytics API
 export const analyticsApi = {
-  getDefaultStats: async (days = 30) => {
-    const response = await api.get('/api/analytics/default', {
+  getDefaultStats: async (days = 30): Promise<PublicAnalyticsReport> => {
+    const response = await api.get<PublicAnalyticsReport>('/api/analytics/default', {
       params: { days },
     });
     return response.data;
   },
 
-  getUserStats: async (days = 30) => {
-    const response = await api.get('/api/analytics/user', { params: { days } });
+  getUserStats: async (days = 30): Promise<AnalyticsReport> => {
+    const response = await api.get<AnalyticsReport>('/api/analytics/user', { params: { days } });
     return response.data;
   },
 
-  getUserListStats: async (listName: string, days = 30) => {
-    const response = await api.get(`/api/analytics/user/${listName}`, {
+  getUserListStats: async (listName: string, days = 30): Promise<ListAnalyticsReport> => {
+    const response = await api.get<ListAnalyticsReport>(`/api/analytics/user/${listName}`, {
       params: { days },
     });
     return response.data;
   },
 
-  getPublicStats: async () => {
-    const response = await api.get('/api/analytics/public/stats');
+  getPublicStats: async (): Promise<PublicStats> => {
+    const response = await api.get<PublicStats>('/api/analytics/public/stats');
     return response.data;
   },
 };
@@ -259,8 +267,8 @@ export const adminApi = {
     return response.data;
   },
 
-  getStats: async () => {
-    const response = await api.get('/api/admin/stats');
+  getStats: async (): Promise<AdminStats> => {
+    const response = await api.get<AdminStats>('/api/admin/stats');
     return response.data;
   },
 
@@ -310,8 +318,8 @@ export const adminApi = {
     return response.data;
   },
 
-  getAdminAnalytics: async (days = 30) => {
-    const response = await api.get('/api/analytics/admin', {
+  getAdminAnalytics: async (days = 30): Promise<AdminAnalytics> => {
+    const response = await api.get<AdminAnalytics>('/api/analytics/admin', {
       params: { days },
     });
     return response.data;

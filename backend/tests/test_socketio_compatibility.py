@@ -1,9 +1,11 @@
 from unittest.mock import Mock
 
+import mongomock
 import pytest
 from flask import Flask
 from flask_socketio import SocketIOTestClient
 
+from app.extensions import mongo
 from app.models.user import User
 from app.socketio import init_socketio, socketio
 
@@ -23,6 +25,7 @@ def socket_app(monkeypatch: pytest.MonkeyPatch) -> tuple[Flask, Mock]:
     account.is_banned = False
     account.is_admin = False
     monkeypatch.setattr(User, "get_by_id", Mock(return_value=account))
+    monkeypatch.setattr(mongo, "db", mongomock.MongoClient().default)
     init_socketio(application)
     return application, account
 

@@ -1,10 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminApi } from '../api/client';
+import { apiErrorMessage } from '../api/apiError';
+import { localInputToUtcIso, utcIsoToLocalInput } from '../utils/datetimeLocal';
 import { useAuthStore } from '../store';
 import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { JobList, JobDetailView } from '../components/jobs';
+import { mergeFetchedList, mergeJobs } from '../realtime/jobMerge';
 import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../types';
 import {
   Chart as ChartJS,
@@ -32,7 +35,7 @@ ChartJS.register(
   Filler,
 );
 
-import type { LimitRequest, Announcement } from '../types';
+import type { AdminAnalytics, AdminStats, LimitRequest, Announcement } from '../types';
 import { INTENDED_USE_LABELS } from '../types';
 
 type TabType =
@@ -44,14 +47,6 @@ type TabType =
   | 'jobs'
   | 'library'
   | 'announcements';
-
-interface AdminStats {
-  total_users: number;
-  active_users: number;
-  total_jobs: number;
-  total_domains: number;
-  total_requests: number;
-}
 
 interface AdminUser {
   id: string;
@@ -69,12 +64,11 @@ interface AdminUser {
 }
 
 interface FeaturedList {
-  _id: string;
+  id: string;
   username: string;
   list_name: string;
   description: string;
-  display_order: number;
-  created_at: string;
+  order: number;
 }
 
 interface LibraryEntry {
@@ -127,14 +121,13 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const selectedJob = jobs.find((job) => job.job_id === selectedJobId) ?? null;
+  const jobsRef = useRef<Job[]>([]);
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
   const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
   const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
-  const [analytics, setAnalytics] = useState<{
-    requests_over_time: { date: string; count: number }[];
-    geo_distribution: Record<string, number>;
-  } | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [jobsPerDay, setJobsPerDay] = useState<
     { date: string; total: number; completed: number; failed: number }[]
   >([]);
@@ -192,30 +185,34 @@ export default function AdminPage() {
   const [totalPages, setTotalPages] = useState(1);
 
   // Handle real-time job updates (admin sees all jobs)
-  const handleJobCreated = useCallback((job: Job) => {
-    setJobs((prev) => [job, ...prev.slice(0, 49)]); // Keep 50 most recent
-    // Auto-select newly created jobs
-    setSelectedJob(job);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  const applyJobs = useCallback((incoming: Job[]) => {
+    setJobs((prev) => mergeJobs(prev, incoming, 50));
   }, []);
 
-  const handleJobProgress = useCallback((job: Job) => {
-    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
-    // Update selected job if it matches
-    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
-  }, []);
+  const applyJob = useCallback((job: Job) => applyJobs([job]), [applyJobs]);
 
-  const handleJobCompleted = useCallback((job: Job) => {
-    setJobs((prev) => prev.map((j) => (j.job_id === job.job_id ? job : j)));
-    // Update selected job if it matches
-    setSelectedJob((prev) => (prev?.job_id === job.job_id ? job : prev));
+  const refetchJobs = useCallback(async () => {
+    try {
+      const jobsData = await adminApi.getAllJobs();
+      setJobs((prev) => mergeFetchedList(prev, jobsData.jobs || []));
+    } catch (error) {
+      console.error('Failed to refresh jobs:', error);
+    }
   }, []);
 
   // Subscribe to all jobs (admin view)
   useJobSocket({
     isAdmin: true,
-    onJobCreated: handleJobCreated,
-    onJobProgress: handleJobProgress,
-    onJobCompleted: handleJobCompleted,
+    onJobCreated: applyJob,
+    onJobProgress: applyJob,
+    onJobCompleted: applyJob,
+    onReconnect: refetchJobs,
+    knownJobs: () => jobsRef.current,
+    onJobsSynced: applyJobs,
   });
 
   // Refresh stats when stats:updated event received
@@ -301,12 +298,12 @@ export default function AdminPage() {
           adminApi.getJobsPerDay(30).catch(() => ({ jobs_per_day: [] })),
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
           adminApi.getLimitRequests().catch(() => ({ requests: [], pending_count: 0 })),
-          adminApi.getLibraryEntries().catch(() => ({ entries: [] })),
+          adminApi.getLibraryEntries().catch(() => ({ library: [] })),
           adminApi.getAnnouncements().catch(() => ({ announcements: [] })),
         ]);
 
         setStats(statsData);
-        setJobs(jobsData.jobs || []);
+        setJobs((prev) => mergeFetchedList(prev, jobsData.jobs || []));
         setFeatured(featuredData?.featured || []);
         setDefaultConfig(configData);
         setLocalConfig(configData);
@@ -315,7 +312,7 @@ export default function AdminPage() {
         setUserGrowth(userGrowthData?.user_growth || []);
         setLimitRequests(limitRequestsData?.requests || []);
         setPendingRequestCount(limitRequestsData?.pending_count || 0);
-        setLibraryEntries(libraryData?.entries || []);
+        setLibraryEntries(libraryData?.library || []);
         setAnnouncements(announcementsData?.announcements || []);
       } catch (error) {
         console.error('Failed to fetch admin data:', error);
@@ -395,7 +392,7 @@ export default function AdminPage() {
       setMessage({ type: 'success', text: 'Default config saved' });
     } catch (error) {
       console.error('Failed to save config:', error);
-      setMessage({ type: 'error', text: 'Failed to save config' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to save config') });
     } finally {
       setSaving(false);
     }
@@ -410,19 +407,19 @@ export default function AdminPage() {
         newFeatured.list_name,
         newFeatured.description,
       );
-      setFeatured([...featured, result]);
+      setFeatured([...featured, result.featured]);
       setNewFeatured({ username: '', list_name: '', description: '' });
       setMessage({ type: 'success', text: 'Featured list added' });
     } catch (error) {
       console.error('Failed to add featured list:', error);
-      setMessage({ type: 'error', text: 'Failed to add featured list' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to add featured list') });
     }
   };
 
   const handleRemoveFeatured = async (id: string) => {
     try {
       await adminApi.removeFeaturedList(id);
-      setFeatured(featured.filter((f) => f._id !== id));
+      setFeatured(featured.filter((f) => f.id !== id));
       setMessage({ type: 'success', text: 'Featured list removed' });
     } catch (error) {
       console.error('Failed to remove featured list:', error);
@@ -523,7 +520,7 @@ export default function AdminPage() {
         title: newAnnouncement.title,
         message: newAnnouncement.message,
         type: newAnnouncement.type,
-        expires_at: newAnnouncement.expires_at || null,
+        expires_at: localInputToUtcIso(newAnnouncement.expires_at),
       });
       setAnnouncements([result.announcement, ...announcements]);
       setNewAnnouncement({ title: '', message: '', type: 'info', expires_at: '' });
@@ -543,7 +540,7 @@ export default function AdminPage() {
         message: editingAnnouncement.message,
         type: editingAnnouncement.type,
         is_active: editingAnnouncement.is_active,
-        expires_at: editExpiresAt || null,
+        expires_at: localInputToUtcIso(editExpiresAt),
       });
       setAnnouncements(
         announcements.map((a) => (a.id === editingAnnouncement.id ? result.announcement : a)),
@@ -638,6 +635,7 @@ export default function AdminPage() {
               'default',
               'featured',
               'jobs',
+              'library',
               'announcements',
             ] as TabType[]
           ).map((tab) => (
@@ -747,7 +745,7 @@ export default function AdminPage() {
               <div>
                 <div className="font-semibold text-pihole-text">Manage Users</div>
                 <div className="text-sm text-pihole-text-muted">
-                  {stats?.total_users || 0} registered users
+                  {stats?.users.total || 0} registered users
                 </div>
               </div>
             </button>
@@ -758,47 +756,47 @@ export default function AdminPage() {
             <div className="card">
               <div className="text-sm text-pihole-text-muted mb-1">Total Users</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_users?.toLocaleString() || 0}
+                {stats?.users.total.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
               <div className="text-sm text-pihole-text-muted mb-1">Active Users</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.active_users?.toLocaleString() || 0}
+                {stats?.users.active.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Jobs</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Jobs Today</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_jobs?.toLocaleString() || 0}
+                {stats?.jobs.today.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Domains</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Visitors (30 days)</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_domains?.toLocaleString() || 0}
+                {analytics?.overall.totals.unique_visitors.toLocaleString() || 0}
               </div>
             </div>
             <div className="card">
-              <div className="text-sm text-pihole-text-muted mb-1">Total Requests</div>
+              <div className="text-sm text-pihole-text-muted mb-1">Requests (30 days)</div>
               <div className="text-2xl font-bold text-pihole-text">
-                {stats?.total_requests?.toLocaleString() || 0}
+                {analytics?.overall.totals.requests.toLocaleString() || 0}
               </div>
             </div>
           </div>
 
           {/* Charts - Row 1: Requests & Geographic */}
           <div className="grid md:grid-cols-2 gap-6">
-            {(analytics?.requests_over_time?.length ?? 0) > 0 && analytics && (
+            {analytics && analytics.overall.totals.requests > 0 && (
               <div className="card">
                 <h3 className="font-semibold text-pihole-text mb-4">Requests (30 days)</h3>
                 <div className="h-48">
                   <Line
                     data={{
-                      labels: analytics.requests_over_time.map((d) => d.date),
+                      labels: analytics.overall.daily.map((d) => d.date),
                       datasets: [
                         {
-                          data: analytics.requests_over_time.map((d) => d.count),
+                          data: analytics.overall.daily.map((d) => d.requests),
                           borderColor: '#d93025',
                           backgroundColor: 'rgba(217, 48, 37, 0.1)',
                           fill: true,
@@ -811,16 +809,16 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
-            {Object.keys(analytics?.geo_distribution || {}).length > 0 && (
+            {analytics && analytics.overall.top_countries.length > 0 && (
               <div className="card">
                 <h3 className="font-semibold text-pihole-text mb-4">Top Countries</h3>
                 <div className="h-48">
                   <Bar
                     data={{
-                      labels: Object.keys(analytics!.geo_distribution).slice(0, 10),
+                      labels: analytics.overall.top_countries.slice(0, 10).map((c) => c.code),
                       datasets: [
                         {
-                          data: Object.values(analytics!.geo_distribution).slice(0, 10),
+                          data: analytics.overall.top_countries.slice(0, 10).map((c) => c.requests),
                           backgroundColor: '#d93025',
                           borderRadius: 4,
                         },
@@ -1355,7 +1353,7 @@ export default function AdminPage() {
               <div className="space-y-3">
                 {featured.map((f) => (
                   <div
-                    key={f._id}
+                    key={f.id}
                     className="flex items-center justify-between p-4 bg-pihole-darkest rounded-lg"
                   >
                     <div>
@@ -1367,7 +1365,7 @@ export default function AdminPage() {
                       )}
                     </div>
                     <button
-                      onClick={() => handleRemoveFeatured(f._id)}
+                      onClick={() => handleRemoveFeatured(f.id)}
                       className="btn btn-ghost text-sm text-red-400"
                     >
                       Remove
@@ -1411,7 +1409,7 @@ export default function AdminPage() {
                     <JobList
                       jobs={jobs}
                       selectedJobId={selectedJob?.job_id || null}
-                      onSelectJob={setSelectedJob}
+                      onSelectJob={(job) => setSelectedJobId(job.job_id)}
                       showUsername={true}
                     />
                   </div>
@@ -1422,6 +1420,7 @@ export default function AdminPage() {
               <div className="md:col-span-2">
                 {selectedJob ? (
                   <JobDetailView
+                    key={selectedJob.job_id}
                     job={selectedJob}
                     sources={selectedJobSources}
                     whitelist={selectedJobWhitelist}
@@ -1945,9 +1944,7 @@ export default function AdminPage() {
                           <button
                             onClick={() => {
                               setEditingAnnouncement(announcement);
-                              setEditExpiresAt(
-                                announcement.expires_at ? announcement.expires_at.slice(0, 16) : '',
-                              );
+                              setEditExpiresAt(utcIsoToLocalInput(announcement.expires_at));
                             }}
                             className="btn btn-ghost text-sm"
                           >
