@@ -83,8 +83,7 @@ impl UserRepository {
 
         // For __default__, update system_config collection
         if username == "__default__" {
-            let system_config: Collection<bson::Document> =
-                self.db.collection("system_config");
+            let system_config: Collection<bson::Document> = self.db.collection("system_config");
             system_config
                 .update_one(
                     doc! { "_id": "default_build" },
@@ -173,8 +172,7 @@ impl UserRepository {
     ) -> Result<Option<MatchedUser>> {
         // First check if __default__ matches (and we're not building for default)
         if exclude_username != "__default__" {
-            let system_config: Collection<bson::Document> =
-                self.db.collection("system_config");
+            let system_config: Collection<bson::Document> = self.db.collection("system_config");
             if let Some(default_build) = system_config
                 .find_one(doc! { "_id": "default_build" })
                 .await?
@@ -185,9 +183,8 @@ impl UserRepository {
                         return Ok(Some(MatchedUser {
                             username: "__default__".to_string(),
                             lists: Vec::new(), // Lists will be computed from files
-                            total_domains: default_build
-                                .get_i64("total_domains")
-                                .unwrap_or(0) as u64,
+                            total_domains: default_build.get_i64("total_domains").unwrap_or(0)
+                                as u64,
                             total_output_size: default_build
                                 .get_i64("total_output_size_bytes")
                                 .unwrap_or(0) as u64,
@@ -211,7 +208,11 @@ impl UserRepository {
             .sort(doc! { "stats.last_build_at": -1 })
             .build();
 
-        let user = self.collection.find_one(filter).with_options(options).await?;
+        let user = self
+            .collection
+            .find_one(filter)
+            .with_options(options)
+            .await?;
 
         if let Some(u) = user {
             let stats = u.stats.unwrap_or(UserStats {

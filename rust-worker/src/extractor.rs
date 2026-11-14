@@ -292,7 +292,10 @@ mod tests {
         let extractor = DomainExtractor::new();
 
         // $third-party rules cannot work at DNS level - skip them
-        assert_eq!(extractor.extract_domain("||facebook.com^$third-party"), None);
+        assert_eq!(
+            extractor.extract_domain("||facebook.com^$third-party"),
+            None
+        );
         assert_eq!(
             extractor.extract_domain("||tracker.com^$third-party,image"),
             None

@@ -60,9 +60,9 @@ async fn run_worker() -> Result<()> {
     // Load .env file from project root (parent directory)
     // Try multiple locations for the .env file
     let env_paths = [
-        Path::new("../.env"),           // If running from rust-worker/
-        Path::new(".env"),              // If running from project root
-        Path::new("../../.env"),        // If running from rust-worker/target/release/
+        Path::new("../.env"),    // If running from rust-worker/
+        Path::new(".env"),       // If running from project root
+        Path::new("../../.env"), // If running from rust-worker/target/release/
     ];
 
     for path in env_paths {
@@ -148,8 +148,13 @@ async fn connect_with_retry(config: &Config) -> Result<Database> {
                 backoff = (backoff * 2).min(max_backoff);
             }
             Err(_) => {
-                error!("MongoDB unreachable after {}s", config.mongo_connect_timeout_secs);
-                return Err(anyhow::anyhow!("Database unavailable during worker startup"));
+                error!(
+                    "MongoDB unreachable after {}s",
+                    config.mongo_connect_timeout_secs
+                );
+                return Err(anyhow::anyhow!(
+                    "Database unavailable during worker startup"
+                ));
             }
         }
     }

@@ -212,7 +212,11 @@ impl JobProgress {
             sources: Vec::new(),
             whitelist: None,
             generation: None,
-            stage_started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+            stage_started_at: Some(
+                chrono::Utc::now()
+                    .format("%Y-%m-%dT%H:%M:%S%.6f")
+                    .to_string(),
+            ),
             stage_snapshots: std::collections::HashMap::new(),
         }
     }
@@ -229,7 +233,11 @@ impl JobProgress {
             patterns: Vec::new(),
             warnings: Vec::new(),
         });
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 
     /// Update to generation stage
@@ -268,14 +276,22 @@ impl JobProgress {
                 },
             ],
         });
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 
     /// Mark as completed
     pub fn to_completed(&mut self) {
         self.current_step = "completed".to_string();
         self.stage = JobStage::Completed;
-        self.stage_started_at = Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+        self.stage_started_at = Some(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+        );
     }
 }
 
