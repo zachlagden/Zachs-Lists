@@ -47,7 +47,10 @@ def test_ensure_indexes_creates_every_named_index_and_is_repeatable(
     }
     assert index_names(database, "cache") == {"url_hash_1"}
     assert index_names(database, "workers") == {"worker_id_1"}
-    assert index_names(database, "limit_requests") == {"user_id_1_status_1"}
+    assert index_names(database, "limit_requests") == {
+        "user_id_1_status_1",
+        "one_pending_request_per_user",
+    }
     assert index_names(database, "validation_tokens") == {"expires_at_1", "user_id_1"}
     assert index_names(database, "blocklist_library") == LIBRARY_INDEXES
 

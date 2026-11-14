@@ -7,6 +7,7 @@ from app.extensions import limiter
 from app.models.analytics import Analytics
 from app.services import download_recorder
 from app.utils.client_ip import get_client_ip
+from app.utils.rate_limits import rate_limit_key
 
 
 @pytest.mark.parametrize(
@@ -28,7 +29,7 @@ def test_global_limits_are_independent_per_visitor(
 
     headers["CF-Connecting-IP"] = "203.0.113.20"
     assert client.get(path, headers=headers, environ_overrides=peer).status_code == 200
-    assert limiter._key_func is get_client_ip
+    assert limiter._key_func is rate_limit_key
 
 
 def test_changing_spoofed_headers_does_not_reset_the_limit(app: Flask) -> None:

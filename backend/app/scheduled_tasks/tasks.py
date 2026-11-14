@@ -8,11 +8,24 @@ Tasks:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+JOB_HISTORY_DAYS = 30
+
+
+def delete_finished_jobs_before(cutoff: datetime) -> int:
+    from app.extensions import mongo
+    from app.models.job import Job
+
+    finished = [Job.STATUS_COMPLETED, Job.STATUS_FAILED, Job.STATUS_SKIPPED]
+    result = mongo.db[Job.COLLECTION].delete_many(
+        {"created_at": {"$lt": cutoff}, "status": {"$in": finished}}
+    )
+    return result.deleted_count
 
 
 def register_scheduled_tasks(app, scheduler):
@@ -101,16 +114,11 @@ def register_scheduled_tasks(app, scheduler):
         """Clean up old job records daily at 4 AM UTC."""
         with app.app_context():
             try:
-                from app.extensions import mongo
-                from datetime import timedelta
+                cutoff = datetime.utcnow() - timedelta(days=JOB_HISTORY_DAYS)
+                deleted = delete_finished_jobs_before(cutoff)
 
-                # Delete jobs older than 30 days
-                cutoff = datetime.utcnow() - timedelta(days=30)
-
-                result = mongo.db.jobs.delete_many({"created_at": {"$lt": cutoff}})
-
-                if result.deleted_count > 0:
-                    logger.info(f"Cleaned up {result.deleted_count} old job records")
+                if deleted > 0:
+                    logger.info(f"Cleaned up {deleted} old job records")
 
             except Exception as e:
                 logger.exception(f"Failed job cleanup: {e}")

@@ -344,7 +344,7 @@ export interface LimitRequest {
   reason: string;
   intended_use: 'personal' | 'family' | 'organization' | 'other';
   current_usage: number;
-  status: 'pending' | 'approved' | 'denied';
+  status: 'pending' | 'approved' | 'denied' | 'superseded';
   approved_limit?: number;
   admin_response?: string;
   reviewed_by?: string;

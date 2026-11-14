@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminApi } from '../api/client';
+import { apiErrorMessage } from '../api/apiError';
+import { localInputToUtcIso, utcIsoToLocalInput } from '../utils/datetimeLocal';
 import { useAuthStore } from '../store';
 import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -62,12 +64,11 @@ interface AdminUser {
 }
 
 interface FeaturedList {
-  _id: string;
+  id: string;
   username: string;
   list_name: string;
   description: string;
-  display_order: number;
-  created_at: string;
+  order: number;
 }
 
 interface LibraryEntry {
@@ -297,7 +298,7 @@ export default function AdminPage() {
           adminApi.getJobsPerDay(30).catch(() => ({ jobs_per_day: [] })),
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
           adminApi.getLimitRequests().catch(() => ({ requests: [], pending_count: 0 })),
-          adminApi.getLibraryEntries().catch(() => ({ entries: [] })),
+          adminApi.getLibraryEntries().catch(() => ({ library: [] })),
           adminApi.getAnnouncements().catch(() => ({ announcements: [] })),
         ]);
 
@@ -311,7 +312,7 @@ export default function AdminPage() {
         setUserGrowth(userGrowthData?.user_growth || []);
         setLimitRequests(limitRequestsData?.requests || []);
         setPendingRequestCount(limitRequestsData?.pending_count || 0);
-        setLibraryEntries(libraryData?.entries || []);
+        setLibraryEntries(libraryData?.library || []);
         setAnnouncements(announcementsData?.announcements || []);
       } catch (error) {
         console.error('Failed to fetch admin data:', error);
@@ -391,7 +392,7 @@ export default function AdminPage() {
       setMessage({ type: 'success', text: 'Default config saved' });
     } catch (error) {
       console.error('Failed to save config:', error);
-      setMessage({ type: 'error', text: 'Failed to save config' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to save config') });
     } finally {
       setSaving(false);
     }
@@ -406,19 +407,19 @@ export default function AdminPage() {
         newFeatured.list_name,
         newFeatured.description,
       );
-      setFeatured([...featured, result]);
+      setFeatured([...featured, result.featured]);
       setNewFeatured({ username: '', list_name: '', description: '' });
       setMessage({ type: 'success', text: 'Featured list added' });
     } catch (error) {
       console.error('Failed to add featured list:', error);
-      setMessage({ type: 'error', text: 'Failed to add featured list' });
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to add featured list') });
     }
   };
 
   const handleRemoveFeatured = async (id: string) => {
     try {
       await adminApi.removeFeaturedList(id);
-      setFeatured(featured.filter((f) => f._id !== id));
+      setFeatured(featured.filter((f) => f.id !== id));
       setMessage({ type: 'success', text: 'Featured list removed' });
     } catch (error) {
       console.error('Failed to remove featured list:', error);
@@ -519,7 +520,7 @@ export default function AdminPage() {
         title: newAnnouncement.title,
         message: newAnnouncement.message,
         type: newAnnouncement.type,
-        expires_at: newAnnouncement.expires_at || null,
+        expires_at: localInputToUtcIso(newAnnouncement.expires_at),
       });
       setAnnouncements([result.announcement, ...announcements]);
       setNewAnnouncement({ title: '', message: '', type: 'info', expires_at: '' });
@@ -539,7 +540,7 @@ export default function AdminPage() {
         message: editingAnnouncement.message,
         type: editingAnnouncement.type,
         is_active: editingAnnouncement.is_active,
-        expires_at: editExpiresAt || null,
+        expires_at: localInputToUtcIso(editExpiresAt),
       });
       setAnnouncements(
         announcements.map((a) => (a.id === editingAnnouncement.id ? result.announcement : a)),
@@ -634,6 +635,7 @@ export default function AdminPage() {
               'default',
               'featured',
               'jobs',
+              'library',
               'announcements',
             ] as TabType[]
           ).map((tab) => (
@@ -1351,7 +1353,7 @@ export default function AdminPage() {
               <div className="space-y-3">
                 {featured.map((f) => (
                   <div
-                    key={f._id}
+                    key={f.id}
                     className="flex items-center justify-between p-4 bg-pihole-darkest rounded-lg"
                   >
                     <div>
@@ -1363,7 +1365,7 @@ export default function AdminPage() {
                       )}
                     </div>
                     <button
-                      onClick={() => handleRemoveFeatured(f._id)}
+                      onClick={() => handleRemoveFeatured(f.id)}
                       className="btn btn-ghost text-sm text-red-400"
                     >
                       Remove
@@ -1942,9 +1944,7 @@ export default function AdminPage() {
                           <button
                             onClick={() => {
                               setEditingAnnouncement(announcement);
-                              setEditExpiresAt(
-                                announcement.expires_at ? announcement.expires_at.slice(0, 16) : '',
-                              );
+                              setEditExpiresAt(utcIsoToLocalInput(announcement.expires_at));
                             }}
                             className="btn btn-ghost text-sm"
                           >

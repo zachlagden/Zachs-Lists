@@ -10,6 +10,7 @@ from pymongo.errors import ConnectionFailure, PyMongoError
 from app.models.analytics import Analytics
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.job import Job
+from app.models.limit_request import LimitRequest
 from app.utils.job_document import revision_bump
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,39 @@ def prepare_active_job_targets(db: Database) -> None:
                 )
 
 
+def prepare_pending_limit_requests(db: Database) -> None:
+    requests = db[LimitRequest.COLLECTION]
+    pending_filter = {"status": LimitRequest.STATUS_PENDING}
+    by_user: dict[Any, list[dict[str, Any]]] = {}
+    for request in requests.find(pending_filter):
+        by_user.setdefault(request.get("user_id"), []).append(request)
+    for user_id, pending in by_user.items():
+        pending.sort(
+            key=lambda request: (
+                request.get("created_at") or datetime.min,
+                request["_id"],
+            ),
+            reverse=True,
+        )
+        for duplicate in pending[1:]:
+            superseded = requests.update_one(
+                {"_id": duplicate["_id"], **pending_filter},
+                {
+                    "$set": {
+                        "status": LimitRequest.STATUS_SUPERSEDED,
+                        "admin_response": "Replaced by a newer request",
+                        "reviewed_at": datetime.utcnow(),
+                    }
+                },
+            )
+            if superseded.modified_count:
+                logger.warning(
+                    "Superseded duplicate pending limit request %s for user %s",
+                    duplicate["_id"],
+                    user_id,
+                )
+
+
 ANALYTICS_RETENTION_SECONDS = Analytics.RETENTION_DAYS * 24 * 60 * 60
 
 INDEXES: tuple[IndexSpec, ...] = (
@@ -111,6 +145,16 @@ INDEXES: tuple[IndexSpec, ...] = (
     IndexSpec("cache", "url_hash_1", (("url_hash", 1),), {"unique": True}),
     IndexSpec("workers", "worker_id_1", (("worker_id", 1),), {"unique": True}),
     IndexSpec("limit_requests", "user_id_1_status_1", (("user_id", 1), ("status", 1))),
+    IndexSpec(
+        LimitRequest.COLLECTION,
+        "one_pending_request_per_user",
+        (("user_id", 1),),
+        {
+            "unique": True,
+            "partialFilterExpression": {"status": LimitRequest.STATUS_PENDING},
+        },
+        prepare_pending_limit_requests,
+    ),
     IndexSpec(
         "validation_tokens",
         "expires_at_1",

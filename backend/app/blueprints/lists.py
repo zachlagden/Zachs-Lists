@@ -10,6 +10,7 @@ from flask import Blueprint, Response, send_file, request, abort, jsonify, curre
 
 from app.models.user import User
 from app.models.analytics import Analytics
+from app.models.featured_list import FeaturedList
 from app.services.download_recorder import record_download
 from app.utils.time import utc_iso
 
@@ -161,7 +162,7 @@ def serve_user_list(username: str, name: str):
 
     # Get user
     user = User.get_by_username(username)
-    if not user or not user.is_enabled:
+    if not user or not user.is_enabled or user.is_banned:
         abort(404)
 
     # Check if list exists and is public
@@ -291,15 +292,11 @@ def list_default_lists():
 @lists_api_bp.route("/browse/featured")
 def get_featured_lists():
     """Get featured community lists."""
-    from app.extensions import mongo
-
-    featured = list(mongo.db.featured_lists.find().sort("display_order", 1))
-
     result = []
-    for f in featured:
-        # Get list info
-        user = User.get_by_username(f.get("username"))
-        if not user or not user.is_enabled:
+    for entry in FeaturedList.all_ordered():
+        f = entry.to_dict()
+        user = User.get_by_username(entry.username)
+        if not user or not user.is_enabled or user.is_banned:
             continue
 
         list_info = user.get_list(f.get("list_name"))
@@ -308,43 +305,10 @@ def get_featured_lists():
 
         result.append(
             {
-                "id": str(f["_id"]),
-                "username": f.get("username"),
-                "list_name": f.get("list_name"),
-                "description": f.get("description", ""),
+                **f,
                 "domain_count": list_info.get("domain_count", 0),
                 "last_updated": utc_iso(list_info.get("last_updated")),
-                "display_order": f.get("display_order", 0),
             }
         )
 
     return jsonify(result)
-
-
-@lists_api_bp.route("/browse/community")
-def get_community_lists():
-    """Get all public community lists."""
-    from app.extensions import mongo
-
-    # Get all enabled users with lists
-    users = list(
-        mongo.db.users.find({"is_enabled": True, "lists": {"$exists": True, "$ne": []}})
-    )
-
-    result = []
-    for u in users:
-        username = u.get("username")
-        for list_info in u.get("lists", []):
-            result.append(
-                {
-                    "username": username,
-                    "name": list_info.get("name"),
-                    "domain_count": list_info.get("domain_count", 0),
-                    "last_updated": utc_iso(list_info.get("last_updated")),
-                }
-            )
-
-    # Sort by domain count (most popular first)
-    result.sort(key=lambda x: x.get("domain_count", 0), reverse=True)
-
-    return jsonify(result[:100])  # Limit to 100

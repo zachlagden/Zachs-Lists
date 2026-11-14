@@ -45,14 +45,16 @@ export default function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleLogout = async () => {
+    let destination = '/';
     try {
       await authApi.logout();
-      disconnectSocket();
-      logout();
-      window.location.href = '/';
     } catch (error) {
       console.error('Logout failed:', error);
+      destination = '/login?error=logout_failed';
     }
+    disconnectSocket();
+    logout();
+    window.location.href = destination;
   };
 
   return (
@@ -162,8 +164,8 @@ export default function Layout({ children }: LayoutProps) {
             role="status"
             className="bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 px-8 py-2 text-sm"
           >
-            {connectionState === 'offline' ? 'Connection lost.' : 'Reconnecting.'} Live updates
-            are paused. This page will catch up when the connection is back.
+            {connectionState === 'offline' ? 'Connection lost.' : 'Reconnecting.'} Live updates are
+            paused. This page will catch up when the connection is back.
           </div>
         )}
         <div className="p-8">
