@@ -20,7 +20,12 @@ DEFAULT_TARGET = Job.DEFAULT_TARGET_ID
 JOB_TYPES = (Job.TYPE_MANUAL, Job.TYPE_SCHEDULED, Job.TYPE_ADMIN)
 MANUAL_COOLDOWN_MINUTES = 5
 RECENT_MANUAL_BUILD_MINUTES = 30
-REFUNDABLE_ERROR_CODES = ("internal", Job.ERROR_WORKER_ABANDONED, Job.ERROR_SUPERSEDED)
+REFUNDABLE_ERROR_CODES = (
+    "internal",
+    "all_sources_failed",
+    Job.ERROR_WORKER_ABANDONED,
+    Job.ERROR_SUPERSEDED,
+)
 EPOCH = datetime(1970, 1, 1)
 
 
@@ -55,15 +60,7 @@ def refund_quota_if_due(job_id: str) -> bool:
     job = mongo.db[Job.COLLECTION].find_one_and_update(
         {
             "job_id": job_id,
-            "quota_charged": True,
-            "quota_refunded": {"$ne": True},
-            "$or": [
-                {"status": Job.STATUS_SKIPPED},
-                {
-                    "status": Job.STATUS_FAILED,
-                    "result.error_code": {"$in": list(REFUNDABLE_ERROR_CODES)},
-                },
-            ],
+            **_refund_due(),
         },
         {"$set": {"quota_refunded": True}, **revision_bump()},
     )
@@ -76,6 +73,28 @@ def refund_quota_if_due(job_id: str) -> bool:
         "applied" if refunded else "not applied, the charged week has ended",
     )
     return refunded
+
+
+def refund_missed_quota() -> int:
+    current_week = week_start(datetime.utcnow())
+    missed = mongo.db[Job.COLLECTION].find(
+        {"created_at": {"$gte": current_week}, **_refund_due()}, {"job_id": 1}
+    )
+    return sum(1 for job in list(missed) if refund_quota_if_due(job["job_id"]))
+
+
+def _refund_due() -> dict[str, Any]:
+    return {
+        "quota_charged": True,
+        "quota_refunded": {"$ne": True},
+        "$or": [
+            {"status": Job.STATUS_SKIPPED},
+            {
+                "status": Job.STATUS_FAILED,
+                "result.error_code": {"$in": list(REFUNDABLE_ERROR_CODES)},
+            },
+        ],
+    }
 
 
 def queue_scheduled_user_builds() -> tuple[int, int]:
@@ -332,17 +351,7 @@ def _insert_job(
         raise
     document["_id"] = inserted.inserted_id
     job = Job(document)
-    _announce(job)
     logger.info(
         "Admitted %s build %s for %s", job.job_type, job.job_id, document["target_id"]
     )
     return job
-
-
-def _announce(job: Job) -> None:
-    from app.socketio import emit_job_created
-
-    try:
-        emit_job_created(job.to_dict(), str(job.user_id) if job.user_id else None)
-    except Exception:
-        logger.exception("Could not announce job %s over Socket.IO", job.job_id)

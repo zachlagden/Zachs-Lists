@@ -21,7 +21,7 @@ jobs:
       - run: uv run --no-project pytest backend/tests --disable-warnings
         env:
           PYTHONPATH: backend
-      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/app/models/cache.py backend/app/services/cache_manager.py backend/app/scheduled_tasks/tasks.py backend/app/services/build_admission.py backend/app/config.py backend/app/utils/__init__.py backend/app/utils/job_document.py backend/scripts/audit_whitelists.py backend/tests
+      - run: uv run --no-project mypy --implicit-optional --ignore-missing-imports --follow-imports=silent backend/app/utils/safe_http.py backend/app/utils/validators.py backend/app/utils/api_input.py backend/app/models/user.py backend/app/blueprints/user.py backend/app/socketio.py backend/app/db_indexes.py backend/app/utils/time.py backend/app/models/cache.py backend/app/services/cache_manager.py backend/app/scheduled_tasks/tasks.py backend/app/services/build_admission.py backend/app/config.py backend/app/utils/__init__.py backend/app/utils/job_document.py backend/app/services/job_poller.py backend/app/services/job_feed.py backend/scripts/audit_whitelists.py backend/tests
         env:
           PYTHONPATH: backend
   frontend:

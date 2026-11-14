@@ -15,6 +15,7 @@ from app.models.system_config import SystemConfig
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
 from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
+from app.services.job_feed import job_payload, job_payloads
 from app.utils.time import utc_iso
 
 admin_bp = Blueprint("admin", __name__)
@@ -320,7 +321,7 @@ def list_all_jobs(admin: User):
     limit = request.args.get("limit", 50, type=int)
     jobs = Job.get_recent(limit=limit)
 
-    return jsonify({"jobs": [j.to_dict() for j in jobs]})
+    return jsonify({"jobs": job_payloads(jobs)})
 
 
 @admin_bp.route("/jobs/<job_id>", methods=["GET"])
@@ -331,7 +332,7 @@ def get_admin_job(admin: User, job_id: str):
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
-    return jsonify(job.to_dict())
+    return jsonify(job_payload(job))
 
 
 @admin_bp.route("/stats", methods=["GET"])
