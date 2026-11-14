@@ -39,9 +39,11 @@ supervise_worker() {
 shutdown() {
   touch "$STOP_FILE"
 
+  local worker_pids=()
   for pid_file in "$RUN_DIR"/worker-*.pid; do
     [ -f "$pid_file" ] || continue
-    kill "$(cat "$pid_file")" 2>/dev/null
+    worker_pids+=("$(cat "$pid_file")")
+    kill "${worker_pids[-1]}" 2>/dev/null
   done
 
   for pid in "${SUPERVISOR_PIDS[@]}"; do
@@ -52,6 +54,12 @@ shutdown() {
     kill -TERM "$GUNICORN_PID" 2>/dev/null
     wait "$GUNICORN_PID" 2>/dev/null
   fi
+
+  for pid in "${worker_pids[@]}"; do
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 0.1
+    done
+  done
 
   exit 0
 }
