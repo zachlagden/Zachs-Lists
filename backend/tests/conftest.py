@@ -12,6 +12,7 @@ from app.config import TestingConfig
 from app.extensions import limiter
 from app.models.analytics import Analytics
 from app.models.user import User
+from app.services import download_recorder, site_stats
 from app.utils import client_ip
 
 
@@ -50,8 +51,10 @@ def app(
     monkeypatch.setattr(
         lists, "serve_list_file", Mock(side_effect=lambda _: Response("example.com\n"))
     )
-    monkeypatch.setattr(Analytics, "record_request", Mock())
-    monkeypatch.setattr(lists, "get_geo_data", Mock(return_value=(None, None)))
+    monkeypatch.setattr(Analytics, "record_download", Mock())
+    download_recorder.failures.reset()
+    download_recorder.database_pause.reset()
+    site_stats.clear_caches()
     with application.app_context():
         limiter.reset()
     yield application

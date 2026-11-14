@@ -4,14 +4,13 @@ Lists blueprint - serve public blocklists.
 
 import os
 import gzip
-import hashlib
 from io import BytesIO
 from datetime import datetime, timezone
 from flask import Blueprint, Response, send_file, request, abort, jsonify, current_app
 
 from app.models.user import User
 from app.models.analytics import Analytics
-from app.utils.client_ip import get_client_ip
+from app.services.download_recorder import record_download
 from app.utils.time import utc_iso
 
 # Two blueprints: one for public file serving (no prefix), one for API metadata (with /api prefix)
@@ -21,58 +20,6 @@ lists_public_bp = Blueprint(
 lists_api_bp = Blueprint(
     "lists_api", __name__
 )  # Handles /api/lists and /api/browse metadata
-
-
-def hash_ip(ip: str) -> str:
-    """Hash IP for privacy."""
-    return hashlib.sha256(ip.encode()).hexdigest()[:16]
-
-
-def get_geo_data(ip: str) -> tuple:
-    """Get geographic data for IP using GeoLite2."""
-    try:
-        import geoip2.database
-
-        db_path = current_app.config.get("GEOIP_DATABASE_PATH")
-        if not db_path or not os.path.exists(db_path):
-            return None, None
-
-        with geoip2.database.Reader(db_path) as reader:
-            response = reader.city(ip)
-            country = response.country.iso_code
-            city = response.city.name
-            return country, city
-    except Exception:
-        return None, None
-
-
-def record_analytics(
-    list_type: str,
-    list_name: str,
-    username: str | None,
-    format_type: str,
-    file_size: int,
-) -> None:
-    """Record analytics for a list request."""
-    try:
-        ip = get_client_ip()
-        ip_hash = hash_ip(ip)
-        country, city = get_geo_data(ip)
-        referrer = request.headers.get("Referer", "")
-
-        Analytics.record_request(
-            list_type=list_type,
-            list_name=list_name,
-            username=username,
-            format_type=format_type,
-            ip_hash=ip_hash,
-            country=country,
-            city=city,
-            referrer=referrer[:200] if referrer else None,  # Limit referrer length
-            size_bytes=file_size,
-        )
-    except Exception as e:
-        current_app.logger.error(f"Failed to record analytics: {e}")
 
 
 def serve_list_file(output_path: str) -> Response:
@@ -181,12 +128,12 @@ def serve_default_list(name: str):
     file_size = get_list_file_size(output_path)
 
     # Record analytics
-    record_analytics(
+    record_download(
         list_type=Analytics.TYPE_DEFAULT,
         list_name=name,
         username=None,
         format_type=format_type,
-        file_size=file_size,
+        size_bytes=file_size,
     )
 
     # Serve file with gzip support
@@ -238,12 +185,12 @@ def serve_user_list(username: str, name: str):
     file_size = get_list_file_size(output_path)
 
     # Record analytics
-    record_analytics(
+    record_download(
         list_type=Analytics.TYPE_USER,
         list_name=name,
         username=username,
         format_type=format_type,
-        file_size=file_size,
+        size_bytes=file_size,
     )
 
     # Serve file with gzip support

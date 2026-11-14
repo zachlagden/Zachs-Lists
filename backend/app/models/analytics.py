@@ -1,379 +1,403 @@
-"""
-Analytics model for MongoDB.
-"""
+import re
+from collections.abc import Iterator, Mapping
+from datetime import datetime, timedelta, timezone
+from itertools import product
+from typing import Any
+from urllib.parse import urlsplit
 
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 
 from app.extensions import mongo
 
+NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,100}")
+VISITOR_PATTERN = re.compile(r"[0-9a-f]{16,64}")
+COUNTRY_PATTERN = re.compile(r"[A-Z]{2}")
+REFERRER_HOST_PATTERN = re.compile(r"[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?")
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+KEY_ESCAPES = ((".", "．"), ("$", "＄"))
+REFERRER_DOT = ","
+OTHER = ""
+
 
 class Analytics:
-    """Analytics model for tracking list access statistics."""
-
     COLLECTION = "analytics"
+    VISITORS_COLLECTION = "analytics_visitors"
 
-    # List types
     TYPE_DEFAULT = "default"
     TYPE_USER = "user"
+    LIST_TYPES = (TYPE_DEFAULT, TYPE_USER)
 
-    def __init__(self, data: Dict[str, Any]):
-        self._data = data
-        self._id = data.get("_id")
+    SCHEMA_VERSION = 2
+    RETENTION_DAYS = 90
+    FORMATS = ("hosts", "plain", "adblock")
+    UNKNOWN_COUNTRY = "ZZ"
+    MAX_CITIES_PER_DAY = 50
+    MAX_REFERRERS_PER_DAY = 20
+    MAX_CITY_LENGTH = 60
+    TOP_LIMIT = 20
 
-    @property
-    def id(self) -> str:
-        return str(self._id) if self._id else None
+    @staticmethod
+    def today() -> datetime:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    @property
-    def list_type(self) -> str:
-        return self._data.get("list_type")
-
-    @property
-    def list_name(self) -> str:
-        return self._data.get("list_name")
-
-    @property
-    def username(self) -> Optional[str]:
-        return self._data.get("username")
-
-    @property
-    def date(self) -> datetime:
-        return self._data.get("date")
-
-    @property
-    def requests(self) -> int:
-        return self._data.get("requests", 0)
-
-    @property
-    def unique_ips(self) -> int:
-        return self._data.get("unique_ips", 0)
-
-    @property
-    def formats(self) -> Dict[str, int]:
-        return self._data.get("formats", {"hosts": 0, "plain": 0, "adblock": 0})
-
-    @property
-    def bandwidth_bytes(self) -> int:
-        return self._data.get("bandwidth_bytes", 0)
-
-    @property
-    def geo(self) -> Dict[str, Dict[str, int]]:
-        return self._data.get("geo", {"countries": {}, "cities": {}})
-
-    @property
-    def hourly_distribution(self) -> List[int]:
-        return self._data.get("hourly_distribution", [0] * 24)
-
-    @property
-    def top_referrers(self) -> List[Dict[str, Any]]:
-        return self._data.get("top_referrers", [])
-
-    # Serialization
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "list_type": self.list_type,
-            "list_name": self.list_name,
-            "username": self.username,
-            "date": self.date.isoformat() if self.date else None,
-            "requests": self.requests,
-            "unique_ips": self.unique_ips,
-            "formats": self.formats,
-            "bandwidth_bytes": self.bandwidth_bytes,
-            "geo": self.geo,
-            "hourly_distribution": self.hourly_distribution,
-            "top_referrers": self.top_referrers,
-        }
-
-    # Class methods for recording analytics
     @classmethod
-    def record_request(
+    def clamp_days(cls, days: int | None) -> int:
+        if days is None:
+            return 30
+        return max(1, min(days, cls.RETENTION_DAYS))
+
+    @classmethod
+    def bucket_id(
+        cls, list_type: str, username: str | None, list_name: str, day: datetime
+    ) -> str:
+        return (
+            f"v{cls.SCHEMA_VERSION}:{list_type}:{username or ''}:{list_name}"
+            f":{day:%Y-%m-%d}"
+        )
+
+    @classmethod
+    def country_key(cls, country: str | None) -> str:
+        if country and COUNTRY_PATTERN.fullmatch(country.upper()):
+            return country.upper()
+        return cls.UNKNOWN_COUNTRY
+
+    @classmethod
+    def city_key(cls, country: str | None, city: str | None) -> str | None:
+        if not city:
+            return None
+        name = CONTROL_CHARACTERS.sub(" ", city).strip()[: cls.MAX_CITY_LENGTH]
+        if not name:
+            return None
+        for raw, escaped in KEY_ESCAPES:
+            name = name.replace(raw, escaped)
+        return f"{cls.country_key(country)}:{name}"
+
+    @staticmethod
+    def referrer_key(referrer: str | None) -> str | None:
+        if not referrer:
+            return None
+        try:
+            host = urlsplit(referrer.strip()).hostname
+        except ValueError:
+            return None
+        if not host or not REFERRER_HOST_PATTERN.fullmatch(host):
+            return None
+        return host.replace(".", REFERRER_DOT)
+
+    @classmethod
+    def record_download(
         cls,
         list_type: str,
         list_name: str,
-        username: str = None,
-        format_type: str = "hosts",
-        ip_hash: str = None,
-        country: str = None,
-        city: str = None,
-        referrer: str = None,
+        username: str | None,
+        format_type: str,
+        visitor_hash: str | None = None,
+        country: str | None = None,
+        city: str | None = None,
+        referrer: str | None = None,
         size_bytes: int = 0,
+        now: datetime | None = None,
     ) -> None:
-        """Record a list request."""
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        hour = datetime.utcnow().hour
+        if list_type not in cls.LIST_TYPES:
+            raise ValueError(f"Unknown list type: {list_type!r}")
+        if not NAME_PATTERN.fullmatch(list_name):
+            raise ValueError(f"Invalid list name: {list_name!r}")
+        if username is not None and not NAME_PATTERN.fullmatch(username):
+            raise ValueError(f"Invalid username: {username!r}")
+        if format_type not in cls.FORMATS:
+            raise ValueError(f"Unknown format: {format_type!r}")
+        if visitor_hash is not None and not VISITOR_PATTERN.fullmatch(visitor_hash):
+            raise ValueError("Visitor hash must be lowercase hexadecimal")
 
-        # Build update operations
-        update = {
-            "$inc": {
-                "requests": 1,
-                f"formats.{format_type}": 1,
-                "bandwidth_bytes": size_bytes,
-                f"hourly_distribution.{hour}": 1,
-            },
-            "$setOnInsert": {
-                "list_type": list_type,
-                "list_name": list_name,
-                "username": username,
-                "date": today,
-                "unique_ips": 0,
-                "ip_hashes": [],
-                "top_referrers": [],
-            },
+        moment = now or datetime.now(timezone.utc).replace(tzinfo=None)
+        day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        bucket_id = cls.bucket_id(list_type, username, list_name, day)
+        identity = {
+            "list_type": list_type,
+            "username": username,
+            "list_name": list_name,
+            "date": day,
         }
 
-        # Track unique IPs
-        if ip_hash:
-            update["$addToSet"] = {"ip_hashes": ip_hash}
+        if visitor_hash is not None:
+            cls._record_visitor(bucket_id, identity, visitor_hash)
 
-        # Track geo data
-        if country:
-            update["$inc"][f"geo.countries.{country}"] = 1
-        if city:
-            update["$inc"][f"geo.cities.{city}"] = 1
-
-        # Upsert the document
-        mongo.db[cls.COLLECTION].update_one(
-            {
-                "list_type": list_type,
-                "list_name": list_name,
-                "username": username,
-                "date": today,
-            },
-            update,
-            upsert=True,
-        )
-
-        # Update unique IP count (separate operation to count array length)
-        if ip_hash:
-            mongo.db[cls.COLLECTION].update_one(
-                {
-                    "list_type": list_type,
-                    "list_name": list_name,
-                    "username": username,
-                    "date": today,
-                },
-                [{"$set": {"unique_ips": {"$size": {"$ifNull": ["$ip_hashes", []]}}}}],
+        increments = {
+            "requests": 1,
+            "bandwidth_bytes": max(size_bytes, 0),
+            f"formats.{format_type}": 1,
+            f"hours.h{moment.hour:02d}": 1,
+            f"countries.{cls.country_key(country)}": 1,
+        }
+        created = {"schema_version": cls.SCHEMA_VERSION, **identity}
+        city_choices = cls._choices(cls.city_key(country, city))
+        referrer_choices = cls._choices(cls.referrer_key(referrer))
+        collection = mongo.db[cls.COLLECTION]
+        for city_choice, referrer_choice in product(city_choices, referrer_choices):
+            query, update = cls._day_update(
+                bucket_id, increments, created, city_choice, referrer_choice
             )
-
-        # Track referrers (update top 10)
-        if referrer:
-            cls._update_referrer(list_type, list_name, username, today, referrer)
+            try:
+                collection.update_one(query, update, upsert=True)
+                return
+            except DuplicateKeyError:
+                if collection.update_one(query, update).matched_count:
+                    return
+        raise RuntimeError(f"Day document {bucket_id} matched no update")
 
     @classmethod
-    def _update_referrer(
-        cls,
-        list_type: str,
-        list_name: str,
-        username: str,
-        date: datetime,
-        referrer: str,
+    def _record_visitor(
+        cls, bucket_id: str, identity: Mapping[str, Any], visitor_hash: str
     ) -> None:
-        """Update top referrers list."""
-        # Get current document
-        doc = mongo.db[cls.COLLECTION].find_one(
-            {
-                "list_type": list_type,
-                "list_name": list_name,
-                "username": username,
-                "date": date,
-            }
-        )
-
-        if not doc:
+        try:
+            mongo.db[cls.VISITORS_COLLECTION].insert_one(
+                {
+                    "_id": f"{bucket_id}:{visitor_hash}",
+                    **identity,
+                    "visitor": visitor_hash,
+                }
+            )
+        except DuplicateKeyError:
             return
 
-        referrers = doc.get("top_referrers", [])
+    @staticmethod
+    def _choices(key: str | None) -> tuple[str | None, ...]:
+        return (None,) if key is None else (key, OTHER)
 
-        # Find existing referrer
-        found = False
-        for ref in referrers:
-            if ref.get("url") == referrer:
-                ref["count"] += 1
-                found = True
-                break
+    @classmethod
+    def _day_update(
+        cls,
+        bucket_id: str,
+        increments: Mapping[str, int],
+        created: Mapping[str, Any],
+        city_choice: str | None,
+        referrer_choice: str | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        inc = dict(increments)
+        add_to_set: dict[str, str] = {}
+        conditions: list[dict[str, Any]] = []
+        for field, choice, limit in (
+            ("cities", city_choice, cls.MAX_CITIES_PER_DAY),
+            ("referrers", referrer_choice, cls.MAX_REFERRERS_PER_DAY),
+        ):
+            if choice is None:
+                continue
+            if choice == OTHER:
+                inc[f"{field}_other"] = 1
+                continue
+            inc[f"{field}.{choice}"] = 1
+            add_to_set[f"{field}_keys"] = choice
+            conditions.append(
+                {
+                    "$or": [
+                        {f"{field}_keys": choice},
+                        {f"{field}_keys.{limit - 1}": {"$exists": False}},
+                    ]
+                }
+            )
+        query: dict[str, Any] = {"_id": bucket_id}
+        if conditions:
+            query["$and"] = conditions
+        update: dict[str, Any] = {"$inc": inc, "$setOnInsert": dict(created)}
+        if add_to_set:
+            update["$addToSet"] = add_to_set
+        return query, update
 
-        if not found:
-            referrers.append({"url": referrer, "count": 1})
+    @classmethod
+    def _scope(
+        cls,
+        days: int,
+        list_type: str | None,
+        username: str | None,
+        list_name: str | None,
+    ) -> tuple[dict[str, Any], list[datetime]]:
+        today = cls.today()
+        period = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+        match: dict[str, Any] = {"date": {"$gte": period[0], "$lte": today}}
+        if list_type is not None:
+            match["list_type"] = list_type
+        if username is not None:
+            match["username"] = username
+        if list_name is not None:
+            match["list_name"] = list_name
+        return match, period
 
-        # Sort and keep top 10
-        referrers.sort(key=lambda x: x["count"], reverse=True)
-        referrers = referrers[:10]
+    @classmethod
+    def report(
+        cls,
+        days: int,
+        list_type: str | None = None,
+        username: str | None = None,
+        list_name: str | None = None,
+    ) -> dict[str, Any]:
+        match, period = cls._scope(days, list_type, username, list_name)
+        daily = {
+            day: {"requests": 0, "unique_visitors": 0, "bandwidth_bytes": 0}
+            for day in period
+        }
+        formats = dict.fromkeys(cls.FORMATS, 0)
+        hourly = [0] * 24
+        countries: dict[str, int] = {}
+        cities: dict[str, int] = {}
+        referrers: dict[str, int] = {}
 
-        mongo.db[cls.COLLECTION].update_one(
+        documents = mongo.db[cls.COLLECTION].find(
+            {**match, "schema_version": cls.SCHEMA_VERSION},
             {
-                "list_type": list_type,
-                "list_name": list_name,
-                "username": username,
-                "date": date,
+                "date": 1,
+                "requests": 1,
+                "bandwidth_bytes": 1,
+                "formats": 1,
+                "hours": 1,
+                "countries": 1,
+                "cities": 1,
+                "referrers": 1,
             },
-            {"$set": {"top_referrers": referrers}},
         )
+        for document in documents:
+            entry = daily.get(document.get("date"))
+            if entry is None:
+                continue
+            entry["requests"] += _count(document.get("requests"))
+            entry["bandwidth_bytes"] += _count(document.get("bandwidth_bytes"))
+            for name, count in _counts(document.get("formats")):
+                if name in formats:
+                    formats[name] += count
+            for name, count in _counts(document.get("hours")):
+                if re.fullmatch(r"h([01][0-9]|2[0-3])", name):
+                    hourly[int(name[1:])] += count
+            for target, field in (
+                (countries, "countries"),
+                (cities, "cities"),
+                (referrers, "referrers"),
+            ):
+                for name, count in _counts(document.get(field)):
+                    target[name] = target.get(name, 0) + count
 
-    @classmethod
-    def get_stats(
-        cls,
-        list_type: str = None,
-        list_name: str = None,
-        username: str = None,
-        days: int = 30,
-    ) -> Dict[str, Any]:
-        """Get aggregated statistics for a time period."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-        match = {"date": {"$gte": cutoff}}
-        if list_type:
-            match["list_type"] = list_type
-        if list_name:
-            match["list_name"] = list_name
-        if username:
-            match["username"] = username
-
-        pipeline = [
-            {"$match": match},
-            {
-                "$group": {
-                    "_id": None,
-                    "total_requests": {"$sum": "$requests"},
-                    "total_unique_ips": {"$sum": "$unique_ips"},
-                    "total_bandwidth": {"$sum": "$bandwidth_bytes"},
-                    "hosts_requests": {"$sum": "$formats.hosts"},
-                    "plain_requests": {"$sum": "$formats.plain"},
-                    "adblock_requests": {"$sum": "$formats.adblock"},
-                }
-            },
-        ]
-
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-
-        if not result:
-            return {
-                "total_requests": 0,
-                "total_unique_ips": 0,
-                "total_bandwidth": 0,
-                "formats": {"hosts": 0, "plain": 0, "adblock": 0},
-            }
-
-        data = result[0]
-        return {
-            "total_requests": data.get("total_requests", 0),
-            "total_unique_ips": data.get("total_unique_ips", 0),
-            "total_bandwidth": data.get("total_bandwidth", 0),
-            "formats": {
-                "hosts": data.get("hosts_requests", 0),
-                "plain": data.get("plain_requests", 0),
-                "adblock": data.get("adblock_requests", 0),
-            },
-        }
-
-    @classmethod
-    def get_daily_stats(
-        cls,
-        list_type: str = None,
-        list_name: str = None,
-        username: str = None,
-        days: int = 30,
-    ) -> List[Dict[str, Any]]:
-        """Get daily statistics for charting."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-        match = {"date": {"$gte": cutoff}}
-        if list_type:
-            match["list_type"] = list_type
-        if list_name:
-            match["list_name"] = list_name
-        if username:
-            match["username"] = username
-
-        pipeline = [
-            {"$match": match},
-            {
-                "$group": {
-                    "_id": "$date",
-                    "requests": {"$sum": "$requests"},
-                    "unique_ips": {"$sum": "$unique_ips"},
-                    "bandwidth": {"$sum": "$bandwidth_bytes"},
-                }
-            },
-            {"$sort": {"_id": 1}},
-        ]
-
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-
-        return [
-            {
-                "date": item["_id"].isoformat(),
-                "requests": item["requests"],
-                "unique_ips": item["unique_ips"],
-                "bandwidth": item["bandwidth"],
-            }
-            for item in result
-        ]
-
-    @classmethod
-    def get_geo_stats(
-        cls,
-        list_type: str = None,
-        list_name: str = None,
-        username: str = None,
-        days: int = 30,
-    ) -> Dict[str, Dict[str, int]]:
-        """Get geographic distribution statistics."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-        match = {"date": {"$gte": cutoff}}
-        if list_type:
-            match["list_type"] = list_type
-        if list_name:
-            match["list_name"] = list_name
-        if username:
-            match["username"] = username
-
-        # Aggregate country data
-        pipeline = [
-            {"$match": match},
-            {"$project": {"countries": {"$objectToArray": "$geo.countries"}}},
-            {"$unwind": "$countries"},
-            {
-                "$group": {
-                    "_id": "$countries.k",
-                    "count": {"$sum": "$countries.v"},
-                }
-            },
-            {"$sort": {"count": -1}},
-            {"$limit": 20},
-        ]
-
-        countries = {
-            item["_id"]: item["count"]
-            for item in mongo.db[cls.COLLECTION].aggregate(pipeline)
-        }
-
-        return {"countries": countries}
-
-    @classmethod
-    def get_default_list_totals(cls) -> Dict[str, Any]:
-        """Get total statistics for all default lists."""
-        pipeline = [
-            {"$match": {"list_type": cls.TYPE_DEFAULT}},
-            {
-                "$group": {
-                    "_id": None,
-                    "total_requests": {"$sum": "$requests"},
-                    "total_bandwidth": {"$sum": "$bandwidth_bytes"},
-                }
-            },
-        ]
-
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-
-        if not result:
-            return {"total_requests": 0, "total_bandwidth": 0}
+        for day, visitors in cls._daily_unique_visitors(match).items():
+            if day in daily:
+                daily[day]["unique_visitors"] = visitors
 
         return {
-            "total_requests": result[0].get("total_requests", 0),
-            "total_bandwidth": result[0].get("total_bandwidth", 0),
+            "period_days": days,
+            "totals": {
+                "requests": sum(entry["requests"] for entry in daily.values()),
+                "unique_visitors": cls._unique_visitors(match),
+                "bandwidth_bytes": sum(
+                    entry["bandwidth_bytes"] for entry in daily.values()
+                ),
+            },
+            "daily": [
+                {"date": f"{day:%Y-%m-%d}", **entry} for day, entry in daily.items()
+            ],
+            "formats": formats,
+            "hourly": hourly,
+            "top_countries": [
+                {"code": code, "requests": count}
+                for code, count in _top(countries, cls.TOP_LIMIT)
+            ],
+            "top_cities": [
+                _city_entry(key, count) for key, count in _top(cities, cls.TOP_LIMIT)
+            ],
+            "top_referrers": [
+                {"host": key.replace(REFERRER_DOT, "."), "requests": count}
+                for key, count in _top(referrers, cls.TOP_LIMIT)
+            ],
         }
+
+    @classmethod
+    def public_report(cls, days: int) -> dict[str, Any]:
+        report = cls.report(days, list_type=cls.TYPE_DEFAULT)
+        return {
+            name: report[name] for name in ("period_days", "totals", "daily", "formats")
+        }
+
+    @classmethod
+    def admin_report(cls, days: int) -> dict[str, Any]:
+        return {
+            "period_days": days,
+            "overall": cls.report(days),
+            "default_lists": cls.report(days, list_type=cls.TYPE_DEFAULT),
+            "user_lists": cls.report(days, list_type=cls.TYPE_USER),
+        }
+
+    @classmethod
+    def _unique_visitors(cls, match: Mapping[str, Any]) -> int:
+        rows = list(
+            mongo.db[cls.VISITORS_COLLECTION].aggregate(
+                [
+                    {"$match": dict(match)},
+                    {"$group": {"_id": "$visitor"}},
+                    {"$count": "visitors"},
+                ],
+                allowDiskUse=True,
+            )
+        )
+        return _count(rows[0].get("visitors")) if rows else 0
+
+    @classmethod
+    def _daily_unique_visitors(cls, match: Mapping[str, Any]) -> dict[datetime, int]:
+        rows = mongo.db[cls.VISITORS_COLLECTION].aggregate(
+            [
+                {"$match": dict(match)},
+                {"$group": {"_id": {"date": "$date", "visitor": "$visitor"}}},
+                {"$group": {"_id": "$_id.date", "visitors": {"$sum": 1}}},
+            ],
+            allowDiskUse=True,
+        )
+        return {row["_id"]: _count(row.get("visitors")) for row in rows}
+
+    @classmethod
+    def get_default_list_totals(cls) -> dict[str, int]:
+        rows = list(
+            mongo.db[cls.COLLECTION].aggregate(
+                [
+                    {
+                        "$match": {
+                            "list_type": cls.TYPE_DEFAULT,
+                            "schema_version": cls.SCHEMA_VERSION,
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "total_requests": {"$sum": "$requests"},
+                            "total_bandwidth": {"$sum": "$bandwidth_bytes"},
+                        }
+                    },
+                ]
+            )
+        )
+        totals = rows[0] if rows else {}
+        return {
+            "total_requests": _count(totals.get("total_requests")),
+            "total_bandwidth": _count(totals.get("total_bandwidth")),
+            "period_days": cls.RETENTION_DAYS,
+        }
+
+
+def _count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(int(value), 0)
+
+
+def _counts(value: Any) -> Iterator[tuple[str, int]]:
+    if not isinstance(value, dict):
+        return
+    for name, count in value.items():
+        if isinstance(name, str):
+            yield name, _count(count)
+
+
+def _top(counts: Mapping[str, int], limit: int) -> list[tuple[str, int]]:
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return [item for item in ranked[:limit] if item[1] > 0]
+
+
+def _city_entry(key: str, count: int) -> dict[str, Any]:
+    country, _, name = key.partition(":")
+    for raw, escaped in KEY_ESCAPES:
+        name = name.replace(escaped, raw)
+    return {"country": country, "city": name, "requests": count}
