@@ -3,6 +3,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
+
 /// Result of extracting from a line
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtractionResult {
@@ -58,6 +60,13 @@ impl FormatBreakdown {
 pub struct ExtractionOutput {
     pub results: Vec<ExtractionResult>,
     pub format_breakdown: FormatBreakdown,
+}
+
+#[derive(Default)]
+struct PartialExtraction {
+    results: Vec<ExtractionResult>,
+    format_breakdown: FormatBreakdown,
+    unreported: u64,
 }
 
 /// Detected format of a single line
@@ -169,36 +178,45 @@ impl DomainExtractor {
         None
     }
 
-    /// Extract domains from file content with format breakdown
-    pub fn extract_from_content_with_breakdown(&self, content: &str) -> ExtractionOutput {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        let hosts_count = AtomicU64::new(0);
-        let plain_count = AtomicU64::new(0);
-        let adblock_count = AtomicU64::new(0);
-
-        let results: Vec<ExtractionResult> = content
+    pub fn extract(
+        &self,
+        content: &str,
+        cancellation: &Cancellation,
+        report_extracted: &(dyn Fn(u64) + Send + Sync),
+    ) -> Result<ExtractionOutput, Cancelled> {
+        let merged = content
             .par_lines()
-            .filter_map(|line| {
-                self.extract_domain(line).map(|(result, format)| {
+            .try_fold(PartialExtraction::default, |mut partial, line| {
+                cancellation.check()?;
+                if let Some((result, format)) = self.extract_domain(line) {
                     match format {
-                        DetectedFormat::Hosts => hosts_count.fetch_add(1, Ordering::Relaxed),
-                        DetectedFormat::Plain => plain_count.fetch_add(1, Ordering::Relaxed),
-                        DetectedFormat::Adblock => adblock_count.fetch_add(1, Ordering::Relaxed),
-                    };
-                    result
-                })
+                        DetectedFormat::Hosts => partial.format_breakdown.hosts += 1,
+                        DetectedFormat::Plain => partial.format_breakdown.plain += 1,
+                        DetectedFormat::Adblock => partial.format_breakdown.adblock += 1,
+                    }
+                    partial.results.push(result);
+                    partial.unreported += 1;
+                    if partial.unreported == WORK_GRAIN as u64 {
+                        report_extracted(partial.unreported);
+                        partial.unreported = 0;
+                    }
+                }
+                Ok(partial)
             })
-            .collect();
+            .try_reduce(PartialExtraction::default, |mut left, mut right| {
+                left.results.append(&mut right.results);
+                left.format_breakdown.hosts += right.format_breakdown.hosts;
+                left.format_breakdown.plain += right.format_breakdown.plain;
+                left.format_breakdown.adblock += right.format_breakdown.adblock;
+                left.unreported += right.unreported;
+                Ok(left)
+            })?;
+        report_extracted(merged.unreported);
 
-        ExtractionOutput {
-            results,
-            format_breakdown: FormatBreakdown {
-                hosts: hosts_count.load(Ordering::Relaxed),
-                plain: plain_count.load(Ordering::Relaxed),
-                adblock: adblock_count.load(Ordering::Relaxed),
-            },
-        }
+        Ok(ExtractionOutput {
+            results: merged.results,
+            format_breakdown: merged.format_breakdown,
+        })
     }
 
     /// Sort domains alphabetically (parallel sort)
@@ -412,7 +430,9 @@ mod tests {
                        plain1.com\n\
                        plain2.com";
 
-        let output = extractor.extract_from_content_with_breakdown(content);
+        let output = extractor
+            .extract(content, &Cancellation::default(), &|_| {})
+            .unwrap();
 
         assert_eq!(output.results.len(), 7);
         assert_eq!(output.format_breakdown.hosts, 2);
@@ -439,5 +459,28 @@ mod tests {
 
         breakdown.plain = 300;
         assert_eq!(breakdown.primary_format(), Some("plain"));
+    }
+
+    #[test]
+    fn extraction_reports_every_domain_and_stops_when_cancelled() {
+        let extractor = DomainExtractor::new();
+        let content: String = (0..50_000)
+            .map(|n| format!("0.0.0.0 d{n}.example\n"))
+            .collect();
+        let reported = std::sync::atomic::AtomicU64::new(0);
+        let count = |extracted| {
+            reported.fetch_add(extracted, std::sync::atomic::Ordering::Relaxed);
+        };
+
+        let output = extractor
+            .extract(&content, &Cancellation::default(), &count)
+            .unwrap();
+        assert_eq!(output.results.len(), 50_000);
+        assert_eq!(output.format_breakdown.hosts, 50_000);
+        assert_eq!(reported.into_inner(), 50_000);
+
+        let cancelled = Cancellation::default();
+        cancelled.cancel();
+        assert!(extractor.extract(&content, &cancelled, &|_| {}).is_err());
     }
 }

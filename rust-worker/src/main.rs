@@ -5,11 +5,13 @@ mod downloader;
 mod extractor;
 mod generator;
 mod processor;
+mod progress_tracker;
 mod safe_http;
 #[cfg(test)]
 mod source_cache_test_server;
 #[cfg(test)]
 mod source_contract_tests;
+mod stages;
 #[cfg(test)]
 mod test_support;
 mod whitelist;

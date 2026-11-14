@@ -6,9 +6,65 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use tracing::info;
+use std::path::PathBuf;
+use tracing::{info, warn};
 
-use crate::db::progress::{FormatProgress, FormatStatus, GenerationProgress, OutputFile};
+use crate::cancellation::{Cancellation, WORK_GRAIN};
+use crate::db::progress::OutputFile;
+
+pub const COMBINED_LIST_NAME: &str = "all_domains";
+pub const UNCATEGORIZED_LIST_NAME: &str = "uncategorized";
+const PARTIAL_SUFFIX: &str = ".partial";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GenerationEvent {
+    FileStarted(OutputFormat),
+    DomainsWritten(OutputFormat, u64),
+    FileCompleted { format: OutputFormat, gz_size: u64 },
+}
+
+pub struct GenerationControl<'a> {
+    pub cancellation: &'a Cancellation,
+    pub report: &'a (dyn Fn(GenerationEvent) + Send + Sync),
+}
+
+struct PartialFile {
+    partial_path: PathBuf,
+    final_path: PathBuf,
+    published: bool,
+}
+
+impl PartialFile {
+    fn new(output_dir: &std::path::Path, filename: &str) -> Self {
+        Self {
+            partial_path: output_dir.join(format!(".{filename}{PARTIAL_SUFFIX}")),
+            final_path: output_dir.join(filename),
+            published: false,
+        }
+    }
+
+    fn publish(mut self) -> std::io::Result<u64> {
+        fs::rename(&self.partial_path, &self.final_path)?;
+        self.published = true;
+        Ok(fs::metadata(&self.final_path)?.len())
+    }
+}
+
+impl Drop for PartialFile {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        match fs::remove_file(&self.partial_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => warn!(
+                "Could not remove unfinished output {:?}: {}",
+                self.partial_path, error
+            ),
+        }
+    }
+}
 
 /// Output format types
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,11 +83,11 @@ impl OutputFormat {
         }
     }
 
-    pub fn file_suffix(&self) -> &'static str {
+    pub fn index(&self) -> usize {
         match self {
-            OutputFormat::Hosts => "_hosts.txt.gz",
-            OutputFormat::Plain => "_plain.txt.gz",
-            OutputFormat::Adblock => "_adblock.txt.gz",
+            OutputFormat::Hosts => 0,
+            OutputFormat::Plain => 1,
+            OutputFormat::Adblock => 2,
         }
     }
 
@@ -115,102 +171,46 @@ impl OutputGenerator {
         Ok(())
     }
 
-    /// Generate a single output file (optimized: zero string allocations per domain)
-    #[cfg(test)]
-    pub fn generate_file(
+    fn write_list(
         &self,
+        list_name: &str,
         format: OutputFormat,
         domains: &[String],
         adblock_rules: &HashMap<String, String>,
-        mut progress_callback: impl FnMut(u64, u64),
+        control: &GenerationControl,
     ) -> Result<OutputFile> {
+        control.cancellation.check()?;
         let total_domains = domains.len() as u64;
-        let filename = format!("all_domains{}", format.file_suffix());
-        let output_path = self.output_dir.join(&filename);
+        let filename = format!("{}_{}.txt.gz", list_name, format.as_str());
+        let output = PartialFile::new(&self.output_dir, &filename);
+        (control.report)(GenerationEvent::FileStarted(format));
 
-        // Ensure output directory exists
-        fs::create_dir_all(&self.output_dir)?;
-
-        // Create gzip encoder writing to file with fast compression
-        let file = File::create(&output_path)?;
-        let buf_writer = BufWriter::with_capacity(4 * 1024 * 1024, file); // 4MB buffer
-        let mut encoder = GzEncoder::new(buf_writer, Compression::fast()); // Level 1 for speed
-
-        // Write header
-        let header = self.generate_header(format, total_domains);
-        encoder.write_all(header.as_bytes())?;
-
-        // Write domains directly without String allocation
-        let update_interval = (total_domains / 100).max(1000);
-        let rules_ref = if format == OutputFormat::Adblock {
-            Some(adblock_rules)
-        } else {
-            None
-        };
-        for (i, domain) in domains.iter().enumerate() {
-            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
-
-            // Progress callback (sparse)
-            if (i as u64).is_multiple_of(update_interval) {
-                progress_callback(i as u64, total_domains);
-            }
-        }
-
-        // Finish compression
-        let buf_writer = encoder.finish()?;
-        buf_writer.into_inner()?.sync_all()?;
-
-        // Get file size
-        let gz_size = fs::metadata(&output_path)?.len();
-
-        info!(
-            "Generated {} ({} domains, {} bytes compressed)",
-            filename, total_domains, gz_size
-        );
-
-        Ok(OutputFile {
-            name: filename,
-            format: format.as_str().to_string(),
-            size_bytes: gz_size,
-            domain_count: total_domains,
-        })
-    }
-
-    /// Generate a single output file without progress callback (for parallel execution)
-    fn generate_file_parallel(
-        &self,
-        format: OutputFormat,
-        domains: &[String],
-        adblock_rules: &HashMap<String, String>,
-    ) -> Result<OutputFile> {
-        let total_domains = domains.len() as u64;
-        let filename = format!("all_domains{}", format.file_suffix());
-        let output_path = self.output_dir.join(&filename);
-
-        // Create gzip encoder with fast compression
-        let file = File::create(&output_path)?;
+        let file = File::create(&output.partial_path)?;
         let buf_writer = BufWriter::with_capacity(4 * 1024 * 1024, file);
         let mut encoder = GzEncoder::new(buf_writer, Compression::fast());
 
-        // Write header
         let header = self.generate_header(format, total_domains);
         encoder.write_all(header.as_bytes())?;
 
-        // Write all domains directly
         let rules_ref = if format == OutputFormat::Adblock {
             Some(adblock_rules)
         } else {
             None
         };
-        for domain in domains {
-            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
+        for chunk in domains.chunks(WORK_GRAIN) {
+            control.cancellation.check()?;
+            for domain in chunk {
+                Self::write_domain(&mut encoder, format, domain, rules_ref)?;
+            }
+            (control.report)(GenerationEvent::DomainsWritten(format, chunk.len() as u64));
         }
 
-        // Finish compression
         let buf_writer = encoder.finish()?;
         buf_writer.into_inner()?.sync_all()?;
 
-        let gz_size = fs::metadata(&output_path)?.len();
+        control.cancellation.check()?;
+        let gz_size = output.publish()?;
+        (control.report)(GenerationEvent::FileCompleted { format, gz_size });
 
         info!(
             "Generated {} ({} domains, {} bytes compressed)",
@@ -230,108 +230,16 @@ impl OutputGenerator {
         &self,
         domains: &[String],
         adblock_rules: &HashMap<String, String>,
-        mut progress_callback: impl FnMut(&GenerationProgress),
+        control: &GenerationControl,
     ) -> Result<Vec<OutputFile>> {
-        let total_domains = domains.len() as u64;
-        let formats = OutputFormat::all();
-
-        // Ensure output directory exists before parallel execution
         fs::create_dir_all(&self.output_dir)?;
 
-        // Initialize progress - show all as generating since they run in parallel
-        let mut progress = GenerationProgress {
-            current_format: Some("hosts, plain, adblock (parallel)".to_string()),
-            formats: formats
-                .iter()
-                .map(|f| FormatProgress {
-                    format: f.as_str().to_string(),
-                    status: FormatStatus::Generating,
-                    domains_written: 0,
-                    total_domains,
-                    percent: 0.0,
-                    file_size: None,
-                    gz_size: None,
-                })
-                .collect(),
-        };
-
-        progress_callback(&progress);
-
-        // Generate all formats in parallel using rayon
-        let results: Vec<Result<OutputFile>> = formats
+        OutputFormat::all()
             .par_iter()
-            .map(|format| self.generate_file_parallel(*format, domains, adblock_rules))
-            .collect();
-
-        // Collect results and update progress
-        let mut output_files = Vec::with_capacity(formats.len());
-        for (idx, result) in results.into_iter().enumerate() {
-            let output_file = result?;
-            progress.formats[idx].status = FormatStatus::Completed;
-            progress.formats[idx].domains_written = total_domains;
-            progress.formats[idx].percent = 100.0;
-            progress.formats[idx].gz_size = Some(output_file.size_bytes);
-            output_files.push(output_file);
-        }
-
-        progress.current_format = None;
-        progress_callback(&progress);
-
-        Ok(output_files)
-    }
-
-    /// Generate a single category file (for parallel execution)
-    fn generate_category_file(
-        &self,
-        category: Option<&str>,
-        format: OutputFormat,
-        domains: &[String],
-        adblock_rules: &HashMap<String, String>,
-    ) -> Result<OutputFile> {
-        let total_domains = domains.len() as u64;
-
-        // Filename: category_format.txt.gz or uncategorized_format.txt.gz
-        let filename = match category {
-            Some(cat) => format!("{}_{}.txt.gz", cat, format.as_str()),
-            None => format!("uncategorized_{}.txt.gz", format.as_str()),
-        };
-        let output_path = self.output_dir.join(&filename);
-
-        // Create gzip encoder with fast compression
-        let file = File::create(&output_path)?;
-        let buf_writer = BufWriter::with_capacity(4 * 1024 * 1024, file);
-        let mut encoder = GzEncoder::new(buf_writer, Compression::fast());
-
-        // Write header
-        let header = self.generate_header(format, total_domains);
-        encoder.write_all(header.as_bytes())?;
-
-        // Write all domains
-        let rules_ref = if format == OutputFormat::Adblock {
-            Some(adblock_rules)
-        } else {
-            None
-        };
-        for domain in domains {
-            Self::write_domain(&mut encoder, format, domain, rules_ref)?;
-        }
-
-        // Finish compression
-        let buf_writer = encoder.finish()?;
-        buf_writer.into_inner()?.sync_all()?;
-        let gz_size = fs::metadata(&output_path)?.len();
-
-        info!(
-            "Generated {} ({} domains, {} bytes compressed)",
-            filename, total_domains, gz_size
-        );
-
-        Ok(OutputFile {
-            name: filename,
-            format: format.as_str().to_string(),
-            size_bytes: gz_size,
-            domain_count: total_domains,
-        })
+            .map(|format| {
+                self.write_list(COMBINED_LIST_NAME, *format, domains, adblock_rules, control)
+            })
+            .collect()
     }
 
     /// Generate output files for all categories in parallel
@@ -339,17 +247,22 @@ impl OutputGenerator {
         &self,
         category_domains: &HashMap<Option<String>, Vec<String>>,
         adblock_rules: &HashMap<String, String>,
+        control: &GenerationControl,
     ) -> Result<Vec<OutputFile>> {
         // Ensure output directory exists before parallel execution
         fs::create_dir_all(&self.output_dir)?;
 
         // Build task list: (category, format) pairs with domain reference
-        let tasks: Vec<(Option<&str>, OutputFormat, &[String])> = category_domains
+        let tasks: Vec<(&str, OutputFormat, &[String])> = category_domains
             .iter()
             .flat_map(|(cat, domains)| {
-                OutputFormat::all()
-                    .into_iter()
-                    .map(move |fmt| (cat.as_deref(), fmt, domains.as_slice()))
+                OutputFormat::all().into_iter().map(move |fmt| {
+                    (
+                        cat.as_deref().unwrap_or(UNCATEGORIZED_LIST_NAME),
+                        fmt,
+                        domains.as_slice(),
+                    )
+                })
             })
             .collect();
 
@@ -360,16 +273,12 @@ impl OutputGenerator {
         );
 
         // Generate all files in parallel using rayon
-        let results: Vec<Result<OutputFile>> = tasks
+        tasks
             .par_iter()
-            .map(|(category, format, domains)| {
-                self.generate_category_file(*category, *format, domains, adblock_rules)
+            .map(|(list_name, format, domains)| {
+                self.write_list(list_name, *format, domains, adblock_rules, control)
             })
-            .collect();
-
-        // Collect results
-        let output_files: Result<Vec<OutputFile>> = results.into_iter().collect();
-        output_files
+            .collect()
     }
 
     /// Clean up old output files
@@ -459,50 +368,173 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_generate_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let generator = OutputGenerator::new(temp_dir.path());
+    fn collect_events(
+        events: &std::sync::Mutex<Vec<GenerationEvent>>,
+    ) -> impl Fn(GenerationEvent) + Send + Sync + '_ {
+        move |event| events.lock().unwrap().push(event)
+    }
 
-        let domains = vec![
-            "ads.example.com".to_string(),
-            "tracker.example.com".to_string(),
-        ];
-        let adblock_rules = HashMap::new();
-
-        let output = generator
-            .generate_file(OutputFormat::Hosts, &domains, &adblock_rules, |_, _| {})
-            .unwrap();
-
-        assert_eq!(output.format, "hosts");
-        assert_eq!(output.domain_count, 2);
-        assert!(output.size_bytes > 0);
-        assert!(temp_dir.path().join(&output.name).exists());
+    fn numbered_domains(count: usize) -> Vec<String> {
+        (0..count).map(|n| format!("d{n:07}.example")).collect()
     }
 
     #[test]
-    fn test_generate_adblock_with_passthrough() {
+    fn test_generate_all_writes_every_format() {
         let temp_dir = TempDir::new().unwrap();
         let generator = OutputGenerator::new(temp_dir.path());
-
         let domains = vec![
             "ads.example.com".to_string(),
             "plain.example.com".to_string(),
         ];
         let mut adblock_rules = HashMap::new();
-        // Only ads.example.com has an original rule
         adblock_rules.insert(
             "ads.example.com".to_string(),
             "||ads.example.com^$important".to_string(),
         );
-        // plain.example.com has no rule (came from hosts/plain source)
+        let cancellation = Cancellation::default();
+        let events = std::sync::Mutex::new(Vec::new());
+        let report = collect_events(&events);
 
-        let output = generator
-            .generate_file(OutputFormat::Adblock, &domains, &adblock_rules, |_, _| {})
+        let files = generator
+            .generate_all(
+                &domains,
+                &adblock_rules,
+                &GenerationControl {
+                    cancellation: &cancellation,
+                    report: &report,
+                },
+            )
             .unwrap();
 
-        assert_eq!(output.format, "adblock");
-        assert_eq!(output.domain_count, 2);
-        // File should contain ||ads.example.com^$important and ||plain.example.com^
+        assert_eq!(
+            files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            [
+                "all_domains_hosts.txt.gz",
+                "all_domains_plain.txt.gz",
+                "all_domains_adblock.txt.gz"
+            ]
+        );
+        for file in &files {
+            assert_eq!(file.domain_count, 2);
+            assert_eq!(
+                file.size_bytes,
+                fs::metadata(temp_dir.path().join(&file.name))
+                    .unwrap()
+                    .len()
+            );
+        }
+        let mut adblock = String::new();
+        std::io::Read::read_to_string(
+            &mut flate2::read::GzDecoder::new(
+                File::open(temp_dir.path().join("all_domains_adblock.txt.gz")).unwrap(),
+            ),
+            &mut adblock,
+        )
+        .unwrap();
+        assert!(adblock.contains("||ads.example.com^$important\n||plain.example.com^\n"));
+    }
+
+    #[test]
+    fn every_category_file_reports_its_progress() {
+        let temp_dir = TempDir::new().unwrap();
+        let generator = OutputGenerator::new(temp_dir.path());
+        let mut categories = HashMap::new();
+        categories.insert(Some("tracking".to_string()), numbered_domains(20_000));
+        categories.insert(None, numbered_domains(3));
+        let cancellation = Cancellation::default();
+        let events = std::sync::Mutex::new(Vec::new());
+        let report = collect_events(&events);
+
+        let files = generator
+            .generate_all_categories(
+                &categories,
+                &HashMap::new(),
+                &GenerationControl {
+                    cancellation: &cancellation,
+                    report: &report,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(files.len(), 6);
+        assert!(temp_dir.path().join("uncategorized_plain.txt.gz").exists());
+        let events = events.lock().unwrap().clone();
+        for format in OutputFormat::all() {
+            let started = events
+                .iter()
+                .filter(|event| **event == GenerationEvent::FileStarted(format))
+                .count();
+            let written: u64 = events
+                .iter()
+                .filter_map(|event| match event {
+                    GenerationEvent::DomainsWritten(reported, count) if *reported == format => {
+                        Some(*count)
+                    }
+                    _ => None,
+                })
+                .sum();
+            let compressed: u64 = events
+                .iter()
+                .filter_map(|event| match event {
+                    GenerationEvent::FileCompleted {
+                        format: reported,
+                        gz_size,
+                    } if *reported == format => Some(*gz_size),
+                    _ => None,
+                })
+                .sum();
+            assert_eq!(started, 2);
+            assert_eq!(written, 20_003);
+            assert_eq!(
+                compressed,
+                files
+                    .iter()
+                    .filter(|file| file.format == format.as_str())
+                    .map(|file| file.size_bytes)
+                    .sum::<u64>()
+            );
+        }
+        assert!(
+            events
+                .iter()
+                .filter(|event| matches!(event, GenerationEvent::DomainsWritten(..)))
+                .count()
+                > 6
+        );
+    }
+
+    #[test]
+    fn cancelled_generation_keeps_the_published_file_and_leaves_no_partial() {
+        let temp_dir = TempDir::new().unwrap();
+        let generator = OutputGenerator::new(temp_dir.path());
+        let published = temp_dir.path().join("all_domains_hosts.txt.gz");
+        fs::write(&published, b"previous build").unwrap();
+        let domains = numbered_domains(5 * WORK_GRAIN);
+        let cancellation = Cancellation::default();
+        let cancel_after_first_chunk = |event| {
+            if matches!(event, GenerationEvent::DomainsWritten(..)) {
+                cancellation.cancel();
+            }
+        };
+
+        let outcome = generator.generate_all(
+            &domains,
+            &HashMap::new(),
+            &GenerationControl {
+                cancellation: &cancellation,
+                report: &cancel_after_first_chunk,
+            },
+        );
+
+        let error = outcome.unwrap_err();
+        assert!(error
+            .downcast_ref::<crate::cancellation::Cancelled>()
+            .is_some());
+        assert_eq!(fs::read(&published).unwrap(), b"previous build");
+        let left: Vec<String> = fs::read_dir(temp_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, ["all_domains_hosts.txt.gz"]);
     }
 }

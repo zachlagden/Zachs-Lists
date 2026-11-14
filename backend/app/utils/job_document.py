@@ -14,6 +14,8 @@ def initial_progress() -> dict[str, Any]:
         "queue_position": None,
         "queue_delay_remaining_ms": None,
         "stage_started_at": None,
+        "stages": {"downloading": None, "whitelist": None, "generation": None},
+        "stage_snapshots": {},
     }
 
 

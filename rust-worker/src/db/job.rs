@@ -71,6 +71,12 @@ pub fn initial_queue_progress() -> Document {
         "queue_position": Bson::Null,
         "queue_delay_remaining_ms": Bson::Null,
         "stage_started_at": Bson::Null,
+        "stages": {
+            "downloading": Bson::Null,
+            "whitelist": Bson::Null,
+            "generation": Bson::Null,
+        },
+        "stage_snapshots": {},
     }
 }
 
@@ -104,6 +110,7 @@ fn revision_bump(set: Document) -> Document {
 }
 
 /// Job repository for MongoDB operations
+#[derive(Clone)]
 pub struct JobRepository {
     collection: Collection<Document>,
     worker_id: String,
@@ -131,6 +138,7 @@ impl JobRepository {
                 "claimed_at": "$$NOW",
                 "heartbeat_at": "$$NOW",
                 "started_at": { "$ifNull": ["$started_at", "$$NOW"] },
+                "attempt_started_at": "$$NOW",
                 "attempt": increment_or_start("attempt"),
                 "rev": increment_or_start("rev"),
                 "updated_at": "$$NOW",
@@ -160,6 +168,7 @@ impl JobRepository {
                     &stored_id,
                     error_code::INTERNAL,
                     vec![INTERNAL_ERROR_MESSAGE.to_string()],
+                    None,
                 )
                 .await?;
                 Ok(Claim::Unusable)
@@ -167,10 +176,10 @@ impl JobRepository {
         }
     }
 
-    async fn write_under_lease(
+    async fn update_under_lease(
         &self,
         stored_id: &Bson,
-        set: Document,
+        update: Document,
     ) -> Result<(), JobWriteError> {
         let result = self
             .collection
@@ -180,7 +189,7 @@ impl JobRepository {
                     "worker_id": &self.worker_id,
                     "status": "processing"
                 },
-                revision_bump(set),
+                update,
             )
             .await?;
 
@@ -190,39 +199,46 @@ impl JobRepository {
         Ok(())
     }
 
+    async fn write_under_lease(
+        &self,
+        stored_id: &Bson,
+        set: Document,
+    ) -> Result<(), JobWriteError> {
+        self.update_under_lease(stored_id, revision_bump(set)).await
+    }
+
     async fn write_failure(
         &self,
         stored_id: &Bson,
         code: &str,
         errors: Vec<String>,
+        progress: Option<&JobProgress>,
     ) -> Result<(), JobWriteError> {
-        let result = bson::to_document(&JobResult::failure(code, errors))?;
-        self.write_under_lease(
-            stored_id,
-            doc! {
-                "status": "failed",
-                "completed_at": bson::DateTime::now(),
-                "result": result,
-            },
-        )
-        .await
+        let mut set = doc! {
+            "status": "failed",
+            "completed_at": bson::DateTime::now(),
+            "result": bson::to_document(&JobResult::failure(code, errors))?,
+        };
+        if let Some(progress) = progress {
+            set.insert("progress", bson::to_document(progress)?);
+        }
+        self.write_under_lease(stored_id, set).await
     }
 
-    pub async fn update_progress(
+    pub async fn write_progress_fields(
         &self,
         job_id: &ObjectId,
-        progress: &JobProgress,
+        fields: Document,
     ) -> Result<(), JobWriteError> {
-        let progress = bson::to_document(progress)?;
-        self.write_under_lease(&Bson::ObjectId(*job_id), doc! { "progress": progress })
+        self.write_under_lease(&Bson::ObjectId(*job_id), fields)
             .await
     }
 
     pub async fn heartbeat(&self, job_id: &ObjectId) -> Result<bool, JobWriteError> {
         let written = self
-            .write_under_lease(
+            .update_under_lease(
                 &Bson::ObjectId(*job_id),
-                doc! { "heartbeat_at": bson::DateTime::now() },
+                doc! { "$set": { "heartbeat_at": bson::DateTime::now() } },
             )
             .await;
         match written {
@@ -236,14 +252,15 @@ impl JobRepository {
         &self,
         job_id: &ObjectId,
         result: &JobResult,
+        progress: &JobProgress,
     ) -> Result<(), JobWriteError> {
-        let result = bson::to_document(result)?;
         self.write_under_lease(
             &Bson::ObjectId(*job_id),
             doc! {
                 "status": "completed",
                 "completed_at": bson::DateTime::now(),
-                "result": result,
+                "result": bson::to_document(result)?,
+                "progress": bson::to_document(progress)?,
             },
         )
         .await
@@ -254,19 +271,20 @@ impl JobRepository {
         job_id: &ObjectId,
         code: &str,
         errors: Vec<String>,
+        progress: Option<&JobProgress>,
     ) -> Result<(), JobWriteError> {
-        self.write_failure(&Bson::ObjectId(*job_id), code, errors)
+        self.write_failure(&Bson::ObjectId(*job_id), code, errors, progress)
             .await
     }
 
     pub async fn skip(&self, job_id: &ObjectId, reason: &str) -> Result<(), JobWriteError> {
-        let result = bson::to_document(&JobResult::skipped(reason))?;
         self.write_under_lease(
             &Bson::ObjectId(*job_id),
             doc! {
                 "status": "skipped",
                 "completed_at": bson::DateTime::now(),
-                "result": result,
+                "result": bson::to_document(&JobResult::skipped(reason))?,
+                "progress": initial_queue_progress(),
             },
         )
         .await

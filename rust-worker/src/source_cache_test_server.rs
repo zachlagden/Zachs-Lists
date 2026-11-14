@@ -11,6 +11,9 @@ pub struct Reply {
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
     pub delay: Duration,
+    pub pieces: usize,
+    pub pause_between_pieces: Duration,
+    pub declares_length: bool,
 }
 
 impl Reply {
@@ -20,6 +23,9 @@ impl Reply {
             headers: Vec::new(),
             body: body.to_vec(),
             delay: Duration::ZERO,
+            pieces: 1,
+            pause_between_pieces: Duration::ZERO,
+            declares_length: true,
         }
     }
 
@@ -30,6 +36,17 @@ impl Reply {
 
     pub fn delayed(mut self, delay: Duration) -> Self {
         self.delay = delay;
+        self
+    }
+
+    pub fn dripped(mut self, pieces: usize, pause_between_pieces: Duration) -> Self {
+        self.pieces = pieces.max(1);
+        self.pause_between_pieces = pause_between_pieces;
+        self
+    }
+
+    pub fn without_length(mut self) -> Self {
+        self.declares_length = false;
         self
     }
 }
@@ -84,10 +101,11 @@ impl TestServer {
                     tokio::time::sleep(reply.delay).await;
                     let mut response =
                         format!("HTTP/1.1 {} Fixture\r\nConnection: close\r\n", reply.status);
-                    if !reply
-                        .headers
-                        .iter()
-                        .any(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    if reply.declares_length
+                        && !reply
+                            .headers
+                            .iter()
+                            .any(|(name, _)| name.eq_ignore_ascii_case("content-length"))
                     {
                         response.push_str(&format!("Content-Length: {}\r\n", reply.body.len()));
                     }
@@ -96,7 +114,12 @@ impl TestServer {
                     }
                     response.push_str("\r\n");
                     let _ = connection.write_all(response.as_bytes()).await;
-                    let _ = connection.write_all(&reply.body).await;
+                    let piece_size = reply.body.len().div_ceil(reply.pieces).max(1);
+                    for piece in reply.body.chunks(piece_size) {
+                        let _ = connection.write_all(piece).await;
+                        let _ = connection.flush().await;
+                        tokio::time::sleep(reply.pause_between_pieces).await;
+                    }
                     let _ = connection.shutdown().await;
                 });
             }

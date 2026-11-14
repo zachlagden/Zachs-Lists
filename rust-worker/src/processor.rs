@@ -1,69 +1,45 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bson::DateTime as BsonDateTime;
 use chrono::Utc;
 use mongodb::Database;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::Mutex;
+use std::time::{Duration, Instant};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
 use crate::cancellation::{Cancellation, Cancelled};
 use crate::config::Config;
 use crate::db::job::{Job, JobRepository, JobType, JobWriteError};
 use crate::db::progress::{
-    error_code, JobProgress, JobResult, JobStage, OutputFile, SourceProgress, SourceStatus,
-    StageSnapshot,
+    error_code, GenerationProgress, JobProgress, JobResult, JobStage, OutputFile,
 };
 use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
 use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
-use crate::generator::OutputGenerator;
-use crate::whitelist::{job_warnings, ParsedWhitelist, WhitelistManager};
+use crate::progress_tracker::{LiveProgress, ProgressTracker};
+use crate::stages::{
+    apply_whitelist, extract_source, generate_outputs, plan_whitelist, run_blocking,
+    CategoryDomains, ExtractedDomains, SourceBody,
+};
+use crate::whitelist::WhitelistManager;
 
-/// Domains organized by category for per-category output generation
-pub struct CategoryDomains {
-    /// Map from category name to domains in that category
-    /// None key = uncategorized sources
-    pub by_category: HashMap<Option<String>, HashSet<String>>,
-    /// Raw adblock rules keyed by domain (for adblock output passthrough)
-    /// Only populated for domains that came from adblock-format sources
-    pub adblock_rules: HashMap<String, String>,
+const CANCELLATION_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+const DOWNLOAD_HANDOFF_CAPACITY: usize = 1;
+
+struct Downloaded {
+    index: usize,
+    result: DownloadResult,
+    held_slot: OwnedSemaphorePermit,
 }
 
-impl CategoryDomains {
-    pub fn new() -> Self {
-        Self {
-            by_category: HashMap::new(),
-            adblock_rules: HashMap::new(),
-        }
-    }
-
-    /// Total domain count across all categories (deduplicated)
-    pub fn total_count(&self) -> usize {
-        self.by_category
-            .values()
-            .flatten()
-            .collect::<HashSet<&String>>()
-            .len()
-    }
-
-    /// Check whether a domain is present in any category
-    pub fn contains(&self, domain: &str) -> bool {
-        self.by_category.values().any(|d| d.contains(domain))
-    }
-
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.by_category.values().all(|d| d.is_empty())
-    }
-
-    /// Number of categories
-    pub fn category_count(&self) -> usize {
-        self.by_category.len()
-    }
+#[derive(Debug)]
+pub struct BuildFailure {
+    pub error: BuildError,
+    pub progress: Option<Box<JobProgress>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -129,8 +105,8 @@ pub struct JobProcessor {
     job_repo: JobRepository,
     user_config_repo: UserConfigRepository,
     user_repo: UserRepository,
-    downloader: Downloader,
-    extractor: DomainExtractor,
+    downloader: Arc<Downloader>,
+    extractor: Arc<DomainExtractor>,
 }
 
 impl JobProcessor {
@@ -141,8 +117,8 @@ impl JobProcessor {
         db: &Database,
         cancellation: Cancellation,
     ) -> Result<Self> {
-        let downloader = Downloader::new(config.clone(), db)?;
-        let extractor = DomainExtractor::new();
+        let downloader = Arc::new(Downloader::new(config.clone(), db)?);
+        let extractor = Arc::new(DomainExtractor::new());
         let user_config_repo = UserConfigRepository::new(db);
         let user_repo = UserRepository::new(db);
 
@@ -296,7 +272,28 @@ impl JobProcessor {
     }
 
     /// Process a single job
-    pub async fn process_job(&self, job: &Job) -> Result<(), BuildError> {
+    pub async fn process_job(&self, job: &Job) -> Result<(), BuildFailure> {
+        let mut live = None;
+        let Err(error) = self.build(job, &mut live).await else {
+            return Ok(());
+        };
+        let progress = match live.take() {
+            Some(live) => match live.stop().await {
+                Ok(progress) => Some(Box::new(progress)),
+                Err(stopped) => {
+                    warn!(
+                        "Progress writer for job {} did not stop cleanly: {:#}",
+                        job.job_id, stopped
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+        Err(BuildFailure { error, progress })
+    }
+
+    async fn build(&self, job: &Job, live: &mut Option<LiveProgress>) -> Result<(), BuildError> {
         let start_time = Instant::now();
         info!("Processing job {} for user {}", job.job_id, job.username);
 
@@ -433,18 +430,11 @@ impl JobProcessor {
                                 .as_ref()
                                 .map(|s| s.sources_processed + s.sources_failed)
                                 .unwrap_or(0);
-                            JobProgress {
-                                current_step: "completed".to_string(),
-                                stage: JobStage::Completed,
-                                total_sources: sources_count,
-                                processed_sources: sources_count,
-                                ..JobProgress::default()
-                            }
+                            JobProgress::completed_copy(sources_count)
                         };
-                        self.job_repo.update_progress(&job.id, &progress).await?;
 
                         // Mark job as completed
-                        self.job_repo.complete(&job.id, &result).await?;
+                        self.job_repo.complete(&job.id, &result, &progress).await?;
 
                         // Build list metadata from output files
                         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
@@ -522,51 +512,22 @@ impl JobProcessor {
             }
         }
 
-        // Initialize progress tracking
-        let progress = Arc::new(Mutex::new(JobProgress::downloading(sources.len() as u64)));
+        let tracker = Arc::new(ProgressTracker::downloading(&sources));
+        let flusher = live.insert(LiveProgress::start(
+            self.job_repo.clone(),
+            job.id,
+            Arc::clone(&tracker),
+            self.cancellation.clone(),
+            Duration::from_millis(self.config.progress_update_interval_ms),
+        ));
+        flusher.flush_now().await?;
 
-        // Initialize source progress
-        {
-            let mut p = progress.lock().await;
-            p.sources = sources
-                .iter()
-                .map(|s| SourceProgress {
-                    id: Downloader::hash_url(&s.url),
-                    name: s.name.clone(),
-                    url: s.url.clone(),
-                    status: SourceStatus::Pending,
-                    cache_hit: None,
-                    bytes_downloaded: 0,
-                    bytes_total: None,
-                    download_percent: None,
-                    download_time_ms: None,
-                    domain_count: None,
-                    domain_change: None,
-                    format_breakdown: None,
-                    detected_formats: Vec::new(),
-                    error: None,
-                    warnings: Vec::new(),
-                    started_at: None,
-                    completed_at: None,
-                })
-                .collect();
-        }
-
-        // Update progress in DB
-        self.update_progress(&job.id, &progress).await?;
-
-        // Stages 1 and 2: download and extract, batch by batch
-        let (download_results, category_domains) = self
-            .download_and_extract_stage(&job.id, sources, job.force_rebuild, Arc::clone(&progress))
+        let extracted = self
+            .download_and_extract_stage(sources, job.force_rebuild, &tracker)
             .await?;
+        let downloaded = tracker.source_summary();
 
-        // Check for complete failure
-        let successful_downloads = download_results
-            .iter()
-            .filter(|r| r.error.is_none())
-            .count();
-
-        if successful_downloads == 0 {
+        if downloaded.completed == 0 {
             return Err(BuildError::rejected(
                 error_code::ALL_SOURCES_FAILED,
                 "All source downloads failed",
@@ -574,12 +535,12 @@ impl JobProcessor {
         }
 
         info!(
-            "Extracted {} unique domains across {} categories",
-            category_domains.total_count(),
-            category_domains.category_count()
+            "Extracted domains from {} sources across {} categories",
+            downloaded.completed,
+            extracted.category_count()
         );
 
-        if category_domains.is_empty() {
+        if extracted.is_empty() {
             return Err(BuildError::rejected(
                 error_code::NO_DOMAINS,
                 "No domains extracted",
@@ -588,48 +549,63 @@ impl JobProcessor {
 
         self.cancellation.check()?;
 
-        // Stage 3: Whitelist filtering
-        let (filtered_domains, whitelist_removed, _whitelist_progress) = self
-            .whitelist_stage(
-                &job.id,
-                &job.username,
+        let cancellation = self.cancellation.clone();
+        let plan = run_blocking(move || {
+            Ok(plan_whitelist(
                 &whitelist_content,
-                category_domains,
-                Arc::clone(&progress),
-            )
-            .await?;
+                extracted,
+                &cancellation,
+            )?)
+        })
+        .await?;
+        tracker.begin_whitelist(
+            plan.domains_before,
+            plan.parsed.whitelist.pattern_count() as u64,
+        )?;
+        flusher.flush_now().await?;
 
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(&tracker);
+        let filtered = run_blocking(move || {
+            Ok(apply_whitelist(plan, &cancellation, &|newly_removed| {
+                reporting.whitelist_removed(newly_removed)
+            })?)
+        })
+        .await?;
+        let whitelist_removed = filtered.progress.total_removed;
+        if filtered.ignored_lines > 0 {
+            warn!(
+                "Ignored {} unusable whitelist lines for {}",
+                filtered.ignored_lines, job.username
+            );
+        }
         info!(
             "{} domains after whitelist filtering ({} removed)",
-            filtered_domains.total_count(),
-            whitelist_removed
+            filtered.progress.domains_after, whitelist_removed
         );
+        tracker.whitelist_finished(filtered.progress);
 
         self.cancellation.check()?;
 
-        // Stage 4: Generate output files (per-category + combined)
-        let output_files = self
-            .generation_stage(
-                &job.id,
-                &job.username,
-                filtered_domains,
-                Arc::clone(&progress),
-            )
-            .await?;
+        tracker.begin_generation(GenerationProgress::pending(
+            filtered.generation.files_total,
+            filtered.generation.domains_per_format,
+        ))?;
+        flusher.flush_now().await?;
 
-        // Calculate final stats
-        let sources_processed = download_results
-            .iter()
-            .filter(|r| r.error.is_none())
-            .count() as u64;
-        let sources_failed = download_results
-            .iter()
-            .filter(|r| r.error.is_some())
-            .count() as u64;
-        let total_domains: u64 = {
-            let p = progress.lock().await;
-            p.sources.iter().filter_map(|s| s.domain_count).sum()
-        };
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(&tracker);
+        let output_dir = self.config.output_dir(&job.username);
+        let domains: CategoryDomains = filtered.domains;
+        let generated = run_blocking(move || {
+            generate_outputs(output_dir, domains, &cancellation, &|event| {
+                reporting.generation_event(event)
+            })
+        })
+        .await?;
+        let output_files = generated.files;
+        tracker.complete()?;
+
         // Get unique domains from the combined "all_domains" file
         let unique_domains = output_files
             .iter()
@@ -640,20 +616,35 @@ impl JobProcessor {
         // Calculate total output size
         let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
 
-        // Build result
-        let result = JobResult::success(
-            sources_processed,
-            sources_failed,
-            total_domains,
+        let mut warnings = downloaded.warnings;
+        if filtered.ignored_lines > 0 {
+            warnings.push(format!(
+                "{} whitelist lines were ignored because they are not valid patterns",
+                filtered.ignored_lines
+            ));
+        }
+        let result = JobResult {
+            sources_processed: downloaded.completed,
+            sources_failed: downloaded.failed,
+            sources_stale: downloaded.stale,
+            total_domains: downloaded.total_domains,
             unique_domains,
-            whitelist_removed,
-            output_files.clone(),
-        );
+            whitelisted_removed: whitelist_removed,
+            output_files: output_files.clone(),
+            categories: generated.categories,
+            warnings,
+            ..JobResult::default()
+        };
 
         self.cancellation.check()?;
 
-        // Mark job as completed
-        self.job_repo.complete(&job.id, &result).await?;
+        let final_progress = match live.take() {
+            Some(flusher) => flusher.stop().await?,
+            None => return Err(BuildError::Internal(anyhow!("progress writer is missing"))),
+        };
+        self.job_repo
+            .complete(&job.id, &result, &final_progress)
+            .await?;
 
         // Update user document with lists and stats
         // Build list metadata for all categories + all_domains
@@ -745,376 +736,161 @@ impl JobProcessor {
         Ok(())
     }
 
-    /// Download stage: fetch all sources in parallel
-    /// Download and extract in batches, so only one batch of source content is
-    /// ever resident. Holding every source until extraction was what pushed
-    /// large configs past the container memory limit.
-    async fn download_and_extract_stage(
+    fn start_downloads_in_config_order(
         &self,
-        job_id: &bson::oid::ObjectId,
         sources: Vec<Source>,
         force: bool,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<(Vec<DownloadResult>, CategoryDomains)> {
-        let batch_size = self.config.max_concurrent_downloads.max(1);
-        let mut results: Vec<DownloadResult> = Vec::with_capacity(sources.len());
-        let mut category_domains = CategoryDomains::new();
-
-        for batch in sources.chunks(batch_size) {
-            self.cancellation.check()?;
-
-            // Progress updates are handled after all downloads complete
-            // to avoid frequent DB writes during parallel downloads
-            let mut batch_results = self
-                .downloader
-                .download_sources(batch.to_vec(), force, |_idx, _source_progress| {})
-                .await;
-
-            // Extract straight away so each source's bytes are freed here
-            self.extraction_stage(
-                job_id,
-                &mut batch_results,
-                &mut category_domains,
-                Arc::clone(&progress),
-            )
-            .await?;
-
-            results.extend(batch_results);
-        }
-
-        // Final progress update
-        {
-            let mut p = progress.lock().await;
-            for (idx, result) in results.iter().enumerate() {
-                if idx < p.sources.len() {
-                    p.sources[idx].status = if result.error.is_some() {
-                        SourceStatus::Failed
-                    } else {
-                        SourceStatus::Completed
-                    };
-                    p.sources[idx].cache_hit = Some(result.cache_hit);
-                    p.sources[idx].bytes_downloaded = result.bytes_downloaded;
-                    p.sources[idx].download_time_ms = Some(result.download_time_ms);
-                    p.sources[idx].error = result.error.clone();
-                    p.sources[idx].warnings = result.warnings.clone();
+        tracker: &Arc<ProgressTracker>,
+        handoff: mpsc::Sender<Downloaded>,
+    ) -> JoinSet<Result<(), tokio::task::JoinError>> {
+        let slots = Arc::new(Semaphore::new(self.config.max_concurrent_downloads.max(1)));
+        let downloader = Arc::clone(&self.downloader);
+        let tracker = Arc::clone(tracker);
+        let cancellation = self.cancellation.clone();
+        let mut dispatcher = JoinSet::new();
+        dispatcher.spawn(async move {
+            let mut downloads = JoinSet::new();
+            for (index, source) in sources.into_iter().enumerate() {
+                let Ok(held_slot) = Arc::clone(&slots).acquire_owned().await else {
+                    break;
+                };
+                if cancellation.is_cancelled() {
+                    break;
                 }
+                let handoff = handoff.clone();
+                let downloader = Arc::clone(&downloader);
+                let tracker = Arc::clone(&tracker);
+                downloads.spawn(async move {
+                    tracker.source_started(index);
+                    let report_bytes =
+                        |downloaded, total| tracker.source_bytes(index, downloaded, total);
+                    let result = downloader
+                        .download_source_reporting(&source, force, &report_bytes)
+                        .await;
+                    tracker.source_downloaded(index, &result);
+                    let handed_over = handoff
+                        .send(Downloaded {
+                            index,
+                            result,
+                            held_slot,
+                        })
+                        .await;
+                    if handed_over.is_err() {
+                        debug!("Build stopped before {} could be extracted", source.name);
+                    }
+                });
             }
-            p.processed_sources = p.sources.len() as u64;
-        }
-
-        self.update_progress(job_id, &progress).await?;
-
-        Ok((results, category_domains))
+            drop(handoff);
+            while let Some(joined) = downloads.join_next().await {
+                joined?;
+            }
+            Ok(())
+        });
+        dispatcher
     }
 
-    /// Extraction stage: extract domains and organize by category
-    async fn extraction_stage(
+    async fn download_and_extract_stage(
         &self,
-        _job_id: &bson::oid::ObjectId,
-        download_results: &mut [DownloadResult],
-        category_domains: &mut CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<()> {
-        for result in download_results.iter_mut() {
+        sources: Vec<Source>,
+        force: bool,
+        tracker: &Arc<ProgressTracker>,
+    ) -> Result<ExtractedDomains, BuildError> {
+        let (handoff, mut downloads) = mpsc::channel::<Downloaded>(DOWNLOAD_HANDOFF_CAPACITY);
+        let categories: Vec<Option<String>> = sources
+            .iter()
+            .map(|source| source.category.clone())
+            .collect();
+        let mut dispatcher = self.start_downloads_in_config_order(sources, force, tracker, handoff);
+
+        let mut extracted = ExtractedDomains::default();
+        loop {
             self.cancellation.check()?;
-
-            if result.error.is_some() {
-                continue;
-            }
-
-            // Take ownership so the raw bytes are freed as soon as this source
-            // has been extracted, instead of staying resident for the whole job
-            let content = match result.content.take() {
-                Some(bytes) => bytes,
-                None => {
-                    warn!("No content for {}", result.source.name);
-                    continue;
-                }
-            };
-
-            // Extract domains from content with format breakdown
-            let extraction_output = {
-                let content_str = String::from_utf8_lossy(&content);
-                self.extractor
-                    .extract_from_content_with_breakdown(&content_str)
-            };
-            drop(content);
-
-            let extraction_results = extraction_output.results;
-            let format_breakdown = extraction_output.format_breakdown;
-
-            // domain_count = total domains from this source
-            let source_domain_count = extraction_results.len() as u64;
-
-            // Calculate domain_change = current - previous
-            let domain_change = result
-                .previous_domain_count
-                .map(|prev| source_domain_count as i64 - prev as i64);
-
-            // Get detected format names
-            let detected_formats = format_breakdown.detected_formats();
-
-            // Get category from source
-            let category = result.source.category.clone();
-
-            // Add domains to category bucket and store raw adblock rules
-            let category_set = category_domains
-                .by_category
-                .entry(category.clone())
-                .or_default();
-            let count_before = category_set.len();
-
-            for extraction_result in extraction_results {
-                // Store raw adblock rule if present (for adblock output passthrough).
-                // Only adblock-sourced domains need a clone; the rest move straight in.
-                if let Some(raw_rule) = extraction_result.raw_adblock_rule {
-                    category_domains
-                        .adblock_rules
-                        .insert(extraction_result.domain.clone(), raw_rule);
-                }
-                category_set.insert(extraction_result.domain);
-            }
-
-            let new_in_category = category_set.len() - count_before;
-
-            debug!(
-                "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?}, formats: {:?})",
-                source_domain_count,
-                result.source.name,
-                category,
-                new_in_category,
-                domain_change,
-                detected_formats
-            );
-
-            // Update source progress with domain_count, domain_change, and format info
-            {
-                let mut p = progress.lock().await;
-                if let Some(source) = p.sources.iter_mut().find(|s| s.id == result.url_hash) {
-                    source.domain_count = Some(source_domain_count);
-                    source.domain_change = domain_change;
-                    source.format_breakdown = Some(format_breakdown);
-                    source.detected_formats = detected_formats;
-                }
-            }
-
-            // Save domain_count to cache for next run
-            if let Err(e) = self
-                .downloader
-                .update_domain_count(&result.url_hash, source_domain_count)
-                .await
-            {
-                warn!(
-                    "Failed to update domain count in cache for {}: {}",
-                    result.source.name, e
-                );
-            }
+            let downloaded =
+                match tokio::time::timeout(CANCELLATION_CHECK_INTERVAL, downloads.recv()).await {
+                    Err(_) => continue,
+                    Ok(None) => break,
+                    Ok(Some(downloaded)) => downloaded,
+                };
+            extracted = self
+                .extract_downloaded(downloaded, &categories, extracted, tracker)
+                .await?;
         }
 
-        Ok(())
+        while let Some(dispatched) = dispatcher.join_next().await {
+            dispatched
+                .and_then(|downloads| downloads)
+                .map_err(|stopped| anyhow!("A source download task failed: {stopped}"))?;
+        }
+        self.cancellation.check()?;
+
+        Ok(extracted)
     }
 
-    /// Whitelist stage: filter out whitelisted domains from all categories
-    async fn whitelist_stage(
+    async fn extract_downloaded(
         &self,
-        job_id: &bson::oid::ObjectId,
-        username: &str,
-        whitelist_content: &str,
-        category_domains: CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<(CategoryDomains, u64, crate::db::progress::WhitelistProgress)> {
-        let domains_before = category_domains
-            .by_category
-            .values()
-            .flatten()
-            .collect::<HashSet<&String>>()
-            .len() as u64;
-
-        // Capture downloading stage snapshot before transitioning
-        {
-            let mut p = progress.lock().await;
-            let snapshot = StageSnapshot {
-                completed_at: chrono::Utc::now().to_rfc3339(),
-                data: serde_json::json!({
-                    "sources": &p.sources,
-                    "total_sources": p.total_sources,
-                    "processed_sources": p.processed_sources,
-                }),
-            };
-            p.stage_snapshots
-                .insert("downloading".to_string(), snapshot);
+        downloaded: Downloaded,
+        categories: &[Option<String>],
+        extracted: ExtractedDomains,
+        tracker: &Arc<ProgressTracker>,
+    ) -> Result<ExtractedDomains, BuildError> {
+        let Downloaded {
+            index,
+            mut result,
+            held_slot,
+        } = downloaded;
+        if result.error.is_some() {
+            return Ok(extracted);
         }
+        let content = result
+            .content
+            .take()
+            .ok_or_else(|| anyhow!("Source {} has no body to extract", result.source.name))?;
+        let body = SourceBody {
+            source_index: index,
+            category: categories.get(index).cloned().flatten(),
+            content,
+        };
 
-        // Update progress to whitelist stage
-        {
-            let mut p = progress.lock().await;
-            p.enter_whitelist(domains_before);
-        }
-        self.update_progress(job_id, &progress).await?;
+        tracker.source_extracting(index);
+        let extractor = Arc::clone(&self.extractor);
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(tracker);
+        let (extracted, extraction) = run_blocking(move || {
+            let mut extracted = extracted;
+            let extraction =
+                extract_source(&extractor, body, &mut extracted, &cancellation, &|count| {
+                    reporting.source_domains_extracted(index, count)
+                })?;
+            Ok((extracted, extraction))
+        })
+        .await?;
+        drop(held_slot);
 
-        let ParsedWhitelist {
-            whitelist,
-            problems,
-        } = WhitelistManager::parse(whitelist_content);
-        if !problems.is_empty() {
-            warn!(
-                "Ignored {} unusable whitelist lines for {}",
-                problems.len(),
-                username
-            );
-        }
-
-        // Filter each category separately
-        let mut filtered = CategoryDomains::new();
-        let mut removed_domains: HashSet<String> = HashSet::new();
-        for (category, domains) in category_domains.by_category {
-            let (remaining, removed) = whitelist.partition(domains);
-            removed_domains.extend(removed);
-            if !remaining.is_empty() {
-                filtered.by_category.insert(category, remaining);
-            }
-        }
-        let total_removed = removed_domains.len() as u64;
-        let pattern_matches = whitelist.pattern_matches(&removed_domains);
-        drop(removed_domains);
-
-        // Copy over adblock_rules for domains that remain after whitelist filtering
-        for (domain, rule) in category_domains.adblock_rules {
-            if filtered.contains(&domain) {
-                filtered.adblock_rules.insert(domain, rule);
-            }
-        }
-
-        let domains_after = filtered.total_count() as u64;
-
-        // Create whitelist progress
-        let whitelist_progress = whitelist.create_progress(
-            domains_before,
-            domains_after,
-            pattern_matches,
-            job_warnings(&problems),
+        debug!(
+            "Extracted {} domains from {} (formats: {:?})",
+            extraction.domain_count,
+            result.source.name,
+            extraction.format_breakdown.detected_formats()
+        );
+        tracker.source_completed(
+            index,
+            extraction.domain_count,
+            result.previous_domain_count,
+            extraction.format_breakdown,
         );
 
-        // Update progress
+        if let Err(e) = self
+            .downloader
+            .update_domain_count(&result.url_hash, extraction.domain_count)
+            .await
         {
-            let mut p = progress.lock().await;
-            p.whitelist = Some(whitelist_progress.clone());
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        Ok((filtered, total_removed, whitelist_progress))
-    }
-
-    /// Generation stage: create output files for each category and combined
-    async fn generation_stage(
-        &self,
-        job_id: &bson::oid::ObjectId,
-        username: &str,
-        category_domains: CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<Vec<OutputFile>> {
-        let total_domains = category_domains.total_count() as u64;
-
-        // Capture whitelist stage snapshot before transitioning
-        {
-            let mut p = progress.lock().await;
-            if let Some(whitelist) = &p.whitelist {
-                let snapshot = StageSnapshot {
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                    data: serde_json::to_value(whitelist).unwrap_or(serde_json::Value::Null),
-                };
-                p.stage_snapshots.insert("whitelist".to_string(), snapshot);
-            }
+            warn!(
+                "Failed to update domain count in cache for {}: {}",
+                result.source.name, e
+            );
         }
 
-        // Update progress to generation stage
-        {
-            let mut p = progress.lock().await;
-            p.enter_generation(total_domains);
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        // Create output generator
-        let output_dir = self.config.output_dir(username);
-        let generator = OutputGenerator::new(output_dir);
-
-        // Clean up old files
-        generator.cleanup_old_files()?;
-
-        // Extract adblock_rules before consuming category_domains
-        let adblock_rules = category_domains.adblock_rules;
-
-        // Convert HashSets to sorted Vecs per category
-        let sorted_by_category: HashMap<Option<String>, Vec<String>> = category_domains
-            .by_category
-            .into_iter()
-            .map(|(cat, domains)| (cat, DomainExtractor::sort_domains(domains)))
-            .collect();
-
-        // Generate all category files in parallel (with adblock passthrough)
-        let mut output_files =
-            generator.generate_all_categories(&sorted_by_category, &adblock_rules)?;
-
-        // Create combined "all domains" list (deduplicated across categories).
-        // Note: nsfw category is excluded from the combined list.
-        // The per-category files are already written above, so consume the
-        // sorted sets and move their domains rather than cloning the lot.
-        let all_domains: HashSet<String> = sorted_by_category
-            .into_iter()
-            .filter(|(cat, _)| {
-                // Exclude nsfw category from all_domains
-                !matches!(cat, Some(c) if c == "nsfw")
-            })
-            .flat_map(|(_, domains)| domains.into_iter())
-            .collect();
-        let all_sorted = DomainExtractor::sort_domains(all_domains);
-
-        // Generate combined files (all_domains_*.txt.gz) for backward compatibility
-        let progress_clone = Arc::clone(&progress);
-        let combined_files =
-            generator.generate_all(&all_sorted, &adblock_rules, |gen_progress| {
-                let progress = Arc::clone(&progress_clone);
-                let gen_progress = gen_progress.clone();
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        let mut p = progress.lock().await;
-                        p.generation = Some(gen_progress);
-                    });
-                });
-            })?;
-        output_files.extend(combined_files);
-
-        // Capture generation stage snapshot before completing
-        {
-            let mut p = progress.lock().await;
-            if let Some(generation) = &p.generation {
-                let snapshot = StageSnapshot {
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                    data: serde_json::to_value(generation).unwrap_or(serde_json::Value::Null),
-                };
-                p.stage_snapshots.insert("generation".to_string(), snapshot);
-            }
-        }
-
-        // Final progress update
-        {
-            let mut p = progress.lock().await;
-            p.mark_completed();
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        Ok(output_files)
-    }
-
-    /// Update progress in database
-    async fn update_progress(
-        &self,
-        job_id: &bson::oid::ObjectId,
-        progress: &Arc<Mutex<JobProgress>>,
-    ) -> Result<()> {
-        let p = progress.lock().await;
-        self.job_repo.update_progress(job_id, &p).await?;
-        Ok(())
+        Ok(extracted)
     }
 }
 

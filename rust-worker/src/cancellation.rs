@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+pub const WORK_GRAIN: usize = 8192;
+
 #[derive(Debug, thiserror::Error)]
 #[error("job cancelled")]
 pub struct Cancelled;

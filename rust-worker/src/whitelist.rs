@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 
+use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
 use crate::db::progress::{WhitelistPatternMatch, WhitelistProgress};
 
 pub const MAX_WHITELIST_BYTES: usize = 10 * 1024 * 1024;
@@ -490,38 +491,78 @@ impl WhitelistManager {
         }
     }
 
+    pub fn pattern_count(&self) -> usize {
+        self.patterns.len()
+    }
+
+    #[cfg(test)]
     pub fn partition(&self, domains: HashSet<String>) -> (HashSet<String>, Vec<String>) {
+        self.partition_reporting(domains, &Cancellation::default(), &|_| {})
+            .unwrap()
+    }
+
+    pub fn partition_reporting(
+        &self,
+        domains: HashSet<String>,
+        cancellation: &Cancellation,
+        report_removed: &(dyn Fn(&[String]) + Send + Sync),
+    ) -> Result<(HashSet<String>, Vec<String>), Cancelled> {
         if self.patterns.is_empty() {
-            return (domains, Vec::new());
+            return Ok((domains, Vec::new()));
         }
         let total = domains.len();
-        let (remaining, removed): (HashSet<String>, Vec<String>) =
-            domains.into_par_iter().partition_map(|domain| {
-                if self.is_whitelisted(&domain) {
-                    rayon::iter::Either::Right(domain)
-                } else {
-                    rayon::iter::Either::Left(domain)
-                }
-            });
+        let unchecked: Vec<String> = domains.into_iter().collect();
+        let checked: Vec<(Vec<String>, Vec<String>)> = unchecked
+            .into_par_iter()
+            .chunks(WORK_GRAIN)
+            .map(|chunk| {
+                cancellation.check()?;
+                let (removed, remaining): (Vec<String>, Vec<String>) = chunk
+                    .into_iter()
+                    .partition(|domain| self.is_whitelisted(domain));
+                report_removed(&removed);
+                Ok((remaining, removed))
+            })
+            .collect::<Result<_, Cancelled>>()?;
+
+        let removed_total = checked.iter().map(|(_, removed)| removed.len()).sum();
+        let mut remaining = HashSet::with_capacity(total - removed_total);
+        let mut removed = Vec::with_capacity(removed_total);
+        for (kept, dropped) in checked {
+            cancellation.check()?;
+            remaining.extend(kept);
+            removed.extend(dropped);
+        }
         debug!(
             "Whitelist filtering: {} remaining, {} removed (from {})",
             remaining.len(),
             removed.len(),
             total
         );
-        (remaining, removed)
+        Ok((remaining, removed))
     }
 
+    #[cfg(test)]
     pub fn pattern_matches(&self, removed: &HashSet<String>) -> Vec<WhitelistPatternMatch> {
+        self.pattern_matches_until_cancelled(removed, &Cancellation::default())
+            .unwrap()
+    }
+
+    pub fn pattern_matches_until_cancelled(
+        &self,
+        removed: &HashSet<String>,
+        cancellation: &Cancellation,
+    ) -> Result<Vec<WhitelistPatternMatch>, Cancelled> {
         let tally = removed
             .par_iter()
-            .fold(PatternTally::default, |mut tally, domain| {
+            .try_fold(PatternTally::default, |mut tally, domain| {
+                cancellation.check()?;
                 self.for_each_matching_pattern(domain, |pattern_index| {
                     tally.record(pattern_index, domain.as_str())
                 });
-                tally
+                Ok(tally)
             })
-            .reduce(PatternTally::default, PatternTally::merge);
+            .try_reduce(PatternTally::default, |left, right| Ok(left.merge(right)))?;
 
         let mut ranked: Vec<(usize, u64, Vec<&str>)> = tally
             .by_pattern
@@ -531,7 +572,7 @@ impl WhitelistManager {
         ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         ranked.truncate(MAX_REPORTED_PATTERNS);
 
-        ranked
+        Ok(ranked
             .into_iter()
             .map(|(pattern_index, match_count, samples)| {
                 let pattern = &self.patterns[pattern_index];
@@ -542,7 +583,7 @@ impl WhitelistManager {
                     samples: samples.into_iter().map(str::to_string).collect(),
                 }
             })
-            .collect()
+            .collect())
     }
 
     pub fn create_progress(
@@ -557,6 +598,7 @@ impl WhitelistManager {
             domains_after,
             total_removed: domains_before.saturating_sub(domains_after),
             processing: false,
+            patterns_total: self.patterns.len() as u64,
             patterns: pattern_matches,
             warnings,
         }

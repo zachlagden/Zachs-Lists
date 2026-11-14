@@ -12,9 +12,10 @@ use tracing::{debug, error, info, warn};
 use crate::cancellation::Cancellation;
 use crate::config::Config;
 use crate::db::job::{Claim, Job, JobRepository, JobWriteError};
+use crate::db::progress::JobProgress;
 use crate::db::progress::{error_code, INTERNAL_ERROR_MESSAGE};
 use crate::db::worker::WorkerRegistry;
-use crate::processor::{BuildError, JobProcessor};
+use crate::processor::{BuildError, BuildFailure, JobProcessor};
 
 const SHUTDOWN_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 const SHUTDOWN_STOP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -26,7 +27,7 @@ struct ActiveJob {
 }
 
 enum JobEnd {
-    Finished(Result<(), BuildError>),
+    Finished(Result<(), BuildFailure>),
     Panicked(tokio::task::JoinError),
     ShutDown,
 }
@@ -133,7 +134,7 @@ impl Worker {
             }
             Err(e) => {
                 error!("Failed to create processor for job {}: {:#}", job_name, e);
-                self.fail_internal(job_repo, &job_id, &job_name).await;
+                self.fail_internal(job_repo, &job_id, &job_name, None).await;
             }
         }
 
@@ -142,7 +143,7 @@ impl Worker {
 
     async fn wait_for_build(
         &self,
-        mut build: JoinHandle<Result<(), BuildError>>,
+        mut build: JoinHandle<Result<(), BuildFailure>>,
         cancellation: &Cancellation,
     ) -> JobEnd {
         loop {
@@ -179,39 +180,56 @@ impl Worker {
         job_name: &str,
         end: JobEnd,
     ) {
-        match end {
-            JobEnd::Finished(Ok(())) => {}
-            JobEnd::Finished(Err(BuildError::Cancelled | BuildError::LeaseLost)) => {
+        let failure = match end {
+            JobEnd::Finished(Ok(())) => return,
+            JobEnd::Finished(Err(failure)) => failure,
+            JobEnd::Panicked(panic) => {
+                error!("Job {} panicked: {}", job_name, panic);
+                self.fail_internal(job_repo, job_id, job_name, None).await;
+                return;
+            }
+            JobEnd::ShutDown => {
+                info!("Releasing job {} back to the queue", job_name);
+                Self::log_write(job_name, job_repo.release(job_id).await);
+                return;
+            }
+        };
+        let progress = failure.progress.as_deref();
+        match failure.error {
+            BuildError::Cancelled | BuildError::LeaseLost => {
                 warn!(
                     "Stopped job {} because this worker no longer holds its lease",
                     job_name
                 );
             }
-            JobEnd::Finished(Err(BuildError::Rejected { code, message })) => {
+            BuildError::Rejected { code, message } => {
                 info!("Job {} failed ({}): {}", job_name, code, message);
-                Self::log_write(job_name, job_repo.fail(job_id, code, vec![message]).await);
+                Self::log_write(
+                    job_name,
+                    job_repo.fail(job_id, code, vec![message], progress).await,
+                );
             }
-            JobEnd::Finished(Err(BuildError::Internal(e))) => {
+            BuildError::Internal(e) => {
                 error!("Job {} failed with an internal error: {:#}", job_name, e);
-                self.fail_internal(job_repo, job_id, job_name).await;
-            }
-            JobEnd::Panicked(panic) => {
-                error!("Job {} panicked: {}", job_name, panic);
-                self.fail_internal(job_repo, job_id, job_name).await;
-            }
-            JobEnd::ShutDown => {
-                info!("Releasing job {} back to the queue", job_name);
-                Self::log_write(job_name, job_repo.release(job_id).await);
+                self.fail_internal(job_repo, job_id, job_name, progress)
+                    .await;
             }
         }
     }
 
-    async fn fail_internal(&self, job_repo: &JobRepository, job_id: &ObjectId, job_name: &str) {
+    async fn fail_internal(
+        &self,
+        job_repo: &JobRepository,
+        job_id: &ObjectId,
+        job_name: &str,
+        progress: Option<&JobProgress>,
+    ) {
         let written = job_repo
             .fail(
                 job_id,
                 error_code::INTERNAL,
                 vec![INTERNAL_ERROR_MESSAGE.to_string()],
+                progress,
             )
             .await;
         Self::log_write(job_name, written);

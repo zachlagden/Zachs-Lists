@@ -1,5 +1,6 @@
 use crate::extractor::FormatBreakdown;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Job stage enum
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -32,44 +33,62 @@ pub enum FormatStatus {
     #[default]
     Pending,
     Generating,
-    Compressing,
     Completed,
 }
 
+pub const OUTPUT_FORMAT_NAMES: [&str; 3] = ["hosts", "plain", "adblock"];
+
+pub fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 /// Progress for a single source
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct SourceProgress {
     pub id: String,
     pub name: String,
     pub url: String,
     pub status: SourceStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cache_hit: Option<bool>,
+    #[serde(default)]
+    pub stale: bool,
     pub bytes_downloaded: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub bytes_total: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub download_percent: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub download_time_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub domain_count: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub domain_change: Option<i64>,
     /// Format breakdown - counts per format type (hosts/plain/adblock)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub format_breakdown: Option<FormatBreakdown>,
     /// Detected format names (e.g., ["hosts", "adblock"])
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub detected_formats: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub warnings: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub completed_at: Option<String>,
+}
+
+impl SourceProgress {
+    pub fn pending(id: String, name: String, url: String) -> Self {
+        Self {
+            id,
+            name,
+            url,
+            ..Self::default()
+        }
+    }
 }
 
 /// Whitelist pattern match info
@@ -83,43 +102,71 @@ pub struct WhitelistPatternMatch {
 }
 
 /// Whitelist processing progress
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct WhitelistProgress {
     pub domains_before: u64,
     pub domains_after: u64,
     pub total_removed: u64,
     pub processing: bool,
     #[serde(default)]
+    pub patterns_total: u64,
+    #[serde(default)]
     pub patterns: Vec<WhitelistPatternMatch>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub warnings: Vec<String>,
 }
 
 /// Single format generation progress
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FormatProgress {
     pub format: String,
     pub status: FormatStatus,
     pub domains_written: u64,
     pub total_domains: u64,
     pub percent: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub file_size: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub gz_size: Option<u64>,
 }
 
 /// Generation stage progress
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct GenerationProgress {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub files_total: u64,
+    #[serde(default)]
+    pub files_completed: u64,
+    #[serde(default)]
     pub current_format: Option<String>,
     #[serde(default)]
     pub formats: Vec<FormatProgress>,
 }
 
+impl GenerationProgress {
+    pub fn pending(files_total: u64, domains_per_format: u64) -> Self {
+        Self {
+            files_total,
+            files_completed: 0,
+            current_format: None,
+            formats: OUTPUT_FORMAT_NAMES
+                .into_iter()
+                .map(|format| FormatProgress {
+                    format: format.to_string(),
+                    status: FormatStatus::Pending,
+                    domains_written: 0,
+                    total_domains: domains_per_format,
+                    percent: 0.0,
+                    file_size: None,
+                    gz_size: None,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Snapshot of a stage's final state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StageSnapshot {
     /// When this stage completed
     pub completed_at: String,
@@ -127,8 +174,34 @@ pub struct StageSnapshot {
     pub data: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StageTiming {
+    pub started_at: String,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+}
+
+impl StageTiming {
+    fn started_at(started_at: &str) -> Self {
+        Self {
+            started_at: started_at.to_string(),
+            completed_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct StageTimings {
+    #[serde(default)]
+    pub downloading: Option<StageTiming>,
+    #[serde(default)]
+    pub whitelist: Option<StageTiming>,
+    #[serde(default)]
+    pub generation: Option<StageTiming>,
+}
+
 /// Full job progress structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobProgress {
     /// Legacy field for backwards compatibility
     pub current_step: String,
@@ -139,29 +212,31 @@ pub struct JobProgress {
     /// Number of processed sources
     pub processed_sources: u64,
     /// Currently processing source (legacy)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub current_source: Option<String>,
     /// Queue position (for queued jobs)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub queue_position: Option<u64>,
     /// Time remaining in queue delay (ms)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub queue_delay_remaining_ms: Option<u64>,
     /// Per-source progress
     #[serde(default)]
     pub sources: Vec<SourceProgress>,
     /// Whitelist stage progress
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub whitelist: Option<WhitelistProgress>,
     /// Generation stage progress
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub generation: Option<GenerationProgress>,
     /// When current stage started
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub stage_started_at: Option<String>,
+    #[serde(default)]
+    pub stages: StageTimings,
     /// Snapshots of completed stages (for viewing historical state)
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub stage_snapshots: std::collections::HashMap<String, StageSnapshot>,
+    #[serde(default)]
+    pub stage_snapshots: BTreeMap<String, StageSnapshot>,
 }
 
 impl Default for JobProgress {
@@ -178,105 +253,110 @@ impl Default for JobProgress {
             whitelist: None,
             generation: None,
             stage_started_at: None,
-            stage_snapshots: std::collections::HashMap::new(),
+            stages: StageTimings::default(),
+            stage_snapshots: BTreeMap::new(),
         }
     }
 }
 
 impl JobProgress {
-    /// Create progress for downloading stage
-    pub fn downloading(total_sources: u64) -> Self {
+    pub fn downloading(sources: Vec<SourceProgress>) -> Self {
+        let now = now_rfc3339();
         Self {
             current_step: "downloading".to_string(),
             stage: JobStage::Downloading,
-            total_sources,
-            processed_sources: 0,
-            current_source: None,
-            queue_position: None,
-            queue_delay_remaining_ms: None,
-            sources: Vec::new(),
-            whitelist: None,
-            generation: None,
-            stage_started_at: Some(
-                chrono::Utc::now()
-                    .format("%Y-%m-%dT%H:%M:%S%.6f")
-                    .to_string(),
-            ),
-            stage_snapshots: std::collections::HashMap::new(),
+            total_sources: sources.len() as u64,
+            sources,
+            stages: StageTimings {
+                downloading: Some(StageTiming::started_at(&now)),
+                ..StageTimings::default()
+            },
+            stage_started_at: Some(now),
+            ..Self::default()
         }
     }
 
-    /// Update to whitelist stage
-    pub fn enter_whitelist(&mut self, domains_before: u64) {
+    pub fn completed_copy(total_sources: u64) -> Self {
+        Self {
+            current_step: "completed".to_string(),
+            stage: JobStage::Completed,
+            total_sources,
+            processed_sources: total_sources,
+            ..Self::default()
+        }
+    }
+
+    fn snapshot(&mut self, stage: &str, completed_at: &str, data: serde_json::Value) {
+        self.stage_snapshots.insert(
+            stage.to_string(),
+            StageSnapshot {
+                completed_at: completed_at.to_string(),
+                data,
+            },
+        );
+    }
+
+    pub fn enter_whitelist(
+        &mut self,
+        domains_before: u64,
+        patterns_total: u64,
+    ) -> Result<(), serde_json::Error> {
+        let now = now_rfc3339();
+        let data = serde_json::json!({
+            "sources": serde_json::to_value(&self.sources)?,
+            "total_sources": self.total_sources,
+            "processed_sources": self.processed_sources,
+        });
+        self.snapshot("downloading", &now, data);
+        if let Some(downloading) = self.stages.downloading.as_mut() {
+            downloading.completed_at = Some(now.clone());
+        }
         self.current_step = "whitelist".to_string();
         self.stage = JobStage::Whitelist;
+        self.current_source = None;
         self.whitelist = Some(WhitelistProgress {
             domains_before,
             domains_after: domains_before,
             total_removed: 0,
             processing: true,
+            patterns_total,
             patterns: Vec::new(),
             warnings: Vec::new(),
         });
-        self.stage_started_at = Some(
-            chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                .to_string(),
-        );
+        self.stages.whitelist = Some(StageTiming::started_at(&now));
+        self.stage_started_at = Some(now);
+        Ok(())
     }
 
-    /// Update to generation stage
-    pub fn enter_generation(&mut self, total_domains: u64) {
+    pub fn enter_generation(
+        &mut self,
+        generation: GenerationProgress,
+    ) -> Result<(), serde_json::Error> {
+        let now = now_rfc3339();
+        let data = serde_json::to_value(&self.whitelist)?;
+        self.snapshot("whitelist", &now, data);
+        if let Some(whitelist) = self.stages.whitelist.as_mut() {
+            whitelist.completed_at = Some(now.clone());
+        }
         self.current_step = "generation".to_string();
         self.stage = JobStage::Generation;
-        self.generation = Some(GenerationProgress {
-            current_format: None,
-            formats: vec![
-                FormatProgress {
-                    format: "hosts".to_string(),
-                    status: FormatStatus::Pending,
-                    domains_written: 0,
-                    total_domains,
-                    percent: 0.0,
-                    file_size: None,
-                    gz_size: None,
-                },
-                FormatProgress {
-                    format: "plain".to_string(),
-                    status: FormatStatus::Pending,
-                    domains_written: 0,
-                    total_domains,
-                    percent: 0.0,
-                    file_size: None,
-                    gz_size: None,
-                },
-                FormatProgress {
-                    format: "adblock".to_string(),
-                    status: FormatStatus::Pending,
-                    domains_written: 0,
-                    total_domains,
-                    percent: 0.0,
-                    file_size: None,
-                    gz_size: None,
-                },
-            ],
-        });
-        self.stage_started_at = Some(
-            chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                .to_string(),
-        );
+        self.generation = Some(generation);
+        self.stages.generation = Some(StageTiming::started_at(&now));
+        self.stage_started_at = Some(now);
+        Ok(())
     }
 
-    /// Mark as completed
-    pub fn mark_completed(&mut self) {
+    pub fn mark_completed(&mut self) -> Result<(), serde_json::Error> {
+        let now = now_rfc3339();
+        let data = serde_json::to_value(&self.generation)?;
+        self.snapshot("generation", &now, data);
+        if let Some(generation) = self.stages.generation.as_mut() {
+            generation.completed_at = Some(now.clone());
+        }
         self.current_step = "completed".to_string();
         self.stage = JobStage::Completed;
-        self.stage_started_at = Some(
-            chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                .to_string(),
-        );
+        self.stage_started_at = Some(now);
+        Ok(())
     }
 }
 
@@ -301,30 +381,34 @@ pub const INTERNAL_ERROR_MESSAGE: &str =
     "The build failed because of an internal error. Please try again.";
 
 /// Job result on completion
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct JobResult {
     pub sources_processed: u64,
     pub sources_failed: u64,
+    #[serde(default)]
+    pub sources_stale: u64,
     pub total_domains: u64,
     pub unique_domains: u64,
     pub whitelisted_removed: u64,
     #[serde(default)]
     pub output_files: Vec<OutputFile>,
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub categories: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub categories: BTreeMap<String, u64>,
     #[serde(default)]
     pub errors: Vec<String>,
     #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default)]
     pub error_code: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub skip_reason: Option<String>,
     /// Username whose output was copied (for fingerprint-matched builds)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub copied_from: Option<String>,
 }
 
 /// Output file info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OutputFile {
     pub name: String,
     pub format: String,
@@ -333,51 +417,19 @@ pub struct OutputFile {
 }
 
 impl JobResult {
-    /// Create a success result
-    pub fn success(
-        sources_processed: u64,
-        sources_failed: u64,
-        total_domains: u64,
-        unique_domains: u64,
-        whitelisted_removed: u64,
-        output_files: Vec<OutputFile>,
-    ) -> Self {
-        Self {
-            sources_processed,
-            sources_failed,
-            total_domains,
-            unique_domains,
-            whitelisted_removed,
-            output_files,
-            categories: std::collections::HashMap::new(),
-            errors: Vec::new(),
-            error_code: None,
-            skip_reason: None,
-            copied_from: None,
-        }
-    }
-
     pub fn skipped(reason: &str) -> Self {
         Self {
             skip_reason: Some(reason.to_string()),
-            ..Self::success(0, 0, 0, 0, 0, Vec::new())
+            ..Self::default()
         }
     }
 
     /// Create a failure result
     pub fn failure(code: &str, errors: Vec<String>) -> Self {
         Self {
-            sources_processed: 0,
-            sources_failed: 0,
-            total_domains: 0,
-            unique_domains: 0,
-            whitelisted_removed: 0,
-            output_files: Vec::new(),
-            categories: std::collections::HashMap::new(),
             errors,
             error_code: Some(code.to_string()),
-            skip_reason: None,
-            copied_from: None,
+            ..Self::default()
         }
     }
 
@@ -391,22 +443,22 @@ impl JobResult {
         unique_domains: u64,
         output_files: Vec<OutputFile>,
     ) -> Self {
+        let copied = source_result.cloned().unwrap_or_else(|| Self {
+            total_domains: total_domains_without_source_result,
+            ..Self::default()
+        });
         Self {
-            sources_processed: source_result.map_or(0, |source| source.sources_processed),
-            sources_failed: source_result.map_or(0, |source| source.sources_failed),
-            total_domains: source_result.map_or(total_domains_without_source_result, |source| {
-                source.total_domains
-            }),
             unique_domains,
-            whitelisted_removed: source_result.map_or(0, |source| source.whitelisted_removed),
             output_files,
-            categories: source_result
-                .map(|source| source.categories.clone())
-                .unwrap_or_default(),
             errors: Vec::new(),
             error_code: None,
             skip_reason: None,
             copied_from: Some(source_username),
+            ..copied
         }
     }
 }
+
+#[cfg(test)]
+#[path = "progress_tests.rs"]
+mod tests;
