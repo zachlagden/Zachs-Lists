@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store';
 import { analyticsApi } from '../api/client';
+import type { PublicStats } from '../types';
 import {
   CinematicHero,
   ProblemSection,
@@ -10,19 +11,6 @@ import {
   CTASection,
   Footer,
 } from '../components/home';
-
-interface PublicStats {
-  total_domains: number;
-  total_requests: number;
-  total_requests_today?: number;
-  total_requests_week?: number;
-  total_bandwidth_bytes?: number;
-  total_users?: number;
-  user_count?: number;
-  last_updated?: string;
-  requests_over_time?: { date: string; count: number }[];
-  geo_distribution?: Record<string, number>;
-}
 
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore();
