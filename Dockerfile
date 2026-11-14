@@ -9,6 +9,7 @@ COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts
 
 COPY frontend/ ./
+COPY tests/fixtures/job-progress.json tests/fixtures/job-initial-progress.json /build/tests/fixtures/
 
 # Empty VITE_API_URL = same-origin requests in production
 ENV VITE_API_URL=""
