@@ -12,6 +12,7 @@ from app.extensions import mongo
 from app.models.user import User
 from app.models.job import Job
 from app.services.build_admission import AdmissionError, admit_build
+from app.services.job_feed import job_payload, job_payloads
 from app.utils.validators import (
     WhitelistValidationUnavailable,
     validate_whitelist,
@@ -375,7 +376,7 @@ def get_jobs(user: User):
 
     return jsonify(
         {
-            "jobs": [j.to_dict() for j in jobs],
+            "jobs": job_payloads(jobs),
             "has_unread_failures": has_unread_failures,
         }
     )
@@ -393,7 +394,7 @@ def get_job(user: User, job_id: str):
     if job.user_id and str(job.user_id) != user.id:
         return jsonify({"error": "Job not found"}), 404
 
-    return jsonify(job.to_dict())
+    return jsonify(job_payload(job))
 
 
 @user_bp.route("/jobs/mark-read", methods=["POST"])

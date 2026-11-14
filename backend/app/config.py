@@ -59,6 +59,10 @@ class Config:
     MAX_RETRIES = 3
     RETRY_BACKOFF = 0.5
 
+    # Job relay
+    JOB_POLL_ACTIVE_SECONDS = float(os.environ.get("JOB_POLL_ACTIVE_SECONDS", "0.5"))
+    JOB_POLL_IDLE_SECONDS = float(os.environ.get("JOB_POLL_IDLE_SECONDS", "2"))
+
     # Rate limiting
     RATELIMIT_DEFAULT = "100/hour"
     RATELIMIT_STORAGE_URL = os.environ.get("REDIS_URL", "memory://")

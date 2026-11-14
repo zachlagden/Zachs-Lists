@@ -1,69 +1,113 @@
 import { io, Socket } from 'socket.io-client';
 import { authApi } from '../api/client';
-import { useAuthStore, useJobsStore, useUserDataStore } from '../store';
+import { useAuthStore, useConnectionStore, useJobsStore, useUserDataStore } from '../store';
+import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || '';
-const MAX_RECONNECT_ATTEMPTS = 5;
 export let socket: Socket | null = null;
-let authCheckSocket: Socket | null = null;
-let connectionAttempts = 0;
+let sessionCheckSocket: Socket | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let failures = 0;
+let connections = 0;
 
-export function disconnectSocket(): void {
-  socket?.disconnect();
-  socket = null;
-  authCheckSocket = null;
-  connectionAttempts = 0;
+function clearRetry(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
 }
 
-async function reconnectAuthenticated(current: Socket, attempt = 0): Promise<void> {
-  if (socket !== current || !useAuthStore.getState().isAuthenticated) return;
-  authCheckSocket = current;
+export function hasReconnected(): boolean {
+  return connections > 1;
+}
+
+export function disconnectSocket(): void {
+  clearRetry();
+  socket?.disconnect();
+  socket = null;
+  sessionCheckSocket = null;
+  failures = 0;
+  connections = 0;
+  useConnectionStore.getState().setState('connecting');
+}
+
+function endSession(): void {
+  disconnectSocket();
+  useAuthStore.getState().setUser(null);
+  useUserDataStore.getState().reset();
+  useJobsStore.getState().reset();
+}
+
+function scheduleReconnect(current: Socket): void {
+  if (socket !== current || retryTimer !== null) return;
+  failures += 1;
+  useConnectionStore.getState().setState(stateAfterFailures(failures, navigator.onLine));
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (socket === current) current.connect();
+  }, reconnectDelay(failures));
+}
+
+async function reconnectIfSignedIn(current: Socket, immediately: boolean): Promise<void> {
+  if (socket !== current || sessionCheckSocket === current) return;
+  if (!useAuthStore.getState().isAuthenticated) return;
+  sessionCheckSocket = current;
   try {
     const user = await authApi.getMe();
-    if (socket === current) {
-      useAuthStore.getState().setUser(user);
-      current.connect();
-    }
+    if (socket !== current) return;
+    useAuthStore.getState().setUser(user);
+    if (immediately) current.connect();
+    else scheduleReconnect(current);
   } catch (error: unknown) {
     if (socket !== current) return;
     const status = (error as { response?: { status?: number } }).response?.status;
-    if (status === 401 || status === 403) {
-      disconnectSocket();
-      useAuthStore.getState().setUser(null);
-      useUserDataStore.getState().reset();
-      useJobsStore.getState().reset();
-    } else if (attempt < MAX_RECONNECT_ATTEMPTS) {
-      setTimeout(() => void reconnectAuthenticated(current, attempt + 1), 1000);
-    }
+    if (status === 401 || status === 403) endSession();
+    else scheduleReconnect(current);
   } finally {
-    if (authCheckSocket === current) authCheckSocket = null;
+    if (sessionCheckSocket === current) sessionCheckSocket = null;
   }
+}
+
+function isTransportFailure(error: Error): boolean {
+  return 'type' in error || error.message === 'timeout';
+}
+
+function retryNow(): void {
+  if (!socket || socket.connected) return;
+  clearRetry();
+  socket.connect();
+}
+
+function reportBrowserOffline(): void {
+  if (socket && !socket.connected) useConnectionStore.getState().setState('offline');
 }
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(SOCKET_URL, {
+    const current = io(SOCKET_URL, {
       withCredentials: true,
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnection: false,
     });
-    socket.on('connect', () => {
-      connectionAttempts = 0;
+    socket = current;
+    current.on('connect', () => {
+      clearRetry();
+      failures = 0;
+      connections += 1;
+      useConnectionStore.getState().setState('connected');
     });
-    const current = socket;
-    socket.on('disconnect', (reason) => {
-      if (reason === 'io server disconnect' && authCheckSocket !== current) {
-        void reconnectAuthenticated(current);
-      }
+    current.on('disconnect', (reason) => {
+      if (socket !== current || reason === 'io client disconnect') return;
+      useConnectionStore.getState().setState('reconnecting');
+      if (reason === 'io server disconnect') void reconnectIfSignedIn(current, true);
+      else scheduleReconnect(current);
     });
-    socket.on('connect_error', () => {
-      connectionAttempts++;
-      if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.warn('Realtime connection is unavailable');
-      }
+    current.on('connect_error', (error) => {
+      if (isTransportFailure(error)) scheduleReconnect(current);
+      else void reconnectIfSignedIn(current, false);
     });
+    window.removeEventListener('online', retryNow);
+    window.removeEventListener('offline', reportBrowserOffline);
+    window.addEventListener('online', retryNow);
+    window.addEventListener('offline', reportBrowserOffline);
   }
   return socket;
 }

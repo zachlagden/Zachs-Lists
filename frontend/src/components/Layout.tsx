@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { useAuthStore, useJobsStore } from '../store';
+import { useAuthStore, useConnectionStore, useJobsStore } from '../store';
 import { authApi, userApi } from '../api/client';
 import { SITE_DOMAIN } from '../config/site';
 import { disconnectSocket } from '../hooks/useSocket';
@@ -25,6 +25,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const { hasUnreadFailures } = useJobsStore();
+  const connectionState = useConnectionStore((connection) => connection.state);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   useEffect(() => {
@@ -156,6 +157,15 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
+        {(connectionState === 'reconnecting' || connectionState === 'offline') && (
+          <div
+            role="status"
+            className="bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 px-8 py-2 text-sm"
+          >
+            {connectionState === 'offline' ? 'Connection lost.' : 'Reconnecting.'} Live updates
+            are paused. This page will catch up when the connection is back.
+          </div>
+        )}
         <div className="p-8">
           <AnnouncementBanner announcements={announcements} onDismiss={handleDismissAnnouncement} />
           {children}

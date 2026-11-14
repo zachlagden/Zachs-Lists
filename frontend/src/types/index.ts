@@ -47,6 +47,7 @@ export type SourceStatus = 'pending' | 'downloading' | 'processing' | 'completed
 export interface QueueInfo {
   position: number;
   total_queued: number;
+  workers_alive?: number;
   active_workers: number;
   jobs_processing: number;
 }
