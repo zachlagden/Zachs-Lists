@@ -2,7 +2,6 @@
 Job model for MongoDB.
 """
 
-import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
@@ -29,8 +28,14 @@ class Job:
     TYPE_ADMIN = "admin"
 
     # Priority levels (lower number = higher priority)
-    PRIORITY_HIGH = 1  # Default/admin jobs
-    PRIORITY_NORMAL = 2  # User jobs
+    PRIORITY_HIGH = 1
+    PRIORITY_NORMAL = 2
+    PRIORITY_LOW = 3
+
+    DEFAULT_TARGET_ID = "__default__"
+    ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_PROCESSING)
+    ERROR_WORKER_ABANDONED = "worker_abandoned"
+    ERROR_SUPERSEDED = "superseded"
 
     # Stale resets a job may accumulate before it is abandoned as unbuildable
     MAX_STALE_ATTEMPTS = 3
@@ -54,6 +59,21 @@ class Job:
     @property
     def username(self) -> str:
         return self._data.get("username")
+
+    @staticmethod
+    def target_id_for(document: Dict[str, Any]) -> Optional[str]:
+        stored = document.get("target_id")
+        if isinstance(stored, str) and stored:
+            return stored
+        if document.get("user_id"):
+            return str(document["user_id"])
+        if document.get("username") == Job.DEFAULT_TARGET_ID:
+            return Job.DEFAULT_TARGET_ID
+        return None
+
+    @property
+    def target_id(self) -> Optional[str]:
+        return self.target_id_for(self._data)
 
     @property
     def job_type(self) -> str:
@@ -107,6 +127,7 @@ class Job:
             "job_id": self.job_id,
             "user_id": str(self.user_id) if self.user_id else None,
             "username": self.username,
+            "target_id": self.target_id,
             "type": self.job_type,
             "status": self.status,
             "priority": self.priority,
@@ -130,94 +151,6 @@ class Job:
         }
 
     # Class methods
-    @classmethod
-    def create(
-        cls,
-        user_id: ObjectId,
-        username: str,
-        job_type: str = TYPE_MANUAL,
-        priority: int = PRIORITY_NORMAL,
-        force_rebuild: bool = False,
-    ) -> "Job":
-        """Create a new job."""
-        job_data = {
-            "job_id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "username": username,
-            "type": job_type,
-            "status": cls.STATUS_QUEUED,
-            "priority": priority,
-            "force_rebuild": force_rebuild,
-            "progress": {
-                "current_step": "queued",
-                "stage": "queue",
-                "total_sources": 0,
-                "processed_sources": 0,
-                "current_source": None,
-                "sources": [],
-                "whitelist": None,
-                "generation": None,
-                "queue_position": None,
-                "queue_delay_remaining_ms": None,
-                "stage_started_at": None,
-            },
-            "result": None,
-            "started_at": None,
-            "completed_at": None,
-            "created_at": datetime.utcnow(),
-            "worker_id": None,
-            "claimed_at": None,
-            "heartbeat_at": None,
-        }
-
-        result = mongo.db[cls.COLLECTION].insert_one(job_data)
-        job_data["_id"] = result.inserted_id
-
-        return cls(job_data)
-
-    @classmethod
-    def create_default(
-        cls,
-        job_type: str = TYPE_SCHEDULED,
-        priority: int = PRIORITY_HIGH,
-        force_rebuild: bool = False,
-    ) -> "Job":
-        """Create a job for default lists (no user). High priority by default."""
-        job_data = {
-            "job_id": str(uuid.uuid4()),
-            "user_id": None,
-            "username": "__default__",
-            "type": job_type,
-            "status": cls.STATUS_QUEUED,
-            "priority": priority,
-            "force_rebuild": force_rebuild,
-            "progress": {
-                "current_step": "queued",
-                "stage": "queue",
-                "total_sources": 0,
-                "processed_sources": 0,
-                "current_source": None,
-                "sources": [],
-                "whitelist": None,
-                "generation": None,
-                "queue_position": None,
-                "queue_delay_remaining_ms": None,
-                "stage_started_at": None,
-            },
-            "result": None,
-            "started_at": None,
-            "completed_at": None,
-            "created_at": datetime.utcnow(),
-            "worker_id": None,
-            "claimed_at": None,
-            "heartbeat_at": None,
-        }
-
-        result = mongo.db[cls.COLLECTION].insert_one(job_data)
-        job_data["_id"] = result.inserted_id
-
-        return cls(job_data)
-
     @classmethod
     def get_by_id(cls, job_id: str) -> Optional["Job"]:
         """Get job by ID (either _id or job_id)."""
@@ -347,6 +280,7 @@ class Job:
                             f"Abandoned after {max_attempts} attempts that each "
                             f"died before completing (worker crashed or ran out of memory)"
                         ],
+                        "error_code": cls.ERROR_WORKER_ABANDONED,
                     },
                 }
             },
@@ -439,20 +373,11 @@ class Job:
     # Cooldown and scheduling methods
 
     @classmethod
-    def has_active_job_for_user(cls, user_id: ObjectId) -> bool:
-        """
-        Check if user has any active job (queued or processing).
-        Used to prevent duplicate builds.
-        """
-        return (
-            mongo.db[cls.COLLECTION].count_documents(
-                {
-                    "user_id": user_id,
-                    "status": {"$in": [cls.STATUS_QUEUED, cls.STATUS_PROCESSING]},
-                }
-            )
-            > 0
+    def get_active_for_target(cls, target_id: str) -> Optional["Job"]:
+        data = mongo.db[cls.COLLECTION].find_one(
+            {"target_id": target_id, "status": {"$in": list(cls.ACTIVE_STATUSES)}}
         )
+        return cls(data) if data else None
 
     @classmethod
     def get_last_completed_for_user(

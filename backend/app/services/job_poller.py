@@ -92,6 +92,7 @@ class JobStatusPoller:
 
     def _check_jobs(self):
         """Query active jobs and emit updates for changed ones."""
+        from app.services.build_admission import refund_quota_if_due
         from app.socketio import emit_job_progress, emit_job_completed
 
         # Get all active jobs (queued or processing)
@@ -120,6 +121,7 @@ class JobStatusPoller:
                         Job.STATUS_FAILED,
                         Job.STATUS_SKIPPED,
                     ):
+                        refund_quota_if_due(job_id)
                         emit_job_completed(
                             job.to_dict(), str(job.user_id) if job.user_id else None
                         )
