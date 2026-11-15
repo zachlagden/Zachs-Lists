@@ -200,6 +200,15 @@ class User:
         return self._data.get("lists", [])
 
     @property
+    def published_generation(self) -> Optional[str]:
+        return self._data.get("published_generation")
+
+    @property
+    def published_at(self) -> Optional[datetime]:
+        published = self._data.get("published")
+        return published.get("published_at") if isinstance(published, dict) else None
+
+    @property
     def ip_log(self) -> List[Dict[str, Any]]:
         """Get IP access log."""
         return self._data.get("ip_log", [])
@@ -220,11 +229,6 @@ class User:
     def get_output_dir(self) -> str:
         """Get user's output directory."""
         return os.path.join(self.get_user_dir(), "output")
-
-    def get_output_path(self, list_name: str, format_type: str) -> str:
-        """Get path to output file for a specific list and format."""
-        filename = f"{list_name}_{format_type}.txt"
-        return os.path.join(self.get_output_dir(), filename)
 
     # Config methods
     CONFIG_SCHEMA_VERSION = 1

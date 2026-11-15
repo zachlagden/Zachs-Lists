@@ -29,6 +29,36 @@ class SystemConfig:
         return total
 
     @classmethod
+    def get_default_publication(cls) -> dict[str, Any]:
+        build = (
+            mongo.db[cls.COLLECTION].find_one(
+                {"_id": cls.BUILD_DOC_ID},
+                {
+                    "published_generation": 1,
+                    "published.published_at": 1,
+                    "total_domains": 1,
+                },
+            )
+            or {}
+        )
+        published = build.get("published")
+        published_at = (
+            published.get("published_at") if isinstance(published, dict) else None
+        )
+        total = build.get("total_domains")
+        return {
+            "generation_id": build.get("published_generation"),
+            "published_at": (
+                published_at if isinstance(published_at, datetime) else None
+            ),
+            "total_domains": (
+                total
+                if isinstance(total, int) and not isinstance(total, bool) and total >= 0
+                else None
+            ),
+        }
+
+    @classmethod
     def get_default_config(cls) -> dict:
         """Get both blocklists and whitelist configs."""
         doc = mongo.db[cls.COLLECTION].find_one({"_id": cls.DOC_ID})
