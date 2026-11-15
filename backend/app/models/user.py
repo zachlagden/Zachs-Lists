@@ -585,6 +585,31 @@ class User:
         )
         return notified.matched_count == 1
 
+    @classmethod
+    def notify_unless_unread(
+        cls,
+        user_id: ObjectId,
+        notification: Dict[str, Any],
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        same_type_unread = {
+            "$elemMatch": {"type": notification["type"], "read": {"$ne": True}}
+        }
+        notified = cls._users(users).update_one(
+            {"_id": user_id, "notifications": {"$not": same_type_unread}},
+            {
+                "$set": {"updated_at": notification["created_at"]},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": cls.MAX_NOTIFICATIONS,
+                    }
+                },
+            },
+        )
+        return notified.matched_count == 1
+
     def log_ip_access(self, ip: str) -> None:
         from app.services.download_recorder import access_log_hash
 

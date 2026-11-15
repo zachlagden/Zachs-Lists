@@ -841,6 +841,107 @@ def test_scheduled_rebuild_skips_active_recent_and_unconfigured_users(
     assert site.db.jobs.count_documents({"target_id": site.sam.id}) == 1
 
 
+def weekly_skip_notices(site: Site, user: User) -> list[dict[str, Any]]:
+    return [
+        notice
+        for notice in site.stored_user(user).get("notifications", [])
+        if notice["type"] == build_admission.WEEKLY_REBUILD_SKIPPED_TYPE
+    ]
+
+
+def test_scheduled_rebuild_refused_for_an_invalid_config_notifies_the_user_once(
+    site: Site, caplog: pytest.LogCaptureFixture
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": INVALID_CONFIG}}
+    )
+
+    with caplog.at_level("WARNING", logger="app.services.build_admission"):
+        assert queue_scheduled_user_builds() == (1, 1)
+        site.db.jobs.delete_many({})
+        assert queue_scheduled_user_builds() == (1, 1)
+
+    notices = weekly_skip_notices(site, site.sam)
+    assert len(notices) == 1
+    assert notices[0]["title"] == "Your weekly rebuild was skipped"
+    assert notices[0]["message"] == (
+        "The weekly rebuild of your lists was skipped because your saved "
+        "configuration is not valid. "
+        'The first problem is "Line 1: Invalid or unsafe source URL". '
+        "Your current lists stay published until you fix and save the configuration."
+    )
+    assert notices[0]["read"] is False
+    assert notices[0]["data"] == {"error_count": 1}
+    assert weekly_skip_notices(site, site.alex) == []
+    assert site.db.jobs.count_documents({"target_id": site.sam.id}) == 0
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "WARNING"
+    ]
+    assert (
+        warnings
+        == [
+            f"Weekly rebuild refused for user {site.sam.id}: "
+            "configuration validation errors: 1"
+        ]
+        * 2
+    )
+    assert INVALID_CONFIG not in caplog.text
+    shown = site.client(site.sam).get("/api/user/notifications").get_json()
+    assert [notice["id"] for notice in shown["notifications"]] == [notices[0]["id"]]
+
+
+def test_scheduled_rebuild_notifies_again_once_the_earlier_notice_is_read(
+    site: Site,
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": INVALID_CONFIG}}
+    )
+    queue_scheduled_user_builds()
+    site.db.jobs.delete_many({})
+    first = weekly_skip_notices(site, site.sam)[0]
+    stored = User.get_by_id(site.sam.id)
+    assert stored is not None
+    assert stored.mark_notification_read(first["id"])
+
+    queue_scheduled_user_builds()
+
+    notices = weekly_skip_notices(site, site.sam)
+    assert [notice["read"] for notice in notices] == [False, True]
+
+
+def test_weekly_skip_notice_keeps_the_notification_cap(site: Site) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)},
+        {
+            "$set": {
+                "config.blocklists": INVALID_CONFIG,
+                "notifications": [
+                    {"id": str(index), "type": "example", "read": False}
+                    for index in range(User.MAX_NOTIFICATIONS)
+                ],
+            }
+        },
+    )
+
+    queue_scheduled_user_builds()
+
+    stored = site.stored_user(site.sam)["notifications"]
+    assert len(stored) == User.MAX_NOTIFICATIONS
+    assert stored[0]["type"] == build_admission.WEEKLY_REBUILD_SKIPPED_TYPE
+
+
+def test_scheduled_rebuild_without_a_config_sends_no_notice(site: Site) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": ""}}
+    )
+
+    assert queue_scheduled_user_builds() == (1, 0)
+
+    assert weekly_skip_notices(site, site.sam) == []
+
+
 def test_scheduled_rebuild_continues_after_one_user_fails(
     site: Site, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -28,6 +28,8 @@ REFUNDABLE_ERROR_CODES = (
     Job.ERROR_SUPERSEDED,
 )
 EPOCH = datetime(1970, 1, 1)
+WEEKLY_REBUILD_SKIPPED_TYPE = "weekly_rebuild_skipped"
+WEEKLY_REBUILD_SKIPPED_TITLE = "Your weekly rebuild was skipped"
 
 
 class AdmissionError(Exception):
@@ -116,13 +118,53 @@ def queue_scheduled_user_builds() -> tuple[int, int]:
         except AdmissionError as refusal:
             if refusal.code == "no_config":
                 continue
-            logger.info(
-                "Skipping %s (%s): %s", user.username, refusal.code, refusal.message
-            )
+            if refusal.code == "invalid_config":
+                _report_refused_weekly_rebuild(user, refusal)
+            else:
+                logger.info(
+                    "Skipping %s (%s): %s", user.username, refusal.code, refusal.message
+                )
             skipped += 1
         except Exception:
             logger.exception("Failed to queue rebuild for %s", user.username)
     return queued, skipped
+
+
+def weekly_rebuild_skipped_message(first_error: str | None) -> str:
+    problem = f' The first problem is "{first_error}".' if first_error else ""
+    return (
+        "The weekly rebuild of your lists was skipped because your saved "
+        f"configuration is not valid.{problem} "
+        "Your current lists stay published until you fix and save the configuration."
+    )
+
+
+def _report_refused_weekly_rebuild(user: User, refusal: AdmissionError) -> None:
+    errors = [str(error) for error in refusal.details.get("errors") or []]
+    logger.warning(
+        "Weekly rebuild refused for user %s: configuration validation errors: %d",
+        user.id,
+        len(errors),
+    )
+    try:
+        User.notify_unless_unread(
+            ObjectId(user.id),
+            {
+                "id": str(uuid.uuid4()),
+                "type": WEEKLY_REBUILD_SKIPPED_TYPE,
+                "title": WEEKLY_REBUILD_SKIPPED_TITLE,
+                "message": weekly_rebuild_skipped_message(
+                    errors[0] if errors else None
+                ),
+                "data": {"error_count": len(errors)},
+                "read": False,
+                "created_at": datetime.utcnow(),
+            },
+        )
+    except PyMongoError:
+        logger.exception(
+            "Could not notify user %s that the weekly rebuild was refused", user.id
+        )
 
 
 def _admit_user_build(
