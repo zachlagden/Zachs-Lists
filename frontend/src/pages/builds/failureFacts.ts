@@ -1,5 +1,6 @@
 import type { Job } from '../../types';
 import { sentence } from '../../lib/text';
+import { statesNothingPublished } from '../../lib/builds';
 
 export const ERROR_CODES = [
   'invalid_config',
@@ -84,8 +85,6 @@ const UNKNOWN_FAILURE: FailureCopy = {
   nextSteps: ['edit-sources', 'build-again'],
 };
 
-const NOTHING_PUBLISHED = /nothing was published/i;
-
 export interface BuildFailure {
   code: string | null;
   title: string;
@@ -110,7 +109,7 @@ export function buildFailure(job: Job): BuildFailure | null {
     code,
     title: copy.title,
     serverMessage,
-    statesNothingPublished: NOTHING_PUBLISHED.test(serverMessage),
+    statesNothingPublished: statesNothingPublished(serverMessage),
     advice: copy.advice,
     nextSteps: copy.nextSteps,
     limit: measured

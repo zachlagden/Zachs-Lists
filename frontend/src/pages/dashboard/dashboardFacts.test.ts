@@ -14,6 +14,7 @@ import type { Job, JobResult, LimitReview, SourceProgress, UserList } from '../.
 import {
   attentionItems,
   describeAttention,
+  describeLastFailure,
   describeManualBuilds,
   describeSourceSummary,
   domainUsage,
@@ -268,6 +269,20 @@ describe('sources', () => {
     expect(attentionItems([silent])[0].detail).toBe(
       'The download failed. No usable earlier copy exists, so it was left out.',
     );
+  });
+});
+
+describe('the last failed build', () => {
+  it('says once that the earlier list is still served', () => {
+    expect(describeLastFailure('All source downloads failed')).toBe(
+      'All source downloads failed. Your earlier list is still being served.',
+    );
+    expect(describeLastFailure(null)).toBe(
+      'The last build failed. Your earlier list is still being served.',
+    );
+    const overLimit =
+      'These lists have 5,123,456 domains across all categories, which is over the limit of 4,000,000, so nothing was published and the previously published lists remain in place.';
+    expect(describeLastFailure(overLimit)).toBe(overLimit);
   });
 });
 

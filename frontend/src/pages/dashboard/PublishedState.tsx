@@ -15,9 +15,10 @@ import {
   pluralise,
 } from '../../lib/format';
 import type { Job } from '../../types';
-import { domainChange, sourceProblemCause } from '../../lib/builds';
+import { domainChange } from '../../lib/builds';
 import {
   describeAttention,
+  describeLastFailure,
   describeManualBuilds,
   lastFinishedJob,
   lastCheckFoundChanges,
@@ -113,9 +114,7 @@ function summarySentence({
   }
   if (state === 'published-last-failed') {
     const failed = lastFinishedJob(jobs);
-    sentences.push(
-      `${sourceProblemCause(failed?.result?.errors[0]) || 'The last build failed.'} Your earlier list is still being served.`,
-    );
+    sentences.push(describeLastFailure(failed?.result?.errors[0]));
   }
   const attention = describeAttention(sourceSummary(sources));
   if (attention && state !== 'published-last-failed') sentences.push(attention);

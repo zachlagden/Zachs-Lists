@@ -112,3 +112,9 @@ export function requestedBy(job: Pick<Job, 'type' | 'username'>, viewer: BuildVi
 export function isUnreadFailure(job: Pick<Job, 'status' | 'read'>): boolean {
   return job.status === 'failed' && job.read === false;
 }
+
+const NOTHING_PUBLISHED = /nothing was published/i;
+
+export function statesNothingPublished(message: string | null | undefined): boolean {
+  return NOTHING_PUBLISHED.test(message ?? '');
+}

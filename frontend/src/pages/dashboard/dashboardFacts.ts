@@ -1,6 +1,6 @@
 import type { UserListsResponse } from '../../api/lists';
 import { sourceOutcome } from '../../components/ui/status';
-import { sourceProblemCause } from '../../lib/builds';
+import { sourceProblemCause, statesNothingPublished } from '../../lib/builds';
 import { formatDateTime } from '../../lib/format';
 import { ADULT_CONTENT_LIST, COMBINED_LIST } from '../../lib/listCatalogue';
 import { isActive } from '../../realtime/jobMerge';
@@ -191,4 +191,11 @@ export function describeManualBuilds(
     return `No manual builds left this week. More on ${formatDateTime(nextManualBuildReset(now), { now })}`;
   }
   return `${remaining} of ${perWeek} manual builds left this week`;
+}
+
+export function describeLastFailure(report: string | null | undefined): string {
+  const cause = sourceProblemCause(report) || 'The last build failed.';
+  return statesNothingPublished(cause)
+    ? cause
+    : `${cause} Your earlier list is still being served.`;
 }
