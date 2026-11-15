@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Github, ChevronDown, Copy, Check, Heart } from 'lucide-react';
 import RustBadge from './RustBadge';
-import PublicNav from '../PublicNav';
 import { getDefaultListUrl } from '../../config/site';
 
 interface CinematicHeroProps {
@@ -29,9 +28,6 @@ export default function CinematicHero({ isAuthenticated }: CinematicHeroProps) {
 
       {/* Rust-colored radial glow */}
       <div className="absolute top-1/3 right-0 w-[600px] h-[600px] bg-gradient-radial-rust opacity-40 translate-x-1/4" />
-
-      {/* Navigation */}
-      <PublicNav className="shrink-0" />
 
       {/* Main Hero Content - Two Column */}
       <div className="relative z-10 flex-1 flex items-center">
