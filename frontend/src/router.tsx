@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { createBrowserRouter, Outlet, type RouteObject } from 'react-router-dom';
+import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AppShell } from './components/shell/AppShell';
 import { PagePending } from './components/shell/Pending';
 import { PublicShell } from './components/shell/PublicShell';
@@ -57,12 +57,47 @@ export const routes: RouteObject[] = [
                     children: [
                       {
                         path: 'admin',
-                        element: <Outlet />,
+                        lazy: page(() => import('./pages/admin/AdminLayout')),
                         children: [
-                          { index: true, lazy: page(() => import('./pages/AdminPage')) },
+                          {
+                            index: true,
+                            lazy: page(() => import('./pages/admin/overview/OverviewPage')),
+                          },
+                          {
+                            path: 'users',
+                            lazy: page(() => import('./pages/admin/users/UsersPage')),
+                          },
                           {
                             path: 'users/:userId',
-                            lazy: page(() => import('./pages/AdminUserDetailPage')),
+                            lazy: page(() => import('./pages/admin/users/detail/UserDetailPage')),
+                          },
+                          {
+                            path: 'limits',
+                            lazy: page(() => import('./pages/admin/limits/LimitsPage')),
+                          },
+                          {
+                            path: 'default-lists',
+                            lazy: page(
+                              () => import('./pages/admin/default-lists/DefaultListsPage'),
+                            ),
+                          },
+                          {
+                            path: 'featured',
+                            lazy: page(() => import('./pages/admin/featured/FeaturedPage')),
+                          },
+                          {
+                            path: 'builds',
+                            lazy: page(() => import('./pages/admin/builds/BuildsPage')),
+                          },
+                          {
+                            path: 'library',
+                            lazy: page(() => import('./pages/admin/library/LibraryPage')),
+                          },
+                          {
+                            path: 'announcements',
+                            lazy: page(
+                              () => import('./pages/admin/announcements/AnnouncementsPage'),
+                            ),
                           },
                           {
                             path: 'jobs/:jobId',

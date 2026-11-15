@@ -45,13 +45,27 @@ const ADMIN_DETAIL_TITLES: Record<string, string> = {
   jobs: 'Build',
 };
 
+const ADMIN_SECTION_TITLES: Record<string, string> = {
+  users: 'Users',
+  limits: 'Limits',
+  'default-lists': 'Default lists',
+  featured: 'Featured',
+  builds: 'Builds',
+  library: 'Library',
+  announcements: 'Announcements',
+};
+
 export function breadcrumbsFor(pathname: string): Breadcrumb[] {
   const segments = pathname.split('/').filter(Boolean);
   const [first, second] = segments;
   if (!first) return [];
   const root = PAGE_TITLES[first] ?? 'Page not found';
   if (first === 'admin' && second) {
-    return [{ label: root, to: '/admin' }, { label: ADMIN_DETAIL_TITLES[second] ?? 'Details' }];
+    const section = segments.length === 2 ? ADMIN_SECTION_TITLES[second] : undefined;
+    return [
+      { label: root, to: '/admin' },
+      { label: section ?? ADMIN_DETAIL_TITLES[second] ?? 'Details' },
+    ];
   }
   if (first === 'dev' && second === 'components') {
     return [{ label: root }, { label: 'Components' }];
