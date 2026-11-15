@@ -22,6 +22,7 @@ from app.models.limit_request import LimitRequest
 from app.models.worker import Worker
 from app.services.admin_forms import (
     MAX_DESCRIPTION_LENGTH,
+    MAX_FEATURED_ORDER,
     DefaultConfigCheckUnavailable,
     announcement_fields,
     approved_limit,
@@ -47,6 +48,7 @@ from app.utils.request_fields import (
     register_field_errors,
     required_bool,
     required_choice,
+    required_int,
     required_string,
 )
 from app.utils.time import utc_iso
@@ -632,6 +634,24 @@ def add_featured_list(admin: User):
 
     featured = entry.to_dict()
     return jsonify({"success": True, "id": featured["id"], "featured": featured})
+
+
+@admin_bp.route("/featured/<featured_id>", methods=["PUT"])
+@admin_required
+def reorder_featured_list(admin: User, featured_id: str):
+    """Set a featured list's position."""
+    entry_id = object_id(featured_id, "featured_id")
+    order = required_int(json_object(), "order", 0, MAX_FEATURED_ORDER)
+
+    entry = FeaturedList.set_order(entry_id, order)
+    if entry is None:
+        return jsonify({"error": "Featured list not found"}), 404
+
+    current_app.logger.info(
+        f"Admin {admin.username} set featured list {featured_id} to order {order}"
+    )
+
+    return jsonify({"success": True, "featured": entry.to_dict()})
 
 
 @admin_bp.route("/featured/<featured_id>", methods=["DELETE"])

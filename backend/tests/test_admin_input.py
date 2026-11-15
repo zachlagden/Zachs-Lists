@@ -840,3 +840,115 @@ def test_user_jobs_listing_refuses_unknown_users_and_non_admins(
 
     assert api.client(sam).get(f"/api/admin/users/{sam.id}/jobs").status_code == 403
     assert api.client().get(f"/api/admin/users/{sam.id}/jobs").status_code == 401
+
+
+def featured_entries(api: Api, sam: User, names: tuple[str, ...]) -> list[str]:
+    api.db.users.update_one(
+        {"username": "sam"},
+        {"$set": {"lists": [{"name": name, "domain_count": 1} for name in names]}},
+    )
+    stored = api.db.featured_lists.insert_many(
+        [
+            {"username": "sam", "list_name": name, "order": position}
+            for position, name in enumerate(names, start=1)
+        ]
+    )
+    return [str(entry_id) for entry_id in stored.inserted_ids]
+
+
+def featured_names(client: FlaskClient) -> list[str]:
+    listing = client.get("/api/admin/featured").get_json()["featured"]
+    return [entry["list_name"] for entry in listing]
+
+
+def test_featured_order_update_returns_the_item_and_moves_it(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    first, second, third = featured_entries(api, sam, ("first", "second", "third"))
+
+    moved = admin_client.put(f"/api/admin/featured/{third}", json={"order": 2})
+
+    assert moved.status_code == 200
+    assert moved.get_json() == {
+        "success": True,
+        "featured": {
+            "id": third,
+            "username": "sam",
+            "list_name": "third",
+            "description": "",
+            "order": 2,
+        },
+    }
+    assert (
+        admin_client.put(f"/api/admin/featured/{second}", json={"order": 3}).status_code
+        == 200
+    )
+    assert featured_names(admin_client) == ["first", "third", "second"]
+    public = api.client().get("/api/browse/featured").get_json()
+    assert [entry["list_name"] for entry in public] == ["first", "third", "second"]
+    assert first in {
+        entry["id"]
+        for entry in admin_client.get("/api/admin/featured").get_json()["featured"]
+    }
+
+
+def test_featured_lists_with_equal_order_sort_oldest_first(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    first, second, third = featured_entries(api, sam, ("first", "second", "third"))
+
+    tied = admin_client.put(f"/api/admin/featured/{third}", json={"order": 1})
+
+    assert tied.status_code == 200
+    assert featured_names(admin_client) == ["first", "third", "second"]
+    assert (
+        admin_client.put(f"/api/admin/featured/{second}", json={"order": 0}).status_code
+        == 200
+    )
+    assert featured_names(admin_client) == ["second", "first", "third"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"order": None},
+        {"order": "2"},
+        {"order": 1.5},
+        {"order": True},
+        {"order": -1},
+        {"order": 1_000_001},
+        {"order": [2]},
+    ],
+)
+def test_featured_order_update_refuses_an_invalid_order(
+    api: Api, admin_client: FlaskClient, sam: User, body: dict[str, Any]
+) -> None:
+    (entry,) = featured_entries(api, sam, ("first",))
+
+    refusal(admin_client.put(f"/api/admin/featured/{entry}", json=body), "order")
+
+    assert api.db.featured_lists.find_one({})["order"] == 1
+
+
+def test_featured_order_update_refuses_bad_ids_and_non_admins(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    (entry,) = featured_entries(api, sam, ("first",))
+
+    refusal(
+        admin_client.put("/api/admin/featured/undefined", json={"order": 2}),
+        "featured_id",
+    )
+    not_an_object = admin_client.put(f"/api/admin/featured/{entry}", json=[2])
+    assert not_an_object.status_code == 400
+    missing = admin_client.put(f"/api/admin/featured/{ObjectId()}", json={"order": 2})
+    assert missing.status_code == 404
+    assert missing.get_json() == {"error": "Featured list not found"}
+    assert api.db.featured_lists.count_documents({}) == 1
+
+    blocked = api.client(sam).put(f"/api/admin/featured/{entry}", json={"order": 2})
+    assert blocked.status_code == 403
+    signed_out = api.client().put(f"/api/admin/featured/{entry}", json={"order": 2})
+    assert signed_out.status_code == 401
+    assert api.db.featured_lists.find_one({})["order"] == 1
