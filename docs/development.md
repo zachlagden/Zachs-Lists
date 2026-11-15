@@ -131,7 +131,7 @@ pnpm --dir frontend install
 pnpm --dir frontend dev
 ```
 
-Vite serves the frontend on `http://localhost:5173` and proxies `/api`, `/socket.io`, `/lists/` and `/u/` to `http://localhost:5000`. Open the site as `localhost`, not `127.0.0.1`, so the origin matches `FRONTEND_URL`.
+Vite serves the frontend on `http://localhost:5173` and proxies `/api`, `/socket.io`, `/lists/` and `/u/` to `http://localhost:5000`. Set `BACKEND_URL` before starting Vite to proxy to Flask on another address. Open the site as `localhost`, not `127.0.0.1`, so the origin matches `FRONTEND_URL`.
 
 ## Sign in without GitHub
 
