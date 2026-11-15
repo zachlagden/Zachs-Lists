@@ -8,6 +8,8 @@ use crate::generator::OutputFormat;
 use crate::test_support::{insert_job, queued_job, stored_job, test_database};
 
 const WRITE_INTERVAL: Duration = Duration::from_millis(300);
+const TICK_WAIT: Duration = Duration::from_secs(30);
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 fn sources(count: usize) -> Vec<Source> {
     (0..count)
@@ -35,6 +37,27 @@ fn downloaded(source: &Source, error: Option<&str>, stale: bool) -> DownloadResu
         warnings: Vec::new(),
         previous_domain_count: None,
     }
+}
+
+#[test]
+fn each_source_starts_with_the_category_from_its_config_line() {
+    let parsed = Downloader::parse_config(
+        "https://lists.example.com/ads.txt|ads_list|advertising\n\
+         https://lists.example.com/plain.txt|plain_list\n\
+         https://lists.example.org/bare.txt\n",
+    )
+    .unwrap();
+
+    let progress = ProgressTracker::downloading(&parsed).snapshot();
+
+    let categories: Vec<Option<&str>> = progress
+        .sources
+        .iter()
+        .map(|source| source.category.as_deref())
+        .collect();
+    assert_eq!(categories, [Some("advertising"), None, None]);
+    let written = bson::to_document(&progress.sources[1]).unwrap();
+    assert_eq!(written.get("category"), Some(&Bson::Null));
 }
 
 fn field_names(fields: &Document) -> Vec<&str> {
@@ -85,6 +108,20 @@ async fn claimed_job(source_count: usize) -> Claimed {
     }
 }
 
+async fn job_once_written_after(claimed: &Claimed, revision_before: i64) -> Document {
+    tokio::time::timeout(TICK_WAIT, async {
+        loop {
+            let job = stored_job(&claimed.db, &claimed.job_id).await;
+            if revision(&job) > revision_before {
+                return job;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("the progress writer writes on its tick")
+}
+
 #[test]
 fn a_new_tracker_writes_the_whole_progress_once() {
     let tracker = ProgressTracker::downloading(&sources(2));
@@ -113,7 +150,7 @@ fn source_updates_write_only_the_changed_sources_and_scalars() {
     assert_eq!(source.get_i64("bytes_downloaded").unwrap(), 1024);
     assert_eq!(source.get_i64("bytes_total").unwrap(), 2048);
     assert_eq!(source.get_f64("download_percent").unwrap(), 50.0);
-    assert_eq!(source.len(), 18);
+    assert_eq!(source.len(), 19);
 
     tracker.source_downloaded(2, &downloaded(&all[2], None, false));
     tracker.source_downloaded(0, &downloaded(&all[0], Some("HTTP 503"), false));
@@ -258,8 +295,7 @@ async fn many_updates_inside_one_interval_produce_at_most_one_write() {
     for downloaded in 1..=500 {
         claimed.tracker.source_bytes(1, downloaded * 100, None);
     }
-    tokio::time::sleep(WRITE_INTERVAL + WRITE_INTERVAL / 2).await;
-    let after_updates = stored_job(&claimed.db, &claimed.job_id).await;
+    let after_updates = job_once_written_after(&claimed, after_start).await;
     assert_eq!(revision(&after_updates), after_start + 1);
     let written = after_updates
         .get_document("progress")
@@ -372,9 +408,14 @@ async fn tick_flush_after_lease_loss_cancels_the_build() {
     let held_by_other = stored_job(&claimed.db, &claimed.job_id).await;
 
     claimed.tracker.source_started(0);
-    tokio::time::sleep(WRITE_INTERVAL * 2).await;
+    tokio::time::timeout(TICK_WAIT, async {
+        while !claimed.cancellation.is_cancelled() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("the tick after the lease was lost cancels the build");
 
-    assert!(claimed.cancellation.is_cancelled());
     assert_eq!(
         stored_job(&claimed.db, &claimed.job_id).await,
         held_by_other

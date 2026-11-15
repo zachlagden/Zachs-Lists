@@ -13,6 +13,8 @@ import { legacyTabPath } from '../shared/sections';
 import { ActivityCharts } from './ActivityCharts';
 import { recentFailedBuilds } from './overviewFacts';
 import { SystemFigures, SystemFiguresSkeleton } from './SystemFigures';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 function FailedBuilds({ now }: { now: Date }) {
   const jobs = useQuery(adminJobsQuery());
@@ -53,6 +55,7 @@ function FailedBuilds({ now }: { now: Date }) {
 }
 
 export default function OverviewPage() {
+  useDocumentMeta(adminTitle('Overview'));
   const location = useLocation();
   const now = useNow();
   const stats = useQuery(adminStatsQuery());

@@ -1,7 +1,9 @@
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -59,6 +61,8 @@ export const ICONS = {
   'chevron-down': ChevronDown,
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
+  'arrow-up': ArrowUp,
+  'arrow-down': ArrowDown,
   search: Search,
   trash: Trash2,
 } as const satisfies Record<string, LucideIcon>;

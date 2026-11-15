@@ -34,13 +34,7 @@ import {
   whitelistChanges,
 } from './configFacts';
 import { EditorCard, type EditorDialog } from './EditorCard';
-import {
-  ConflictDialog,
-  LeaveDialog,
-  NoticeAlert,
-  RestoreAlert,
-  TemplateDialog,
-} from './EditorNotices';
+import { ConflictDialog, NoticeAlert, RestoreAlert, TemplateDialog } from './EditorNotices';
 import type { EditorTab } from './editorState';
 import { readEditorView, rememberEditorView, type EditorView } from './editorView';
 import { SaveBar } from './SaveBar';
@@ -49,6 +43,7 @@ import { SourceDialogs } from './SourceDialogs';
 import { SyntaxHelp } from './SyntaxHelp';
 import { useConfigActions } from './useConfigActions';
 import { useEditorDraft } from './useEditorDraft';
+import { LeaveDialog } from '../../components/ui/LeaveDialog';
 
 const VIEW_OPTIONS = [
   { value: 'visual', label: 'Visual' },
@@ -307,7 +302,9 @@ export function ConfigEditor({
         }}
         onKeepMyEdits={() => dispatch({ type: 'keep-my-edits' })}
       />
-      <LeaveDialog blocker={draft.blocker} onLeave={discard} />
+      <LeaveDialog blocker={draft.blocker} onLeave={discard}>
+        Your unsaved changes to the sources or the whitelist will be lost.
+      </LeaveDialog>
     </>
   );
 }

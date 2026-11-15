@@ -1,7 +1,7 @@
 import type { AdminUserDetail } from '../../../../api/admin';
 import { Card, CardBody, CardHeader } from '../../../../components/ui/Card';
 import { KeyValueList } from '../../../../components/ui/Layout';
-import { StatusPill } from '../../../../components/ui/StatusPill';
+import { DescribedPill } from '../../../../components/ui/StatusPill';
 import {
   formatBytes,
   formatDateTime,
@@ -21,12 +21,8 @@ export function ProfileCard({ user, now }: { user: AdminUserDetail; now: Date })
         titleId="user-profile"
         actions={
           <>
-            <StatusPill tone={role.tone} icon={role.icon}>
-              {role.label}
-            </StatusPill>
-            <StatusPill tone={state.tone} icon={state.icon}>
-              {state.label}
-            </StatusPill>
+            <DescribedPill description={role} />
+            <DescribedPill description={state} />
           </>
         }
       />

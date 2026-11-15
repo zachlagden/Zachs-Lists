@@ -1,14 +1,8 @@
+import { formatInteger } from '../lib/format';
 import type { LimitReview } from '../types';
 
 export function openLimitReview(review: LimitReview | null | undefined): LimitReview | null {
   return review && review.status === 'open' ? review : null;
-}
-
-export function limitReviewMethodLabel(method: string): string {
-  if (method === 'exact') return 'Counted from files';
-  if (method === 'build') return 'Counted by a build';
-  if (method === 'stored') return 'Estimated from stored counts';
-  return method;
 }
 
 export function limitConsequence(enforcing: boolean): string {
@@ -18,8 +12,8 @@ export function limitConsequence(enforcing: boolean): string {
 }
 
 export function limitReviewSummary(review: LimitReview): string {
-  const measured = review.actual_domains.toLocaleString('en-GB');
-  const limit = review.max_domains.toLocaleString('en-GB');
+  const measured = formatInteger(review.actual_domains);
+  const limit = formatInteger(review.max_domains);
   const about = review.method === 'stored' ? 'about ' : '';
   return `Your lists contain ${about}${measured} domains across all categories. Your limit is ${limit}.`;
 }

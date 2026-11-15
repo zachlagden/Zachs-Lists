@@ -1,8 +1,7 @@
+import { DEFAULT_LISTS_USERNAME } from '../../../lib/builds';
 import { formatInteger } from '../../../lib/format';
 import { isActive } from '../../../realtime/jobMerge';
 import type { Job, JobStage, JobStatus, JobType } from '../../../types';
-
-export const DEFAULT_LISTS_OWNER = '__default__';
 
 export const BUILD_STATUSES: ReadonlyArray<JobStatus> = [
   'queued',
@@ -14,12 +13,6 @@ export const BUILD_STATUSES: ReadonlyArray<JobStatus> = [
 
 export const BUILD_TYPES: ReadonlyArray<JobType> = ['manual', 'scheduled', 'admin'];
 
-export const BUILD_TYPE_LABELS: Record<JobType, string> = {
-  manual: 'Manual',
-  scheduled: 'Scheduled',
-  admin: 'Started by an admin',
-};
-
 export interface BuildFilters {
   status: JobStatus | 'all';
   type: JobType | 'all';
@@ -27,7 +20,7 @@ export interface BuildFilters {
 }
 
 export function ownerLabel(job: Pick<Job, 'username'>): string {
-  return job.username === DEFAULT_LISTS_OWNER ? 'Default lists' : job.username;
+  return job.username === DEFAULT_LISTS_USERNAME ? 'Default lists' : job.username;
 }
 
 export function filterBuilds(jobs: Job[], filters: BuildFilters): Job[] {
@@ -51,10 +44,6 @@ export function activeFirst(jobs: Job[]): Job[] {
     .map((job, index) => ({ job, index }))
     .sort((a, b) => activeRank(a.job) - activeRank(b.job) || a.index - b.index)
     .map(({ job }) => job);
-}
-
-export function buildsOfUser(jobs: Job[], userId: string): Job[] {
-  return jobs.filter((job) => job.user_id === userId);
 }
 
 const STAGE_LABELS: Record<JobStage, string> = {

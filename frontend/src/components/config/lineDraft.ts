@@ -138,8 +138,3 @@ export function lineAtReportedNumber(
   }
   return null;
 }
-
-export function lineNumberOf(draft: LineDraft, id: number): number | null {
-  const index = draft.lines.findIndex((line) => line.id === id);
-  return index === -1 ? null : index + 1;
-}

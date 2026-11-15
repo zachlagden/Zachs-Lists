@@ -137,7 +137,6 @@ export function WhitelistPanel({
                     </div>
                     <Button
                       size="sm"
-                      className="narrow:min-h-11"
                       variant="ghost"
                       onClick={() => onRemove(entry.line.id)}
                       aria-label={`Remove ${entry.pattern}`}

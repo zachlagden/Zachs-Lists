@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import domainLimit from '../../../../tests/fixtures/domain-limit.json';
 import fixture from '../../../../tests/fixtures/job-progress.json';
 import type { EnhancedJobProgress, Job, JobResult, JobStatus, SourceProgress } from '../../types';
+import { attemptSeconds, isUnreadFailure, requestedBy, sourceProblemCause } from '../../lib/builds';
 import {
-  attemptSeconds,
   buildPhase,
   buildSources,
   buildSteps,
@@ -11,14 +12,12 @@ import {
   hasStageProgress,
   outputLists,
   queueWaitSeconds,
-  requestedBy,
 } from './buildFacts';
 import { ERROR_CODES, buildFailure } from './failureFacts';
 import {
   combineHistory,
   finishedBuilds,
   historyFilterFrom,
-  isUnreadFailure,
   legacyBuildPath,
   nextHistoryLimit,
 } from './historyFacts';
@@ -28,10 +27,9 @@ import {
   nameParts,
   sortSources,
   sourceNote,
-  sourceProblemCause,
   sourceTally,
 } from './sourceFacts';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 
 type FixtureName = keyof typeof fixture;
 
@@ -98,6 +96,7 @@ function source(id: string, overrides: Partial<SourceProgress> = {}): SourceProg
     id,
     name: id,
     url: `https://lists.example.org/${id}.txt`,
+    category: null,
     status: 'pending',
     cache_hit: null,
     stale: false,
@@ -206,6 +205,12 @@ describe('build summary', () => {
     expect(failure.publication).toBe(
       'Nothing was published. Your published lists were left unchanged.',
     );
+    const overLimit = buildSummary(
+      failed('domain_limit_exceeded', domainLimit.over_limit.error),
+      'owner',
+    );
+    expect(overLimit.detail).toBe(domainLimit.over_limit.error);
+    expect(overLimit.publication).toBe('');
     const skipped = buildSummary(
       job('skipped', {
         result: { ...EMPTY_RESULT, skip_reason: 'Nothing changed since the last build' },
@@ -319,7 +324,9 @@ describe('build times', () => {
     const now = new Date('2026-03-04T05:06:36.500Z');
     expect(attemptSeconds(midDownload, now)).toBe(30);
     expect(attemptSeconds(completed, now)).toBeCloseTo(3.9);
-    expect(attemptSeconds(job('queued', { attempt_started_at: '2026-03-04T05:06:06.500Z' }), now)).toBeNull();
+    expect(
+      attemptSeconds(job('queued', { attempt_started_at: '2026-03-04T05:06:06.500Z' }), now),
+    ).toBeNull();
   });
 
   it('reads timestamps as UTC instants', () => {
@@ -455,9 +462,7 @@ describe('who asked for the build', () => {
   it('names the account only to an admin', () => {
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'owner')).toBe('Manual');
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'admin')).toBe('Manual, by alex');
-    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe(
-      'Scheduled rebuild',
-    );
+    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe('Scheduled');
     expect(requestedBy({ type: 'admin', username: '__default__' }, 'admin')).toBe(
       'Started by an admin',
     );

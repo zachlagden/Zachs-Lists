@@ -97,7 +97,3 @@ export function workerState(stats: AdminSystemStats): WorkerState {
 export function recentFailedBuilds(jobs: Job[]): Job[] {
   return jobs.filter((job) => job.status === 'failed').slice(0, FAILED_BUILDS_SHOWN);
 }
-
-export function failureReason(job: Job): string {
-  return job.result?.errors[0] ?? 'No reason was recorded';
-}

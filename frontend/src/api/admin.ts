@@ -18,6 +18,7 @@ import { del, get, post, put } from './http';
 
 export const ADMIN_USERS_PAGE_SIZE = 25;
 export const ADMIN_JOBS_LIMIT = 100;
+export const ADMIN_USER_JOBS_PAGE_SIZE = 10;
 export const ADMIN_LIMIT_REVIEWS_PAGE_SIZE = 25;
 export const ADMIN_STATS_FRESH_MS = 30_000;
 export const ADMIN_ANNOUNCEMENTS_LIMIT = 50;
@@ -74,12 +75,6 @@ export interface BanResult extends AdminActionResult {
   banned_until: string;
 }
 
-export interface AdminUserIps {
-  username: string;
-  ip_count: number;
-  ip_log: AdminIpLogEntry[];
-}
-
 export interface AdminBuildStarted {
   job_id: string;
   status: JobStatus;
@@ -87,6 +82,14 @@ export interface AdminBuildStarted {
 
 export interface AdminJobsResponse {
   jobs: Job[];
+}
+
+export interface AdminUserJobsPage {
+  jobs: Job[];
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
 }
 
 export interface AdminSystemStats extends AdminStats {
@@ -104,16 +107,6 @@ export interface JobsPerDayPoint {
 
 export interface JobsPerDayResponse {
   jobs_per_day: JobsPerDayPoint[];
-}
-
-export interface UserGrowthPoint {
-  date: string;
-  new_users: number;
-  total_users: number;
-}
-
-export interface UserGrowthResponse {
-  user_growth: UserGrowthPoint[];
 }
 
 export interface DefaultConfigUpdate {
@@ -229,13 +222,13 @@ export const adminKeys = {
   users: () => [...adminKeys.all, 'users'] as const,
   userList: (filters: AdminUserFilters) => [...adminKeys.users(), 'list', filters] as const,
   user: (userId: string) => [...adminKeys.users(), 'detail', userId] as const,
-  userIps: (userId: string) => [...adminKeys.users(), 'ips', userId] as const,
   jobs: () => [...adminKeys.all, 'jobs'] as const,
   jobList: (limit: number) => [...adminKeys.jobs(), 'list', limit] as const,
   job: (jobId: string) => [...adminKeys.jobs(), 'detail', jobId] as const,
+  userJobs: () => [...adminKeys.jobs(), 'user'] as const,
+  userJobPage: (userId: string, page: number) => [...adminKeys.userJobs(), userId, page] as const,
   stats: () => [...adminKeys.all, 'stats'] as const,
   jobsPerDay: (days: number) => [...adminKeys.all, 'jobs-per-day', days] as const,
-  userGrowth: (days: number) => [...adminKeys.all, 'user-growth', days] as const,
   defaultConfig: () => [...adminKeys.all, 'default-config'] as const,
   defaultSync: () => [...adminKeys.all, 'default-sync'] as const,
   featured: () => [...adminKeys.all, 'featured'] as const,
@@ -247,7 +240,6 @@ export const adminKeys = {
     [...adminKeys.limitReviews(), 'page', page, perPage] as const,
   library: () => [...adminKeys.all, 'library'] as const,
   libraryList: (category: string | null) => [...adminKeys.library(), 'list', category] as const,
-  libraryEntry: (entryId: string) => [...adminKeys.library(), 'detail', entryId] as const,
   announcements: () => [...adminKeys.all, 'announcements'] as const,
   announcementList: (limit: number) => [...adminKeys.announcements(), 'list', limit] as const,
 };
@@ -298,10 +290,6 @@ export function setUserAdmin(userId: string, isAdmin: boolean): Promise<AdminUse
   });
 }
 
-export function fetchAdminUserIps(userId: string): Promise<AdminUserIps> {
-  return get<AdminUserIps>(`/api/admin/users/${encodeURIComponent(userId)}/ips`);
-}
-
 export function triggerUserRebuild(userId: string): Promise<AdminBuildStarted> {
   return post<AdminBuildStarted>(`/api/admin/rebuild/${encodeURIComponent(userId)}`);
 }
@@ -318,16 +306,23 @@ export function fetchAdminJob(jobId: string): Promise<Job> {
   return get<Job>(`/api/admin/jobs/${encodeURIComponent(jobId)}`);
 }
 
+export function fetchAdminUserJobs(
+  userId: string,
+  page: number = 1,
+  perPage: number = ADMIN_USER_JOBS_PAGE_SIZE,
+): Promise<AdminUserJobsPage> {
+  return get<AdminUserJobsPage>(`/api/admin/users/${encodeURIComponent(userId)}/jobs`, {
+    page,
+    per_page: perPage,
+  });
+}
+
 export function fetchAdminStats(): Promise<AdminSystemStats> {
   return get<AdminSystemStats>('/api/admin/stats');
 }
 
 export function fetchJobsPerDay(days: number = ADMIN_CHART_DAYS): Promise<JobsPerDayResponse> {
   return get<JobsPerDayResponse>('/api/admin/stats/jobs-per-day', { days });
-}
-
-export function fetchUserGrowth(days: number = ADMIN_CHART_DAYS): Promise<UserGrowthResponse> {
-  return get<UserGrowthResponse>('/api/admin/stats/user-growth', { days });
 }
 
 export function fetchDefaultConfig(): Promise<DefaultConfig> {
@@ -355,6 +350,12 @@ export function addFeaturedList(submission: FeaturedListSubmission): Promise<Fea
     username: submission.username,
     list_name: submission.listName,
     description: submission.description ?? '',
+  });
+}
+
+export function moveFeaturedList(featuredId: string, order: number): Promise<FeaturedListAdded> {
+  return put<FeaturedListAdded>(`/api/admin/featured/${encodeURIComponent(featuredId)}`, {
+    order,
   });
 }
 
@@ -404,10 +405,6 @@ export function resolveLimitReview(userId: string, reason: string): Promise<{ su
 
 export function fetchLibrary(category?: string): Promise<AdminLibraryResponse> {
   return get<AdminLibraryResponse>('/api/admin/library', { category });
-}
-
-export function fetchLibraryEntry(entryId: string): Promise<LibraryEntry> {
-  return get<LibraryEntry>(`/api/admin/library/${encodeURIComponent(entryId)}`);
 }
 
 export function addLibraryEntry(submission: LibraryEntrySubmission): Promise<LibraryEntrySaved> {
@@ -461,9 +458,6 @@ export const adminUsersQuery = (filters: AdminUserFilters = {}) =>
 export const adminUserQuery = (userId: string) =>
   queryOptions({ queryKey: adminKeys.user(userId), queryFn: () => fetchAdminUser(userId) });
 
-export const adminUserIpsQuery = (userId: string) =>
-  queryOptions({ queryKey: adminKeys.userIps(userId), queryFn: () => fetchAdminUserIps(userId) });
-
 export const adminJobsQuery = () =>
   queryOptions({
     queryKey: adminKeys.jobList(ADMIN_JOBS_LIMIT),
@@ -475,8 +469,12 @@ export const adminJobsQuery = () =>
     },
   });
 
-export const adminJobQuery = (jobId: string) =>
-  queryOptions({ queryKey: adminKeys.job(jobId), queryFn: () => fetchAdminJob(jobId) });
+export const adminUserJobsQuery = (userId: string, page: number = 1) =>
+  queryOptions({
+    queryKey: adminKeys.userJobPage(userId, page),
+    queryFn: () => fetchAdminUserJobs(userId, page),
+    placeholderData: keepPreviousData,
+  });
 
 export const adminStatsQuery = () =>
   queryOptions({
@@ -487,9 +485,6 @@ export const adminStatsQuery = () =>
 
 export const jobsPerDayQuery = (days: number = ADMIN_CHART_DAYS) =>
   queryOptions({ queryKey: adminKeys.jobsPerDay(days), queryFn: () => fetchJobsPerDay(days) });
-
-export const userGrowthQuery = (days: number = ADMIN_CHART_DAYS) =>
-  queryOptions({ queryKey: adminKeys.userGrowth(days), queryFn: () => fetchUserGrowth(days) });
 
 export const defaultConfigQuery = () =>
   queryOptions({ queryKey: adminKeys.defaultConfig(), queryFn: fetchDefaultConfig });
@@ -520,12 +515,6 @@ export const libraryQuery = (category?: string) =>
   queryOptions({
     queryKey: adminKeys.libraryList(category ?? null),
     queryFn: () => fetchLibrary(category),
-  });
-
-export const libraryEntryQuery = (entryId: string) =>
-  queryOptions({
-    queryKey: adminKeys.libraryEntry(entryId),
-    queryFn: () => fetchLibraryEntry(entryId),
   });
 
 export const adminAnnouncementsQuery = (limit: number = ADMIN_ANNOUNCEMENTS_LIMIT) =>

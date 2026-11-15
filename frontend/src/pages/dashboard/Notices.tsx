@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useId, useState } from 'react';
 import {
   accountKeys,
   announcementsQuery,
@@ -12,14 +13,11 @@ import { describeApiError } from '../../api/errors';
 import { Alert, type AlertTone } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { showToast } from '../../components/ui/toasts';
-import type { Announcement, LimitReview, Notification } from '../../types';
+import { ANNOUNCEMENT_TONES } from '../../lib/notices';
+import { pluralise } from '../../lib/format';
+import type { LimitReview } from '../../types';
 import { limitConsequence, limitReviewSummary } from '../../utils/limitReview';
-
-const ANNOUNCEMENT_TONES: Record<Announcement['type'], AlertTone> = {
-  info: 'info',
-  warning: 'warn',
-  critical: 'fail',
-};
+import { orderNotices, splitNotices, type Notice } from './noticeFacts';
 
 const NOTIFICATION_TONES: Record<string, AlertTone> = {
   limit_request_approved: 'ok',
@@ -27,9 +25,16 @@ const NOTIFICATION_TONES: Record<string, AlertTone> = {
   domain_limit_exceeded: 'warn',
 };
 
-export function Announcements() {
+export function DashboardNotices({
+  hiddenNotificationTypes,
+}: {
+  hiddenNotificationTypes: readonly string[];
+}) {
   const client = useQueryClient();
-  const { data } = useQuery(announcementsQuery());
+  const moreId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const announcements = useQuery(announcementsQuery());
+  const notifications = useQuery(notificationsQuery());
   const dismissal = useMutation({
     mutationFn: dismissAnnouncement,
     onMutate: (id: string) => {
@@ -44,33 +49,6 @@ export function Announcements() {
     },
     onSettled: () => client.invalidateQueries({ queryKey: accountKeys.announcements() }),
   });
-  const announcements = data?.announcements ?? [];
-  if (announcements.length === 0) return null;
-  return (
-    <>
-      {announcements.map((announcement) => (
-        <Alert
-          key={announcement.id}
-          tone={ANNOUNCEMENT_TONES[announcement.type] ?? 'info'}
-          title={announcement.title}
-          live={false}
-          onDismiss={() => dismissal.mutate(announcement.id)}
-          dismissLabel={`Dismiss announcement: ${announcement.title}`}
-        >
-          {announcement.message}
-        </Alert>
-      ))}
-    </>
-  );
-}
-
-function unread(notifications: Notification[]): Notification[] {
-  return notifications.filter((notification) => !notification.read);
-}
-
-export function Notifications({ hideTypes = [] }: { hideTypes?: string[] }) {
-  const client = useQueryClient();
-  const { data } = useQuery(notificationsQuery());
   const markRead = useMutation({
     mutationFn: markNotificationRead,
     onMutate: (id: string) => {
@@ -90,25 +68,63 @@ export function Notifications({ hideTypes = [] }: { hideTypes?: string[] }) {
     },
     onSettled: () => client.invalidateQueries({ queryKey: accountKeys.notifications() }),
   });
-  const notifications = unread(data?.notifications ?? []).filter(
-    (notification) => !hideTypes.includes(notification.type),
+
+  const notices = orderNotices(
+    announcements.data?.announcements ?? [],
+    notifications.data?.notifications ?? [],
+    hiddenNotificationTypes,
   );
-  if (notifications.length === 0) return null;
+  if (notices.length === 0) return null;
+  const { shown, more } = splitNotices(notices);
+
+  const renderNotice = (notice: Notice) =>
+    notice.kind === 'announcement' ? (
+      <Alert
+        key={notice.id}
+        tone={ANNOUNCEMENT_TONES[notice.announcement.type] ?? 'info'}
+        title={notice.announcement.title}
+        live={false}
+        onDismiss={() => dismissal.mutate(notice.announcement.id)}
+        dismissLabel={`Dismiss announcement: ${notice.announcement.title}`}
+      >
+        {notice.announcement.message}
+      </Alert>
+    ) : (
+      <Alert
+        key={notice.id}
+        tone={NOTIFICATION_TONES[notice.notification.type] ?? 'info'}
+        title={notice.notification.title}
+        live={false}
+        onDismiss={() => markRead.mutate(notice.notification.id)}
+        dismissLabel={`Dismiss notification: ${notice.notification.title}`}
+      >
+        {notice.notification.message}
+      </Alert>
+    );
+
   return (
-    <>
-      {notifications.map((notification) => (
-        <Alert
-          key={notification.id}
-          tone={NOTIFICATION_TONES[notification.type] ?? 'info'}
-          title={notification.title}
-          live={false}
-          onDismiss={() => markRead.mutate(notification.id)}
-          dismissLabel={`Dismiss notification: ${notification.title}`}
-        >
-          {notification.message}
-        </Alert>
-      ))}
-    </>
+    <section aria-label="Announcements and notifications" className="grid gap-2">
+      {shown.map(renderNotice)}
+      {more.length > 0 ? (
+        <>
+          <div id={moreId} hidden={!expanded} className="grid gap-2">
+            {more.map(renderNotice)}
+          </div>
+          <div>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={expanded ? 'chevron-down' : 'chevron-right'}
+              aria-expanded={expanded}
+              aria-controls={moreId}
+              onClick={() => setExpanded((open) => !open)}
+            >
+              {expanded ? 'Show fewer' : `${pluralise(more.length, 'more notice')}`}
+            </Button>
+          </div>
+        </>
+      ) : null}
+    </section>
   );
 }
 

@@ -4,6 +4,7 @@ import {
   addSource,
   analyseSources,
   countSources,
+  countSourcesInText,
   describeNameProblem,
   describeUrlProblem,
   groupSources,
@@ -16,7 +17,6 @@ import {
   writtenNames,
 } from './sourceLines';
 import { AWKWARD_TEXTS, generatedTexts } from './testTexts';
-import { parseConfig } from './types';
 
 const CATEGORIES = ['advertising', 'comprehensive', 'malicious', 'nsfw', 'suspicious', 'tracking'];
 
@@ -61,13 +61,13 @@ describe('reading one line', () => {
       kind: 'source',
       category: null,
       nameIsWritten: true,
-      problems: ['no-category'],
+      problems: [],
     });
     expect(parseSourceLine('https://lists.example.com/a', CATEGORIES)).toMatchObject({
       kind: 'source',
       name: 'lists_example_com',
       nameIsWritten: false,
-      problems: ['no-category'],
+      problems: [],
     });
   });
 
@@ -112,8 +112,11 @@ describe('the whole file', () => {
     for (const text of [MIXED, ...AWKWARD_TEXTS, ...generatedTexts(200)]) {
       const draft = parseDraft(text);
       const entries = analyseSources(draft, CATEGORIES);
-      const { groups, attention } = groupSources(entries, CATEGORIES);
-      const shown = groups.reduce((sum, group) => sum + group.entries.length, 0) + attention.length;
+      const { groups, uncategorised, attention } = groupSources(entries, CATEGORIES);
+      const shown =
+        groups.reduce((sum, group) => sum + group.entries.length, 0) +
+        uncategorised.length +
+        attention.length;
       const hidden = entries.filter(
         (entry) => entry.parsed.kind === 'comment' || entry.parsed.kind === 'blank',
       ).length;
@@ -122,8 +125,8 @@ describe('the whole file', () => {
     }
   });
 
-  it('puts unplaceable lines under needs attention', () => {
-    const { groups, attention } = groupSources(
+  it('keeps sources with no category apart from the lines that need attention', () => {
+    const { groups, uncategorised, attention } = groupSources(
       analyseSources(parseDraft(MIXED), CATEGORIES),
       CATEGORIES,
     );
@@ -131,9 +134,11 @@ describe('the whole file', () => {
       ['advertising', 2],
       ['tracking', 1],
     ]);
-    expect(attention.map((entry) => entry.line.raw)).toEqual([
+    expect(uncategorised.map((entry) => entry.line.raw)).toEqual([
       'https://example.com/two.txt|two_fields',
       'https://example.com/bare.txt',
+    ]);
+    expect(attention.map((entry) => entry.line.raw)).toEqual([
       'https://example.com/typo.txt|typo|phising',
       'just some words',
     ]);
@@ -150,7 +155,7 @@ describe('the whole file', () => {
 
   it('counts the lines the server counts as sources', () => {
     expect(countSources(analyseSources(parseDraft(MIXED), CATEGORIES))).toBe(7);
-    expect(parseConfig(MIXED).filter((line) => !line.isComment && line.url)).toHaveLength(7);
+    expect(countSourcesInText(MIXED)).toBe(7);
     expect(countSources(analyseSources(parseDraft('# nothing\n\n'), CATEGORIES))).toBe(0);
   });
 });

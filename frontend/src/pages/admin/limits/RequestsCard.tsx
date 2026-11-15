@@ -10,7 +10,7 @@ import {
 import { Button } from '../../../components/ui/Button';
 import { Card, CardHeader } from '../../../components/ui/Card';
 import { LoadingRegion, Skeleton } from '../../../components/ui/Layout';
-import { StatusPill } from '../../../components/ui/StatusPill';
+import { DescribedPill } from '../../../components/ui/StatusPill';
 import { EmptyState, ErrorState } from '../../../components/ui/States';
 import {
   Table,
@@ -24,14 +24,14 @@ import { formatDateTime, formatInteger, pluralise } from '../../../lib/format';
 import { INTENDED_USE_LABELS, type LimitRequest } from '../../../types';
 import { USAGE_SOURCE_LABELS, orderRequests, requestStatus, requestUsage } from './limitFacts';
 import { RequestDecisionDialog, type Decision } from './RequestDecisionDialog';
+import { CELL_LINK } from '../../../components/ui/linkClasses';
+import { cn } from '../../../lib/cn';
 
 function DecisionCell({ request, now }: { request: LimitRequest; now: Date }) {
   const status = requestStatus(request.status);
   return (
     <div className="grid justify-items-start gap-1">
-      <StatusPill tone={status.tone} icon={status.icon}>
-        {status.label}
-      </StatusPill>
+      <DescribedPill description={status} />
       {request.status === 'approved' && typeof request.approved_limit === 'number' ? (
         <span className="num text-xs text-text-secondary">
           Raised to {formatInteger(request.approved_limit)}
@@ -126,7 +126,7 @@ export function RequestsCard({ now }: { now: Date }) {
                     <TableCell className="align-top">
                       <Link
                         to={`/admin/users/${encodeURIComponent(request.user_id)}`}
-                        className="font-medium break-all underline hover:text-accent-text"
+                        className={cn(CELL_LINK, 'font-medium break-all')}
                       >
                         {request.username}
                       </Link>
@@ -164,7 +164,7 @@ export function RequestsCard({ now }: { now: Date }) {
                       <DecisionCell request={request} now={now} />
                       <span className="mt-2 hidden flex-wrap gap-2 narrow:flex">{actions}</span>
                     </TableCell>
-                    <TableCell align="right" className="align-top">
+                    <TableCell align="right" hideOnNarrow className="align-top">
                       <span className="inline-flex justify-end gap-2">{actions}</span>
                     </TableCell>
                   </TableRow>

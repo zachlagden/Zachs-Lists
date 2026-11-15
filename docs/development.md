@@ -77,6 +77,7 @@ Each run drops the database named in `MONGO_URI`, rebuilds the `users` and `defa
 alex	session=<value>
 sam	session=<value>
 jo	session=<value>
+robin	session=<value>
 ```
 
 The script refuses to clear a `DATA_DIR` that holds files it did not create.
@@ -88,7 +89,8 @@ What it creates:
 | `alex`         | A regular account with eight sources, a whitelist, six published lists and a limit raised to 10,000,000 by an approved request. Its jobs are two completed scheduled builds, one skipped build, one failed build over the domain limit and one build in mid download. |
 | `sam`          | An admin with three sources, four published lists and two completed builds.                                                                                                                                                                                           |
 | `jo`           | A regular account over the domain limit, with an open limit review, an unread notification and a pending limit request.                                                                                                                                               |
-| Other accounts | Thirty regular accounts with no configuration, among them `casey`, which is disabled, and `dana`, which is banned, and a second admin, `robin`. They fill the admin user list and print no cookie.                                                                    |
+| `robin`        | A second admin with no configuration, for seeing what an admin who is not the root user can do.                                                                                                                                                                       |
+| Other accounts | Thirty regular accounts with no configuration, among them `casey`, which is disabled, and `dana`, which is banned. They fill the admin user list and print no cookie.                                                                                                 |
 | Default lists  | A default configuration, six published lists and one completed build.                                                                                                                                                                                                 |
 | Shared content | Three active announcements, one for each type, and one inactive. Ten library entries. One featured list. Thirty days of download analytics for alex's lists and the default lists. Cache metadata with a domain count for every library source.                       |
 
@@ -219,7 +221,13 @@ cargo build --release --manifest-path rust-worker/Cargo.toml
 export WORKER_BIN="$PWD/rust-worker/target/release/blocklist-worker"
 ```
 
-A real worker fails every build of the seeded configurations, because the seeded sources do not exist.
+To run real builds, start the worker beside Flask with the same `MONGO_URI` and `DATA_DIR`, and with `DATABASE_NAME` set to the database named in `MONGO_URI`, because the worker does not read the name from the address:
+
+```sh
+DATABASE_NAME=zachs_lists_dev "$WORKER_BIN"
+```
+
+A real worker fails every build of the seeded configurations, because the seeded sources do not exist. Give an account public source addresses to see a build complete; the worker refuses private addresses.
 
 Validating a configuration in the editor sends real HTTP requests to each source address. For the seeded sources the result is one warning per source, "Could not reach source during validation", and the configuration can still be saved.
 
@@ -250,10 +258,9 @@ pnpm --dir frontend build
 | -------------------------------- | ----------------------------------------------------------------------- |
 | `frontend/src/styles/tokens.css` | The colour tokens for the dark and light themes                         |
 | `frontend/src/styles/index.css`  | The Tailwind theme built from the tokens, and the base styles           |
-| `frontend/src/styles/legacy.css` | The old class names mapped onto the tokens, for pages not yet rebuilt   |
 | `frontend/src/components/ui/`    | The shared components                                                   |
 | `frontend/src/components/shell/` | The signed-in shell, the public shell and the navigation                |
-| `frontend/src/router.tsx`        | Every route, loaded lazily                                              |
+| `frontend/src/router.tsx`        | Every route. Pages other than home load on demand                       |
 | `frontend/src/api/`              | One module per resource: query keys, fetch functions and response types |
 | `frontend/src/realtime/`         | Live job events and the bridge that writes them into the query cache    |
 | `frontend/src/lib/format.ts`     | Number, size, duration and date formatting                              |
@@ -278,9 +285,6 @@ state in both themes. The route exists only in development builds.
 5. Build the page from the components in `frontend/src/components/ui/` and the Tailwind theme
    colours such as `bg-surface`, `text-text-secondary` and `border-border`. Use the `narrow:`
    variant for 820 px and below and `compact:` for 1080 px and below.
-6. When a page no longer uses the old class names, remove it from `pagesAwaitingRebuild` in
-   `frontend/eslint.config.js`. When no page uses them, delete `frontend/src/styles/legacy.css`,
-   `frontend/src/api/client.ts` and the user data and jobs stores in `frontend/src/store/index.ts`.
 
 ### Checking a page in a headless browser
 

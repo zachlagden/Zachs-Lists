@@ -47,6 +47,7 @@ function EnabledDialog({ user, onClose, enable }: DialogProps & { enable: boolea
     <ActionDialog
       title={enable ? `Enable ${user.username}?` : `Disable ${user.username}?`}
       confirmLabel={enable ? 'Enable the account' : 'Disable the account'}
+      destructive={!enable}
       run={() => updateAdminUser(user.id, { is_enabled: enable })}
       onDone={(updated) => {
         storeUser(client, updated);
@@ -76,6 +77,7 @@ function BanDialog({ user, onClose }: DialogProps) {
     <ActionDialog
       title={`Ban ${user.username}?`}
       confirmLabel="Ban the account"
+      destructive
       run={() => banUser(user.id, duration, reason.trim() || undefined)}
       onDone={(result) => {
         patchUser(client, user.id, {
@@ -151,6 +153,7 @@ function AdminRoleDialog({ user, onClose, grant }: DialogProps & { grant: boolea
         grant ? `Make ${user.username} an admin?` : `Remove admin access from ${user.username}?`
       }
       confirmLabel={grant ? 'Grant admin access' : 'Remove admin access'}
+      destructive={!grant}
       run={() => setUserAdmin(user.id, grant)}
       onDone={(updated) => {
         storeUser(client, updated);
@@ -203,6 +206,7 @@ function DeleteDialog({ user, onClose }: DialogProps) {
     <ActionDialog
       title={`Delete ${user.username}?`}
       confirmLabel="Delete the account"
+      destructive
       run={() => deleteAdminUser(user.id)}
       onDone={() => {
         showToast('ok', `${user.username} and their data are deleted.`);

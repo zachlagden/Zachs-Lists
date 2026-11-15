@@ -13,18 +13,21 @@ import { useUrlState, useUrlText } from '../shared/useUrlState';
 import {
   BUILD_STATUSES,
   BUILD_TYPES,
-  BUILD_TYPE_LABELS,
   activeFirst,
   countActive,
   filterBuilds,
   type BuildFilters,
 } from './buildFacts';
 import { BuildsTable, BuildsTableSkeleton } from './BuildsTable';
+import { BUILD_TYPE_LABELS } from '../../../lib/builds';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 const STATUS_CHOICES = ['all', ...BUILD_STATUSES] as const;
 const TYPE_CHOICES = ['all', ...BUILD_TYPES] as const;
 
 export default function BuildsPage() {
+  useDocumentMeta(adminTitle('Builds'));
   const now = useNow();
   const url = useUrlState();
   const { params, update } = url;

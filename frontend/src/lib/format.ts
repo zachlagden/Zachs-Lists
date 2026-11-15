@@ -26,6 +26,10 @@ export function formatInteger(value: number): string {
   return integerFormat.format(Math.round(value)).replace(/^-/, MINUS_SIGN);
 }
 
+export function formatDecimal(value: number): string {
+  return upToOneDecimalFormat.format(value).replace(/^-/, MINUS_SIGN);
+}
+
 export function formatRoundedCount(value: number): string {
   const magnitude = Math.abs(value);
   if (magnitude >= 1_000_000_000) {
@@ -78,7 +82,7 @@ function dayKey(date: Date, timeZone: string | undefined): string {
 }
 
 function timeOfDay(date: Date, options: DateFormatOptions): string {
-  return new Intl.DateTimeFormat(options.locale, {
+  return new Intl.DateTimeFormat(options.locale ?? COPY_LOCALE, {
     timeZone: options.timeZone,
     hour: '2-digit',
     minute: '2-digit',
@@ -92,7 +96,7 @@ export function formatDate(value: DateInput, options: DateFormatOptions = {}): s
   const now = options.now ?? new Date();
   const sameYear =
     dayKey(date, options.timeZone).slice(0, 4) === dayKey(now, options.timeZone).slice(0, 4);
-  return new Intl.DateTimeFormat(options.locale, {
+  return new Intl.DateTimeFormat(options.locale ?? COPY_LOCALE, {
     timeZone: options.timeZone,
     day: 'numeric',
     month: 'short',
@@ -124,7 +128,7 @@ export function formatClockTime(value: DateInput, options: DateFormatOptions = {
 export function formatFullDateTime(value: DateInput, options: DateFormatOptions = {}): string {
   const date = parseApiDate(value);
   if (!date) return '';
-  return new Intl.DateTimeFormat(options.locale, {
+  return new Intl.DateTimeFormat(options.locale ?? COPY_LOCALE, {
     timeZone: options.timeZone,
     dateStyle: 'full',
     timeStyle: 'long',

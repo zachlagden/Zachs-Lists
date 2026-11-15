@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
+from pymongo import ReturnDocument
 
 from app.extensions import mongo
 
@@ -65,6 +66,15 @@ class FeaturedList:
         }
         data["_id"] = mongo.db[cls.COLLECTION].insert_one(data).inserted_id
         return cls(data)
+
+    @classmethod
+    def set_order(cls, featured_id: ObjectId, order: int) -> "FeaturedList | None":
+        data = mongo.db[cls.COLLECTION].find_one_and_update(
+            {"_id": featured_id},
+            {"$set": {"order": order}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return cls(data) if data else None
 
     @classmethod
     def remove(cls, featured_id: ObjectId) -> bool:

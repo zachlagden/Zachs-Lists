@@ -15,15 +15,14 @@ import {
   pluralise,
 } from '../../lib/format';
 import type { Job } from '../../types';
+import { domainChange } from '../../lib/builds';
 import {
   describeAttention,
+  describeLastFailure,
   describeManualBuilds,
-  domainChange,
   lastFinishedJob,
-  lastSourceCheck,
-  nextScheduledRebuild,
+  lastCheckFoundChanges,
   publishedJob,
-  sourceFailureCause,
   sourceSummary,
   type PublicationState,
 } from './dashboardFacts';
@@ -115,9 +114,7 @@ function summarySentence({
   }
   if (state === 'published-last-failed') {
     const failed = lastFinishedJob(jobs);
-    sentences.push(
-      `${sourceFailureCause(failed?.result?.errors[0])} Your earlier list is still being served.`,
-    );
+    sentences.push(describeLastFailure(failed?.result?.errors[0]));
   }
   const attention = describeAttention(sourceSummary(sources));
   if (attention && state !== 'published-last-failed') sentences.push(attention);
@@ -127,9 +124,9 @@ function summarySentence({
 export function PublishedState(props: PublishedStateProps) {
   const { state, lists, jobs, isAdmin, now } = props;
   const headline = HEADLINES[state];
-  const nextRebuild = nextScheduledRebuild(now);
+  const nextRebuild = lists.next_rebuild_at;
   const published = publishedJob(jobs, lists.generation_id);
-  const check = lastSourceCheck(jobs);
+  const checkFoundChanges = lastCheckFoundChanges(jobs, lists.last_checked_at);
   const change = published ? domainChange(jobs, published) : null;
   const isPublished = lists.lists.length > 0;
   return (
@@ -180,9 +177,15 @@ export function PublishedState(props: PublishedStateProps) {
           />
           <Fact
             label="Sources last checked"
-            value={check ? formatDateTime(check.at, { now }) : 'Not yet'}
+            value={
+              lists.last_checked_at ? formatDateTime(lists.last_checked_at, { now }) : 'Not yet'
+            }
             detail={
-              check ? (check.changed ? 'A new version was published' : 'Nothing had changed') : null
+              checkFoundChanges === null
+                ? null
+                : checkFoundChanges
+                  ? 'A new version was published'
+                  : 'Nothing had changed'
             }
           />
           <Fact

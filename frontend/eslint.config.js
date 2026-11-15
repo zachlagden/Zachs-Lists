@@ -4,8 +4,6 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
-const pagesAwaitingRebuild = ['src/components/jobs/**'];
-
 export default tseslint.config(
   { ignores: ['dist', 'coverage'] },
   {
@@ -29,14 +27,6 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-    },
-  },
-  {
-    files: pagesAwaitingRebuild,
-    rules: {
-      'react-hooks/set-state-in-effect': 'off',
-      'react-hooks/immutability': 'off',
-      'react-hooks/purity': 'off',
     },
   },
   {

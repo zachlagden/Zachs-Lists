@@ -1,6 +1,5 @@
 import type { AdminUserDetail, AdminUserFilters } from '../../../api/admin';
-import type { IconName } from '../../../components/ui/icons';
-import type { StatusTone } from '../../../components/ui/status';
+import type { StatusDescription } from '../../../components/ui/status';
 import { formatDateTime, parseApiDate } from '../../../lib/format';
 import { choiceFromSearch, pageFromSearch } from '../shared/urlState';
 
@@ -46,15 +45,9 @@ export function apiFilters(state: UserListState, search: string): AdminUserFilte
   };
 }
 
-export interface PillDescription {
-  tone: StatusTone;
-  icon: IconName;
-  label: string;
-}
-
 type RoleSubject = Pick<AdminUserDetail, 'is_root' | 'is_admin'>;
 
-export function roleDescription(user: RoleSubject): PillDescription {
+export function roleDescription(user: RoleSubject): StatusDescription {
   if (user.is_root) return { tone: 'info', icon: 'shield', label: 'Root' };
   if (user.is_admin) return { tone: 'info', icon: 'shield', label: 'Admin' };
   return { tone: 'neutral', icon: 'dash', label: 'Member' };
@@ -62,7 +55,7 @@ export function roleDescription(user: RoleSubject): PillDescription {
 
 type StateSubject = Pick<AdminUserDetail, 'is_banned' | 'is_enabled'>;
 
-export function stateDescription(user: StateSubject): PillDescription {
+export function stateDescription(user: StateSubject): StatusDescription {
   if (user.is_banned) return { tone: 'fail', icon: 'fail', label: 'Banned' };
   if (!user.is_enabled) return { tone: 'warn', icon: 'warn', label: 'Disabled' };
   return { tone: 'ok', icon: 'check', label: 'Enabled' };

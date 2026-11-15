@@ -9,9 +9,9 @@ import {
 } from '../../components/config/sourceLines';
 import { applyChange, minimalChange } from '../../components/config/minimalChange';
 import { AWKWARD_TEXTS, generatedTexts } from '../../components/config/testTexts';
+import { describeBuildRefusal, runningBuildId } from '../../lib/builds';
 import type { Job, SourceProgress } from '../../types';
 import {
-  buildRefusalNotice,
   describeChanges,
   describeSourceLimit,
   filterLibrary,
@@ -206,10 +206,10 @@ describe('limits and refusals', () => {
       message: 'A build is already in progress',
       body: { error: 'A build is already in progress', code: 'build_active', job_id: 'job-1' },
     });
-    expect(buildRefusalNotice(error, new Date())).toEqual({
-      message: 'A build is already running, so a new one was not started.',
-      runningJobId: 'job-1',
-    });
+    expect(describeBuildRefusal(error)).toBe(
+      'A build is already running, so a new one was not started.',
+    );
+    expect(runningBuildId(error)).toBe('job-1');
   });
 
   it('gives the time left in a cooldown', () => {
@@ -219,9 +219,8 @@ describe('limits and refusals', () => {
       message: 'Please wait',
       body: { error: 'Please wait', code: 'cooldown', cooldown_remaining: 125 },
     });
-    const notice = buildRefusalNotice(error, new Date());
-    expect(notice.message).toContain('2 min 5 s');
-    expect(notice.runningJobId).toBeNull();
+    expect(describeBuildRefusal(error)).toContain('2 min 5 s');
+    expect(runningBuildId(error)).toBeNull();
   });
 });
 

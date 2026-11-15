@@ -1,26 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/errors';
 import type { UserListsResponse } from '../../api/lists';
+import {
+  attemptSeconds,
+  compressedSize,
+  describeBuildRefusal,
+  domainChange,
+  domainsAfter,
+  sourceProblemCause,
+} from '../../lib/builds';
 import fixture from '../../../../tests/fixtures/job-progress.json';
 import type { Job, JobResult, LimitReview, SourceProgress, UserList } from '../../types';
 import {
   attentionItems,
-  buildDurationSeconds,
-  compressedSize,
   describeAttention,
-  describeBuildRefusal,
+  describeLastFailure,
   describeManualBuilds,
   describeSourceSummary,
-  domainChange,
   domainUsage,
-  domainsAfter,
-  lastSourceCheck,
-  listAddress,
+  lastCheckFoundChanges,
   nextManualBuildReset,
-  nextScheduledRebuild,
   publicationState,
   publishedJob,
-  sourceFailureCause,
   sourceSummary,
 } from './dashboardFacts';
 
@@ -73,6 +74,8 @@ function listsResponse(overrides: Partial<UserListsResponse> = {}): UserListsRes
     },
     remaining_updates: 2,
     enforce_domain_limit: false,
+    next_rebuild_at: '2026-11-15T07:30:00.000Z',
+    last_checked_at: '2026-11-08T06:41:48.000Z',
     ...overrides,
   };
 }
@@ -100,18 +103,6 @@ const running = job({
 });
 
 describe('schedule', () => {
-  it('finds the next Sunday 07:30 UTC rebuild', () => {
-    expect(nextScheduledRebuild(new Date('2026-11-14T20:41:00Z')).toISOString()).toBe(
-      '2026-11-15T07:30:00.000Z',
-    );
-    expect(nextScheduledRebuild(new Date('2026-11-15T07:29:59Z')).toISOString()).toBe(
-      '2026-11-15T07:30:00.000Z',
-    );
-    expect(nextScheduledRebuild(new Date('2026-11-15T07:30:00Z')).toISOString()).toBe(
-      '2026-11-22T07:30:00.000Z',
-    );
-  });
-
   it('resets manual builds at the start of Sunday UTC', () => {
     expect(nextManualBuildReset(new Date('2026-11-14T20:41:00Z')).toISOString()).toBe(
       '2026-11-15T00:00:00.000Z',
@@ -131,13 +122,11 @@ describe('build history', () => {
     expect(publishedJob(jobs, null)).toBeNull();
   });
 
-  it('reports when the sources were last checked and whether anything changed', () => {
-    expect(lastSourceCheck(jobs)).toEqual({ at: '2026-11-12T19:20:09.000Z', changed: false });
-    expect(lastSourceCheck([failed, published])).toEqual({
-      at: '2026-11-08T06:41:48.000Z',
-      changed: true,
-    });
-    expect(lastSourceCheck([failed])).toBeNull();
+  it('says whether the last check of the sources found anything new', () => {
+    expect(lastCheckFoundChanges(jobs, '2026-11-12T19:20:09.000Z')).toBe(false);
+    expect(lastCheckFoundChanges([failed, published], '2026-11-08T06:41:48.000Z')).toBe(true);
+    expect(lastCheckFoundChanges(jobs, '2026-10-01T00:00:00.000Z')).toBeNull();
+    expect(lastCheckFoundChanges(jobs, null)).toBeNull();
   });
 
   it('works out the change against the previous completed build', () => {
@@ -154,9 +143,9 @@ describe('build history', () => {
   });
 
   it('measures how long a build took, or has taken so far', () => {
-    expect(buildDurationSeconds(published, new Date())).toBe(108);
-    expect(buildDurationSeconds(running, new Date('2026-11-14T20:41:42Z'))).toBe(42);
-    expect(buildDurationSeconds({ ...running, started_at: null }, new Date())).toBeNull();
+    expect(attemptSeconds(published, new Date())).toBe(108);
+    expect(attemptSeconds(running, new Date('2026-11-14T20:41:42Z'))).toBe(42);
+    expect(attemptSeconds({ ...running, started_at: null }, new Date())).toBeNull();
   });
 });
 
@@ -274,8 +263,8 @@ describe('sources', () => {
   });
 
   it('falls back when the worker gives no reason', () => {
-    expect(sourceFailureCause(null)).toBe('The download failed.');
-    expect(sourceFailureCause('Connection refused; no cache')).toBe('Connection refused.');
+    expect(sourceProblemCause(null)).toBe('');
+    expect(sourceProblemCause('Connection refused; no cache')).toBe('Connection refused.');
     const silent: SourceProgress = { ...sources[2], error: null };
     expect(attentionItems([silent])[0].detail).toBe(
       'The download failed. No usable earlier copy exists, so it was left out.',
@@ -283,11 +272,22 @@ describe('sources', () => {
   });
 });
 
-describe('list address', () => {
-  it('builds the address and finds the compressed size of one file', () => {
-    expect(listAddress('https://lists.example.com', 'alex', 'all_domains', 'hosts')).toBe(
-      'https://lists.example.com/u/alex/all_domains.txt?format=hosts',
+describe('the last failed build', () => {
+  it('says once that the earlier list is still served', () => {
+    expect(describeLastFailure('All source downloads failed')).toBe(
+      'All source downloads failed. Your earlier list is still being served.',
     );
+    expect(describeLastFailure(null)).toBe(
+      'The last build failed. Your earlier list is still being served.',
+    );
+    const overLimit =
+      'These lists have 5,123,456 domains across all categories, which is over the limit of 4,000,000, so nothing was published and the previously published lists remain in place.';
+    expect(describeLastFailure(overLimit)).toBe(overLimit);
+  });
+});
+
+describe('list files', () => {
+  it('finds the compressed size of one file', () => {
     expect(compressedSize(published, 'advertising', 'hosts')).toBe(5200);
     expect(compressedSize(published, 'missing', 'hosts')).toBeNull();
     expect(compressedSize(null, 'advertising', 'hosts')).toBeNull();
@@ -332,12 +332,14 @@ describe('manual builds', () => {
       describeBuildRefusal(
         refusal(409, { error: 'A build is already in progress', code: 'build_active' }),
       ),
-    ).toBe('A build is already running. It appears under recent builds.');
+    ).toBe('A build is already running, so a new one was not started.');
     expect(
       describeBuildRefusal(
         refusal(400, { error: 'No blocklist configuration found', code: 'no_config' }),
       ),
-    ).toBe('There are no sources to build from yet. Add some on the Configuration page first.');
+    ).toBe(
+      'There are no saved sources to build from yet. Add one on the Configuration page first.',
+    );
     expect(
       describeBuildRefusal(
         refusal(400, {
@@ -347,7 +349,7 @@ describe('manual builds', () => {
         }),
       ),
     ).toBe(
-      'Your sources have a problem, so the build was not started: Line 3: not a URL. Fix it on the Configuration page, then build again.',
+      'Your saved sources have a problem, so the build was not started: Line 3: not a URL. Fix it on the Configuration page, then build again.',
     );
   });
 

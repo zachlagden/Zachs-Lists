@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { jobsKeys } from '../api/jobs';
+import { fetchJob, jobsKeys } from '../api/jobs';
 import { listsKeys } from '../api/lists';
 import { useJobSocket } from '../hooks/useSocket';
 import { refreshSession } from '../session';
@@ -48,6 +48,7 @@ export function useJobsLiveSync(userId: string | undefined): void {
     onJobCompleted: handleCompleted,
     onReconnect: refetchJobs,
     knownJobs: known,
+    fetchJob,
     onJobsSynced: applyMany,
     onResyncFailed: refetchJobs,
   });

@@ -1,5 +1,5 @@
 import { durationBetween, formatClockTime, formatFullDateTime } from '../../lib/format';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 import { useSecondsClock } from './useSecondsClock';
 
 export function LiveDuration({ since }: { since: string }) {

@@ -1,3 +1,5 @@
+import { formatDateTime, type DateFormatOptions } from '../lib/format';
+
 const LOGIN_ERROR_MESSAGES: Record<string, string> = {
   oauth_declined: 'GitHub sign-in was cancelled. Sign in again to continue.',
   state_mismatch:
@@ -15,13 +17,16 @@ const LOGIN_ERROR_MESSAGES: Record<string, string> = {
 
 const FALLBACK_MESSAGE = 'Sign-in failed. Try again.';
 
-export function loginErrorMessage(code: string, until?: string | null): string {
+export function loginErrorMessage(
+  code: string,
+  until?: string | null,
+  options: DateFormatOptions = {},
+): string {
   if (code === 'account_banned') {
-    const end = until ? new Date(until) : null;
-    if (end && !Number.isNaN(end.getTime())) {
-      return `Your account is banned until ${end.toLocaleString()}, so you cannot sign in.`;
-    }
-    return 'Your account has been banned, so you cannot sign in.';
+    const end = formatDateTime(until, options);
+    return end
+      ? `Your account is banned until ${end}. You cannot sign in until then.`
+      : 'Your account has been banned, so you cannot sign in.';
   }
   return LOGIN_ERROR_MESSAGES[code] ?? FALLBACK_MESSAGE;
 }

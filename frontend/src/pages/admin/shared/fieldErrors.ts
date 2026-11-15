@@ -5,8 +5,6 @@ export interface FormFailure<Field extends string> {
   form: string | null;
 }
 
-export const NO_FAILURE: FormFailure<never> = { fields: {}, form: null };
-
 function withoutPrefix(field: string, prefix: string): string {
   return field.startsWith(prefix) ? field.slice(prefix.length) : field;
 }

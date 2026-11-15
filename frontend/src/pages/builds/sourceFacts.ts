@@ -1,6 +1,7 @@
 import { sourceOutcome, type SourceOutcome } from '../../components/ui/status';
 import type { SourceProgress } from '../../types';
-import { sentence } from './text';
+import { sourceProblemCause } from '../../lib/builds';
+import { sentence } from '../../lib/text';
 
 export interface SourceTally {
   total: number;
@@ -60,13 +61,6 @@ export function sortSources(sources: SourceProgress[]): SourceProgress[] {
     .map((entry) => entry.source);
 }
 
-export function sourceProblemCause(report: string | null | undefined): string {
-  const text = (report ?? '').trim();
-  if (!text) return '';
-  const bracketed = /\(([^)]+)\)/.exec(text);
-  return sentence(bracketed ? bracketed[1] : text.split(';')[0]);
-}
-
 export interface SourceNote {
   tone: 'fail' | 'warn';
   text: string;
@@ -87,14 +81,6 @@ export function sourceNote(source: SourceProgress): SourceNote | null {
   }
   if (source.warnings.length > 0) return { tone: 'warn', text: sentence(source.warnings[0]) };
   return null;
-}
-
-export function sourceHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
 
 const NAME_BREAKS = /(?<=[_\-./])/;

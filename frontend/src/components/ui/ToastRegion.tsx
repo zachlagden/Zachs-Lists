@@ -34,7 +34,7 @@ export function ToastRegion() {
   const urgent = toasts.filter((toast) => toast.tone === 'fail' || toast.tone === 'warn');
   const polite = toasts.filter((toast) => toast.tone === 'info' || toast.tone === 'ok');
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-40 grid w-[min(360px,calc(100vw-32px))] gap-2">
+    <div className="pointer-events-none fixed top-[68px] right-4 z-40 grid w-[min(360px,calc(100vw-32px))] gap-2 narrow:top-[72px]">
       <div role="alert" className="grid gap-2">
         {urgent.map((toast) => (
           <ToastCard key={toast.id} toast={toast} onDismiss={dismiss} />

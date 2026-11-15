@@ -48,6 +48,8 @@ pub struct SourceProgress {
     pub id: String,
     pub name: String,
     pub url: String,
+    #[serde(default)]
+    pub category: Option<String>,
     pub status: SourceStatus,
     #[serde(default)]
     pub cache_hit: Option<bool>,
@@ -81,11 +83,12 @@ pub struct SourceProgress {
 }
 
 impl SourceProgress {
-    pub fn pending(id: String, name: String, url: String) -> Self {
+    pub fn pending(id: String, name: String, url: String, category: Option<String>) -> Self {
         Self {
             id,
             name,
             url,
+            category,
             ..Self::default()
         }
     }

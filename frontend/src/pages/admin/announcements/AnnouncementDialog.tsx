@@ -12,11 +12,11 @@ import { Button } from '../../../components/ui/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Field, Input, Select, Textarea } from '../../../components/ui/Field';
 import { showToast } from '../../../components/ui/toasts';
+import { ANNOUNCEMENT_TONES } from '../../../lib/notices';
 import type { Announcement } from '../../../types';
 import { focusFirstInvalid, formFailure } from '../shared/fieldErrors';
 import {
   ANNOUNCEMENT_FIELDS,
-  ANNOUNCEMENT_TONES,
   ANNOUNCEMENT_TYPES,
   MAX_MESSAGE_LENGTH,
   MAX_TITLE_LENGTH,

@@ -1,16 +1,10 @@
 import { durationBetween, formatInteger, pluralise } from '../../lib/format';
 import { isActive } from '../../realtime/jobMerge';
-import type {
-  FormatProgress,
-  Job,
-  JobType,
-  OutputFile,
-  SourceProgress,
-  StageTiming,
-} from '../../types';
+import type { FormatProgress, Job, OutputFile, SourceProgress, StageTiming } from '../../types';
 import { UNKNOWN_FAILURE_TITLE, buildFailure } from './failureFacts';
 import { sourceTally } from './sourceFacts';
-import { sentence } from './text';
+import { sentence } from '../../lib/text';
+import type { BuildViewer } from '../../lib/builds';
 
 export type BuildPhase =
   | 'queued'
@@ -120,17 +114,6 @@ export function hasStageProgress(job: Job): boolean {
   return job.status !== 'queued' && Boolean(job.progress.stages?.downloading);
 }
 
-export function attemptStartedAt(job: Job): string | null {
-  return job.attempt_started_at ?? job.started_at ?? null;
-}
-
-export function attemptSeconds(job: Job, now: Date): number | null {
-  if (job.status === 'queued') return null;
-  const started = attemptStartedAt(job);
-  if (!started) return null;
-  return durationBetween(started, job.completed_at ?? now);
-}
-
 export function queueWaitSeconds(job: Job, now: Date): number | null {
   if (job.status === 'queued') return durationBetween(job.created_at, now);
   const started = job.started_at ?? job.attempt_started_at;
@@ -138,7 +121,7 @@ export function queueWaitSeconds(job: Job, now: Date): number | null {
   return durationBetween(job.created_at, started);
 }
 
-export type Viewer = 'owner' | 'admin';
+export type Viewer = BuildViewer;
 
 function publishedLists(viewer: Viewer, capital: boolean): string {
   if (viewer === 'owner') return capital ? 'Your published lists' : 'your published lists';
@@ -180,7 +163,11 @@ export function buildSummary(job: Job, viewer: Viewer): BuildSummary {
   const unchanged = `${publishedLists(viewer, true)} were left unchanged.`;
   switch (phase) {
     case 'queued':
-      return { heading: 'Waiting in the queue', detail: queuedDetail(job), publication: untilFinished };
+      return {
+        heading: 'Waiting in the queue',
+        detail: queuedDetail(job),
+        publication: untilFinished,
+      };
     case 'starting':
       return {
         heading: 'Starting the build',
@@ -222,35 +209,16 @@ export function buildSummary(job: Job, viewer: Viewer): BuildSummary {
       return {
         heading: failure?.title ?? UNKNOWN_FAILURE_TITLE,
         detail: failure?.serverMessage ?? '',
-        publication: `Nothing was published. ${unchanged}`,
+        publication: failure?.statesNothingPublished ? '' : `Nothing was published. ${unchanged}`,
       };
     }
     case 'skipped':
       return {
         heading: 'Build skipped',
-        detail:
-          sentence(job.result?.skip_reason) || 'Nothing has changed since the last build.',
+        detail: sentence(job.result?.skip_reason) || 'Nothing has changed since the last build.',
         publication: `Nothing needed rebuilding. ${unchanged}`,
       };
   }
-}
-
-export function requestedBy(job: Pick<Job, 'type' | 'username'>, viewer: Viewer): string {
-  const labels: Record<JobType, string> = {
-    manual:
-      viewer === 'owner' || job.username === '__default__'
-        ? 'Manual'
-        : `Manual, by ${job.username}`,
-    scheduled: 'Scheduled rebuild',
-    admin: 'Started by an admin',
-  };
-  return labels[job.type] ?? job.type;
-}
-
-export const DEFAULT_LISTS_USERNAME = '__default__';
-
-export function isDefaultListsBuild(job: Pick<Job, 'username' | 'user_id'>): boolean {
-  return job.user_id === null || job.username === DEFAULT_LISTS_USERNAME;
 }
 
 const OUTPUT_NAME = /^(.*)_(hosts|plain|adblock)\.txt(\.gz)?$/;
@@ -277,7 +245,9 @@ export function outputLists(files: OutputFile[]): OutputList[] {
   return [...lists.values()];
 }
 
-export function formatRatio(format: Pick<FormatProgress, 'domains_written' | 'total_domains'>): number {
+export function formatRatio(
+  format: Pick<FormatProgress, 'domains_written' | 'total_domains'>,
+): number {
   if (format.total_domains <= 0) return 0;
   return Math.min(1, format.domains_written / format.total_domains);
 }

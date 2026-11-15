@@ -28,6 +28,7 @@ import { UrlField } from '../../components/ui/UrlField';
 import type { ConnectionState } from '../../realtime/backoff';
 import { useConnectionStore } from '../../store';
 import type { JobStatus } from '../../types';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
 const JOB_STATUSES: JobStatus[] = ['queued', 'processing', 'completed', 'failed', 'skipped'];
 
@@ -347,6 +348,7 @@ function Specimens() {
 }
 
 export default function ComponentsPage() {
+  useDocumentMeta('Components');
   return (
     <div className="mx-auto max-w-[1160px] px-6 pb-16">
       <PageHeader

@@ -1,4 +1,11 @@
-import { appendLine, insertLine, replaceLine, type DraftLine, type LineDraft } from './lineDraft';
+import {
+  appendLine,
+  insertLine,
+  parseDraft,
+  replaceLine,
+  type DraftLine,
+  type LineDraft,
+} from './lineDraft';
 
 export const ABP_FLAG = 'abp';
 export const MAX_SOURCE_NAME_LENGTH = 100;
@@ -20,8 +27,7 @@ export type SourceProblem =
   | 'unknown-flag'
   | 'invalid-name'
   | 'duplicate-name'
-  | 'unknown-category'
-  | 'no-category';
+  | 'unknown-category';
 
 export interface ParsedSource {
   kind: 'source';
@@ -114,8 +120,7 @@ export function parseSourceLine(raw: string, categories: readonly string[]): Par
   const category = fields.length > 2 ? fields[2] : null;
   const problems: SourceProblem[] = [];
   if (describeNameProblem(name) !== null) problems.push('invalid-name');
-  if (category === null) problems.push('no-category');
-  else if (!categories.includes(category)) problems.push('unknown-category');
+  if (category !== null && !categories.includes(category)) problems.push('unknown-category');
   return {
     kind: 'source',
     url: fields[0],
@@ -154,13 +159,20 @@ export function countSources(entries: SourceEntry[]): number {
   return entries.filter(countsAsSource).length;
 }
 
+export function countSourcesInText(text: string): number {
+  return countSources(analyseSources(parseDraft(text), []));
+}
+
 export interface SourceGroup {
   category: string;
   entries: SourceEntry<ParsedSource>[];
 }
 
+export const UNCATEGORISED_LIST = 'uncategorized';
+
 export interface GroupedSources {
   groups: SourceGroup[];
+  uncategorised: SourceEntry<ParsedSource>[];
   attention: SourceEntry<ParsedSource | UnrecognisedLine>[];
 }
 
@@ -171,13 +183,19 @@ export function groupSources(
   const byCategory = new Map<string, SourceEntry<ParsedSource>[]>(
     categories.map((category) => [category, []]),
   );
+  const uncategorised: GroupedSources['uncategorised'] = [];
   const attention: GroupedSources['attention'] = [];
   for (const entry of entries) {
     const { parsed } = entry;
     if (parsed.kind === 'unrecognised') {
       attention.push(entry as SourceEntry<UnrecognisedLine>);
     } else if (parsed.kind === 'source') {
-      const placed = parsed.problems.length === 0 ? byCategory.get(parsed.category ?? '') : null;
+      const placed =
+        parsed.problems.length > 0
+          ? null
+          : parsed.category === null
+            ? uncategorised
+            : byCategory.get(parsed.category);
       if (placed) placed.push(entry as SourceEntry<ParsedSource>);
       else attention.push(entry as SourceEntry<ParsedSource>);
     }
@@ -186,6 +204,7 @@ export function groupSources(
     groups: categories
       .map((category) => ({ category, entries: byCategory.get(category) ?? [] }))
       .filter((group) => group.entries.length > 0),
+    uncategorised,
     attention,
   };
 }
@@ -198,7 +217,6 @@ const PROBLEM_TEXT: Record<SourceProblem, string> = {
   'invalid-name': 'The name can only use letters, numbers, dashes and underscores.',
   'duplicate-name': 'Another source already uses this name.',
   'unknown-category': 'The category is not one this site knows.',
-  'no-category': 'No category. Its domains go into a separate list named uncategorized.',
 };
 
 export function describeProblem(problem: SourceProblem): string {

@@ -1,22 +1,24 @@
 import { Link } from 'react-router-dom';
-import { JobStatusPill, StatusPill } from '../../components/ui/StatusPill';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
-} from '../../components/ui/Table';
+  attemptSeconds,
+  domainChange,
+  domainsAfter,
+  isUnreadFailure,
+  requestedBy,
+} from '../../lib/builds';
 import { cn } from '../../lib/cn';
 import { formatDateTime, formatInteger, formatSignedChange } from '../../lib/format';
+import { describeSeconds } from '../../lib/text';
+import { isActive } from '../../realtime/jobMerge';
 import type { Job } from '../../types';
-import { domainChange, domainsAfter } from '../dashboard/dashboardFacts';
-import { attemptSeconds, requestedBy } from './buildFacts';
-import { isUnreadFailure } from './historyFacts';
-import { describeSeconds } from './text';
+import { CELL_LINK } from '../ui/linkClasses';
+import { JobStatusPill, StatusPill } from '../ui/StatusPill';
+import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from '../ui/Table';
 
 function DomainsCell({ jobs, job }: { jobs: Job[]; job: Job }) {
+  if (isActive(job)) {
+    return <span className="whitespace-nowrap text-text-tertiary">in progress</span>;
+  }
   if (job.status === 'failed') {
     return <span className="whitespace-nowrap text-text-tertiary">not published</span>;
   }
@@ -41,15 +43,17 @@ function ChangeCell({ jobs, job }: { jobs: Job[]; job: Job }) {
   );
 }
 
-export interface HistoryTableProps {
+export interface BuildHistoryTableProps {
   jobs: Job[];
   allJobs: Job[];
   now: Date;
+  caption: string;
 }
 
-export function HistoryTable({ jobs, allJobs, now }: HistoryTableProps) {
+export function BuildHistoryTable({ jobs, allJobs, now, caption }: BuildHistoryTableProps) {
   return (
     <Table>
+      <caption className="sr-only">{caption}</caption>
       <TableHead>
         <TableRow>
           <TableHeaderCell>Started</TableHeaderCell>
@@ -72,7 +76,7 @@ export function HistoryTable({ jobs, allJobs, now }: HistoryTableProps) {
               <TableCell>
                 <Link
                   to={`/jobs/${encodeURIComponent(job.job_id)}`}
-                  className="inline-flex min-h-6 items-center whitespace-nowrap underline hover:text-accent-text narrow:min-h-11"
+                  className={cn(CELL_LINK, 'whitespace-nowrap')}
                 >
                   {formatDateTime(job.created_at, { now })}
                 </Link>

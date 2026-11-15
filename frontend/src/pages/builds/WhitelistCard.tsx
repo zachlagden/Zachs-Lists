@@ -4,7 +4,7 @@ import { KeyValueList } from '../../components/ui/Layout';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { formatInteger, pluralise } from '../../lib/format';
 import type { WhitelistPatternProgress, WhitelistProgress } from '../../types';
-import { sentence } from './text';
+import { sentence } from '../../lib/text';
 
 function Pattern({ pattern }: { pattern: WhitelistPatternProgress }) {
   return (

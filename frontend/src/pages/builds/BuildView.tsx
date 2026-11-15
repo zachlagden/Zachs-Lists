@@ -26,7 +26,6 @@ export interface BuildViewProps {
   paused: boolean;
   backTo: string;
   backLabel: string;
-  categories?: ReadonlyMap<string, string> | null;
   limitRequest?: LimitRequestOption | null;
 }
 
@@ -36,7 +35,6 @@ export function BuildView({
   paused,
   backTo,
   backLabel,
-  categories = null,
   limitRequest = null,
 }: BuildViewProps) {
   const phase = buildPhase(job);
@@ -64,7 +62,7 @@ export function BuildView({
         description={
           <>
             {summary.detail ? <span className="block">{summary.detail}</span> : null}
-            <span className="block">{summary.publication}</span>
+            {summary.publication ? <span className="block">{summary.publication}</span> : null}
             {running && paused && job.updated_at ? (
               <span className="block text-warn">
                 Showing the state at {formatClockTime(job.updated_at)}. It catches up when the
@@ -92,7 +90,6 @@ export function BuildView({
           {showSources ? (
             <SourcesTable
               sources={sources}
-              categories={categories}
               emptyMessage={
                 phase === 'queued'
                   ? 'Sources are listed here with their progress once a build worker starts this build.'
@@ -100,7 +97,9 @@ export function BuildView({
               }
             />
           ) : null}
-          <Stack className={showSources ? 'content-start' : 'col-span-full max-w-[32rem] content-start'}>
+          <Stack
+            className={showSources ? 'content-start' : 'col-span-full max-w-[32rem] content-start'}
+          >
             <ThisBuildCard job={job} viewer={viewer} />
             {showPipeline ? (
               <>

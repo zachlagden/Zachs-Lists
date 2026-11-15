@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useState, type Dispatch } from 'react';
-import { useBlocker, type Blocker } from 'react-router-dom';
+import type { Blocker } from 'react-router-dom';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { useAuthStore } from '../../store';
 import {
   clearStoredDraft,
@@ -68,21 +69,7 @@ export function useEditorDraft(userId: string, server: ServerConfig): EditorDraf
     [userId],
   );
 
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
-
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty &&
-      useAuthStore.getState().isAuthenticated &&
-      currentLocation.pathname !== nextLocation.pathname,
-  );
+  const blocker = useUnsavedChangesGuard(dirty);
 
   return {
     state,

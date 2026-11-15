@@ -29,10 +29,6 @@ interface FormErrors {
 
 const NO_ERRORS: FormErrors = { url: null, name: null, category: null };
 
-function focusWhenDialogOpens(input: HTMLInputElement | null): void {
-  input?.setAttribute('autofocus', '');
-}
-
 export function SourceFormDialog({
   mode,
   initial,
@@ -51,6 +47,7 @@ export function SourceFormDialog({
   );
   const [abp, setAbp] = useState(initial.abp);
   const [errors, setErrors] = useState<FormErrors>(NO_ERRORS);
+  const mayStayUncategorised = mode === 'edit' && initial.category === null;
 
   const trimmedUrl = url.trim();
   const suggestedName =
@@ -71,7 +68,13 @@ export function SourceFormDialog({
       name:
         describeNameProblem(finalName) ??
         (takenNames.has(finalName.toLowerCase()) ? 'Another source already uses this name.' : null),
-      category: category ? null : 'Choose a category.',
+      category: category
+        ? null
+        : !mayStayUncategorised
+          ? 'Choose a category.'
+          : abp
+            ? 'Choose a category to use the Adblock flag.'
+            : null,
     };
     setErrors(found);
     const firstInvalid = found.url
@@ -86,7 +89,12 @@ export function SourceFormDialog({
       if (field instanceof HTMLElement) field.focus();
       return;
     }
-    onSubmit({ url: mode === 'add' ? trimmedUrl : initial.url, name: finalName, category, abp });
+    onSubmit({
+      url: mode === 'add' ? trimmedUrl : initial.url,
+      name: finalName,
+      category: category || null,
+      abp,
+    });
   };
 
   return (
@@ -117,7 +125,6 @@ export function SourceFormDialog({
         {mode === 'add' ? (
           <Field label="Address" error={errors.url}>
             <Input
-              ref={focusWhenDialogOpens}
               mono
               type="url"
               name="url"
@@ -143,7 +150,6 @@ export function SourceFormDialog({
           error={errors.name}
         >
           <Input
-            ref={mode === 'edit' ? focusWhenDialogOpens : undefined}
             mono
             autoComplete="off"
             spellCheck={false}
@@ -159,8 +165,8 @@ export function SourceFormDialog({
             value={category}
             onChange={(event) => setCategory(event.target.value)}
           >
-            <option value="" disabled>
-              Choose a category
+            <option value="" disabled={!mayStayUncategorised}>
+              {mayStayUncategorised ? 'No category' : 'Choose a category'}
             </option>
             {categories.map((option) => (
               <option key={option} value={option}>

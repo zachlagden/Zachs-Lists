@@ -22,6 +22,8 @@ import { pageFromSearch } from '../shared/urlState';
 import { useUrlState } from '../shared/useUrlState';
 import { enforcementSentence, methodLabel, percentOverText, type Enforcement } from './limitFacts';
 import { ResolveReviewDialog } from './ResolveReviewDialog';
+import { CELL_LINK } from '../../../components/ui/linkClasses';
+import { cn } from '../../../lib/cn';
 
 const PAGE_KEY = 'reviews_page';
 
@@ -80,7 +82,7 @@ export function ReviewsCard({ enforcement, now }: { enforcement: Enforcement; no
                     <TableCell>
                       <Link
                         to={`/admin/users/${encodeURIComponent(review.user_id)}`}
-                        className="font-medium break-all underline hover:text-accent-text"
+                        className={cn(CELL_LINK, 'font-medium break-all')}
                       >
                         {review.username}
                       </Link>

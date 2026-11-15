@@ -6,32 +6,31 @@ import { configQuery } from '../../api/config';
 import { toApiError } from '../../api/errors';
 import { jobsKeys, jobsQuery, startBuild } from '../../api/jobs';
 import { listsKeys, userListsQuery, type UserListsResponse } from '../../api/lists';
-import { parseConfig } from '../../components/config/types';
+import { countSourcesInText } from '../../components/config/sourceLines';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { LoadingRegion, PageHeader, Stack } from '../../components/ui/Layout';
 import { ErrorState } from '../../components/ui/States';
+import { describeBuildRefusal } from '../../lib/builds';
 import { useNow } from '../../lib/useNow';
 import { useAuthStore } from '../../store';
 import { openLimitReview } from '../../utils/limitReview';
-import { activeJob, describeBuildRefusal, publicationState, publishedJob } from './dashboardFacts';
+import { activeJob, publicationState, publishedJob } from './dashboardFacts';
 import { Figures, FiguresSkeleton } from './Figures';
 import { ListAddress } from './ListAddress';
 import { NeedsAttention } from './NeedsAttention';
-import { Announcements, Notifications, OverLimitNotice } from './Notices';
+import { DashboardNotices, OverLimitNotice } from './Notices';
 import { PublishedState, PublishedStateSkeleton } from './PublishedState';
 import { RecentBuilds } from './RecentBuilds';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
-const OVER_LIMIT_NOTIFICATION = 'domain_limit_exceeded';
-
-function countSources(config: string | undefined): number {
-  if (!config) return 0;
-  return parseConfig(config).filter((line) => !line.isComment && line.url).length;
-}
+const HIDDEN_WITH_A_REVIEW: readonly string[] = ['domain_limit_exceeded'];
+const NOTHING_HIDDEN: readonly string[] = [];
 
 export default function DashboardPage() {
+  useDocumentMeta('Dashboard');
   const user = useAuthStore((state) => state.user);
   const client = useQueryClient();
   const now = useNow();
@@ -63,7 +62,7 @@ export default function DashboardPage() {
   if (!user) return null;
 
   const jobList = jobs.data?.jobs ?? [];
-  const configSourceCount = countSources(config.data?.config);
+  const configSourceCount = countSourcesInText(config.data?.config ?? '');
   const review = user.is_admin ? null : openLimitReview(user.limit_review);
   const running = activeJob(jobList);
   const core = lists.data && jobs.data && config.data ? lists.data : null;
@@ -89,7 +88,11 @@ export default function DashboardPage() {
               Edit sources
             </Button>
             {running ? (
-              <Button to="/jobs" variant="primary" icon="bolt">
+              <Button
+                to={`/jobs/${encodeURIComponent(running.job_id)}`}
+                variant="primary"
+                icon="bolt"
+              >
                 View build
               </Button>
             ) : (
@@ -112,8 +115,9 @@ export default function DashboardPage() {
             {describeBuildRefusal(toApiError(build.error), now)}
           </Alert>
         ) : null}
-        <Announcements />
-        <Notifications hideTypes={review ? [OVER_LIMIT_NOTIFICATION] : []} />
+        <DashboardNotices
+          hiddenNotificationTypes={review ? HIDDEN_WITH_A_REVIEW : NOTHING_HIDDEN}
+        />
         {review && core ? (
           <OverLimitNotice
             review={review}

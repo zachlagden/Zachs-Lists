@@ -19,6 +19,8 @@ import { useNow } from '../../../lib/useNow';
 import { ConfigEditor } from './ConfigEditor';
 import { ConfigViewer } from './ConfigViewer';
 import { SyncCard } from './SyncCard';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 function CardSkeleton({ label }: { label: string }) {
   return (
@@ -91,6 +93,7 @@ function PublishedLists({ now }: { now: Date }) {
 }
 
 export default function DefaultListsPage() {
+  useDocumentMeta(adminTitle('Default lists'));
   const now = useNow();
   const config = useQuery(defaultConfigQuery());
   const status = useQuery(defaultSyncQuery());

@@ -5,8 +5,11 @@ import { useNow } from '../../../lib/useNow';
 import type { Enforcement } from './limitFacts';
 import { RequestsCard } from './RequestsCard';
 import { ReviewsCard } from './ReviewsCard';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 export default function LimitsPage() {
+  useDocumentMeta(adminTitle('Limits'));
   const now = useNow();
   const stats = useQuery(adminStatsQuery());
   const enforcement: Enforcement = stats.data

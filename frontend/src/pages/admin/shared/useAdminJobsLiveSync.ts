@@ -4,6 +4,7 @@ import {
   ADMIN_JOBS_LIMIT,
   ADMIN_STATS_FRESH_MS,
   adminKeys,
+  fetchAdminJob,
   type AdminJobsResponse,
 } from '../../../api/admin';
 import { useJobSocket } from '../../../hooks/useSocket';
@@ -39,6 +40,7 @@ export function useAdminJobsLiveSync(): void {
       createSpacedRunner(() => {
         void client.invalidateQueries({ queryKey: adminKeys.stats() });
         void client.invalidateQueries({ queryKey: adminKeys.limitReviews() });
+        void client.invalidateQueries({ queryKey: adminKeys.userJobs() });
       }, ADMIN_STATS_FRESH_MS),
     [client],
   );
@@ -68,6 +70,7 @@ export function useAdminJobsLiveSync(): void {
     onJobCompleted: applyAndRefreshFigures,
     onReconnect: refetchJobs,
     knownJobs: known,
+    fetchJob: fetchAdminJob,
     onJobsSynced: applyMany,
     onResyncFailed: refetchJobs,
   });

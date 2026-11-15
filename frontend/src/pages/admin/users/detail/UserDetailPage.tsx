@@ -13,6 +13,8 @@ import { AccessCard } from './AccessCard';
 import { LimitsCard } from './LimitsCard';
 import { ProfileCard } from './ProfileCard';
 import { IpLogCard, ReviewCard, UserBuilds } from './UserActivity';
+import { useDocumentMeta } from '../../../../hooks/useDocumentMeta';
+import { adminTitle } from '../../shared/sections';
 
 const BACK = (
   <Button to="/admin/users" variant="ghost" size="sm" icon="arrow-left" className="-ml-2.5">
@@ -25,14 +27,15 @@ export default function UserDetailPage() {
   const viewer = useAuthStore((state) => state.user);
   const now = useNow();
   const user = useQuery(adminUserQuery(userId));
+  const missing = user.isError && toApiError(user.error).status === 404;
+  useDocumentMeta(adminTitle(user.data?.username ?? (missing ? 'User not found' : 'User')));
 
   if (!viewer) return null;
 
   if (!user.data) {
-    const missing = user.isError && toApiError(user.error).status === 404;
     return (
       <>
-        <PageHeader title="User" eyebrow={BACK} />
+        <PageHeader title={missing ? 'User not found' : 'User'} eyebrow={BACK} />
         <Card>
           {missing ? (
             <EmptyState

@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react';
 import { createBrowserRouter, type RouteObject } from 'react-router-dom';
-import { AppShell } from './components/shell/AppShell';
 import { PagePending } from './components/shell/Pending';
 import { PublicShell } from './components/shell/PublicShell';
+import HomePage from './pages/home/HomePage';
 import { RequireAdmin, RequireAuth } from './routes/guards';
 import { RouteError } from './routes/RouteError';
 
@@ -27,7 +27,7 @@ export const routes: RouteObject[] = [
           {
             errorElement: <RouteError />,
             children: [
-              { index: true, lazy: page(() => import('./pages/home/HomePage')) },
+              { index: true, element: <HomePage /> },
               { path: 'login', lazy: page(() => import('./pages/LoginPage')) },
               { path: 'browse', lazy: page(() => import('./pages/browse/BrowsePage')) },
               ...developmentRoutes,
@@ -40,7 +40,9 @@ export const routes: RouteObject[] = [
         element: <RequireAuth />,
         children: [
           {
-            element: <AppShell />,
+            lazy: async () => ({
+              Component: (await import('./components/shell/AppShell')).AppShell,
+            }),
             children: [
               {
                 errorElement: <RouteError />,

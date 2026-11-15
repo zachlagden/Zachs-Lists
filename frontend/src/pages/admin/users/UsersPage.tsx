@@ -11,10 +11,13 @@ import { Pagination } from '../shared/Pagination';
 import { useDebouncedValue, useUrlState } from '../shared/useUrlState';
 import { SEARCH_DEBOUNCE_MS, apiFilters, isFiltered, userListState } from './userFacts';
 import { UsersTable, UsersTableSkeleton } from './UsersTable';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 const CLEARED = { q: null, role: null, state: null, banned: null, page: null };
 
 export default function UsersPage() {
+  useDocumentMeta(adminTitle('Users'));
   const now = useNow();
   const { params, update } = useUrlState();
   const state = userListState(params);

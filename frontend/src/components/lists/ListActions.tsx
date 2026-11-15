@@ -25,7 +25,6 @@ export function ListActions({ listLabel, format, available, address, openPath }:
         variant="ghost"
         text={address}
         subject={`the ${listLabel} address in the ${FORMAT_NAMES[format]} format`}
-        className="narrow:min-h-11"
       />
       {openPath ? (
         <Button
@@ -35,7 +34,6 @@ export function ListActions({ listLabel, format, available, address, openPath }:
           variant="ghost"
           size="sm"
           icon="external"
-          className="narrow:min-h-11"
           aria-label={`Open the ${listLabel} list in the ${FORMAT_NAMES[format]} format in a new tab`}
         >
           Open

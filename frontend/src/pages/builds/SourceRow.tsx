@@ -6,8 +6,8 @@ import { TableCell, TableRow } from '../../components/ui/Table';
 import { cn } from '../../lib/cn';
 import { formatBytes, formatInteger, formatSignedChange } from '../../lib/format';
 import type { SourceProgress } from '../../types';
-import { downloadRatio, nameParts, sourceHost, sourceNote } from './sourceFacts';
-import { describeSeconds } from './text';
+import { downloadRatio, nameParts, sourceNote } from './sourceFacts';
+import { describeSeconds } from '../../lib/text';
 
 function downloadText(source: SourceProgress, outcome: SourceOutcome): string {
   switch (outcome) {
@@ -97,21 +97,20 @@ function BreakableName({ name }: { name: string }) {
 
 export interface SourceRowProps {
   source: SourceProgress;
-  category: string | null;
 }
 
-function SourceRowView({ source, category }: SourceRowProps) {
+function SourceRowView({ source }: SourceRowProps) {
   const outcome = sourceOutcome(source);
   const note = sourceNote(source);
   const text = downloadText(source, outcome);
-  const about = [category ?? sourceHost(source.url), ...source.detected_formats].join(' · ');
+  const about = [source.category, ...source.detected_formats].filter(Boolean).join(' · ');
   return (
     <TableRow data-source-row={source.id}>
       <TableCell className="min-w-[8.5rem] break-words">
         <span className="block font-medium">
           <BreakableName name={source.name} />
         </span>
-        <span className="block text-xs text-text-tertiary">{about}</span>
+        {about ? <span className="block text-xs text-text-tertiary">{about}</span> : null}
         {note ? (
           <span
             className={cn(

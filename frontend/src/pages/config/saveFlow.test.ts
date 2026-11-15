@@ -3,7 +3,13 @@ import type { ValidationResponse } from '../../api/config';
 import { ApiError } from '../../api/errors';
 import { parseDraft } from '../../components/config/lineDraft';
 import { TOKEN_LIFETIME_MS, sourceCheckFrom } from './configFacts';
-import type { ServerConfig } from './editorState';
+import {
+  editorReducer,
+  initialEditorState,
+  sourcesAreDirty,
+  whitelistIsDirty,
+  type ServerConfig,
+} from './editorState';
 import { saveDraft, type SaveApi, type SaveRequest } from './saveFlow';
 
 const SERVER: ServerConfig = {
@@ -65,7 +71,6 @@ function fakeServer(overrides: Partial<SaveApi> = {}): FakeServer {
       stored.revision += 1;
     },
     fetchConfig: async () => ({ config: stored.sources, revision: stored.revision }),
-    fetchWhitelist: async () => ({ whitelist: stored.whitelist }),
     now: () => 1_000_000,
     ...overrides,
   };
@@ -188,6 +193,47 @@ describe('saving the draft', () => {
     const result = await saveDraft(request(SERVER.sources, NEW_WHITELIST), server.api);
     expect(result.problem).toEqual({ kind: 'conflict' });
     expect(server.calls).toEqual([]);
+  });
+
+  it('keeps the whitelist baseline when its save meets a change made elsewhere', async () => {
+    const server = fakeServer();
+    const saveOurSources = server.api.saveConfig;
+    server.api.saveConfig = async (config, token) => {
+      await saveOurSources(config, token);
+      server.stored.whitelist = 'changed.example.com\n';
+      server.stored.revision += 1;
+    };
+    const result = await saveDraft(request(NEW_SOURCES, NEW_WHITELIST), server.api);
+    expect(result.savedSources).toBe(true);
+    expect(result.savedWhitelist).toBe(false);
+    expect(result.problem).toEqual({ kind: 'conflict' });
+    expect(server.calls).toEqual(['validate', 'save-config:token-1']);
+    expect(result.server).toEqual({
+      sources: NEW_SOURCES,
+      whitelist: SERVER.whitelist,
+      revision: 4,
+    });
+
+    const editing = editorReducer(
+      editorReducer(initialEditorState(SERVER), {
+        type: 'restore',
+        sources: NEW_SOURCES,
+        whitelist: NEW_WHITELIST,
+      }),
+      { type: 'saved', server: result.server as ServerConfig },
+    );
+    expect(sourcesAreDirty(editing)).toBe(false);
+    expect(whitelistIsDirty(editing)).toBe(true);
+    const refetched = editorReducer(editing, {
+      type: 'server-changed',
+      server: { ...server.stored },
+    });
+    expect(refetched.conflict).toEqual({
+      sources: NEW_SOURCES,
+      whitelist: 'changed.example.com\n',
+      revision: 5,
+    });
+    expect(refetched.server.whitelist).toBe(SERVER.whitelist);
   });
 
   it('keeps the saved sources when the whitelist is refused, with line numbers', async () => {

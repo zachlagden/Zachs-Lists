@@ -89,6 +89,7 @@ fn stage_changes_write_utc_millisecond_timestamps_and_keep_every_key() {
         "a".repeat(64),
         "first_list".into(),
         "https://lists.example.com/first.txt".into(),
+        Some("advertising".into()),
     )]);
     progress.enter_whitelist(10, 2).unwrap();
     progress

@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Job } from '../types';
-import { useJobsStore } from '../store';
 import {
   OFFLINE_AFTER_FAILURES,
   RECONNECT_MAX_MS,
@@ -93,40 +92,11 @@ describe('job merge', () => {
 });
 
 describe('job ownership', () => {
-  it('accepts only the signed-in account\'s jobs', () => {
+  it("accepts only the signed-in account's jobs", () => {
     expect(belongsTo(job('a', 1), 'user-1')).toBe(true);
     expect(belongsTo(job('a', 1), 'user-2')).toBe(false);
     expect(belongsTo({ user_id: null }, 'user-1')).toBe(false);
     expect(belongsTo(job('a', 1), undefined)).toBe(false);
-  });
-});
-
-describe('jobs store', () => {
-  beforeEach(() => useJobsStore.getState().reset());
-
-  it('drops an update with a lower revision', () => {
-    const store = useJobsStore.getState();
-    store.updateJob(job('a', 4, 'completed'));
-    store.updateJob(job('a', 3, 'processing'));
-    store.addJob(job('a', 2, 'queued'));
-    expect(useJobsStore.getState().jobs).toEqual([job('a', 4, 'completed')]);
-  });
-
-  it('does not duplicate a job that is created twice', () => {
-    const store = useJobsStore.getState();
-    store.addJob(job('a', 0, 'queued'));
-    store.addJob(job('a', 0, 'queued'));
-    expect(useJobsStore.getState().jobs).toHaveLength(1);
-  });
-
-  it('merges a fetched list without rolling back live state', () => {
-    const store = useJobsStore.getState();
-    store.updateJob(job('a', 8, 'completed'));
-    store.mergeFetchedJobs([job('a', 2, 'processing'), job('z', 1, 'completed', -5)]);
-    expect(useJobsStore.getState().jobs.map((item) => [item.job_id, item.rev])).toEqual([
-      ['a', 8],
-      ['z', 1],
-    ]);
   });
 });
 

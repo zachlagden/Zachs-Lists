@@ -1,26 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { limitRequestsQuery } from '../../api/account';
-import { configQuery } from '../../api/config';
 import { toApiError } from '../../api/errors';
 import { jobQuery, jobsKeys, type JobsResponse } from '../../api/jobs';
 import { userListsQuery } from '../../api/lists';
-import { parseConfig } from '../../components/config/types';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { BuildProblem } from './BuildProblem';
 import { BuildView, BuildViewSkeleton } from './BuildView';
-import { isUnreadFailure } from './historyFacts';
 import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
-
-function categoriesByUrl(config: string | undefined): ReadonlyMap<string, string> | null {
-  if (!config) return null;
-  const categories = new Map<string, string>();
-  for (const line of parseConfig(config)) {
-    if (!line.isComment && line.url && line.category) categories.set(line.url, line.category);
-  }
-  return categories;
-}
+import { isUnreadFailure } from '../../lib/builds';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
+import { buildSummary } from './buildFacts';
 
 export default function BuildPage() {
   const { jobId = '' } = useParams<{ jobId: string }>();
@@ -31,25 +22,25 @@ export default function BuildPage() {
   const build = useQuery({
     ...jobQuery(jobId),
     initialData: () =>
-      client
-        .getQueryData<JobsResponse>(jobsKeys.list())
-        ?.jobs.find((job) => job.job_id === jobId),
+      client.getQueryData<JobsResponse>(jobsKeys.list())?.jobs.find((job) => job.job_id === jobId),
     initialDataUpdatedAt: () => client.getQueryState(jobsKeys.list())?.dataUpdatedAt,
   });
   const job = build.data;
   const overLimit = job?.result?.error_code === 'domain_limit_exceeded';
-  const config = useQuery(configQuery());
   const limitRequests = useQuery({ ...limitRequestsQuery(), enabled: overLimit });
   const lists = useQuery({ ...userListsQuery(), enabled: overLimit });
-  const categories = useMemo(() => categoriesByUrl(config.data?.config), [config.data?.config]);
 
   useMarkFailuresRead(job !== undefined && isUnreadFailure(job), jobId);
+  const notFound = build.isError && toApiError(build.error).status === 404;
+  useDocumentMeta(
+    job ? buildSummary(job, 'owner').heading : notFound ? 'Build not found' : 'Build',
+  );
 
   if (!job) {
     if (build.isError) {
       return (
         <BuildProblem
-          notFound={toApiError(build.error).status === 404}
+          notFound={notFound}
           error={build.error}
           onRetry={() => void build.refetch()}
           retrying={build.isFetching}
@@ -70,7 +61,6 @@ export default function BuildPage() {
         paused={paused}
         backTo="/jobs"
         backLabel="All builds"
-        categories={categories}
         limitRequest={
           overLimit && limitRequests.data
             ? {

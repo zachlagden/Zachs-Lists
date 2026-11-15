@@ -100,7 +100,6 @@ export function EditorCard({
     <>
       <Button
         size="sm"
-        className="narrow:min-h-11"
         icon="list"
         disabled={atLimit}
         onClick={() => onOpenDialog({ kind: 'library' })}
@@ -109,7 +108,6 @@ export function EditorCard({
       </Button>
       <Button
         size="sm"
-        className="narrow:min-h-11"
         icon="plus"
         disabled={atLimit}
         onClick={() => onOpenDialog({ kind: 'add' })}

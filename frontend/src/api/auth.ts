@@ -1,4 +1,3 @@
-import { queryOptions } from '@tanstack/react-query';
 import type { User } from '../types';
 import { API_BASE, get, post } from './http';
 
@@ -23,6 +22,3 @@ export function signOut(): Promise<{ success: boolean }> {
 export function gitHubSignInUrl(): string {
   return `${API_BASE}/api/auth/github`;
 }
-
-export const currentUserQuery = () =>
-  queryOptions({ queryKey: authKeys.me(), queryFn: fetchCurrentUser, retry: false });

@@ -1,6 +1,5 @@
-import type { IconName } from '../../../components/ui/icons';
-import type { StatusTone } from '../../../components/ui/status';
-import { formatInteger, parseApiDate } from '../../../lib/format';
+import type { StatusDescription } from '../../../components/ui/status';
+import { formatDecimal, formatInteger, parseApiDate } from '../../../lib/format';
 import type { AdminLimitReview, Job, LimitRequest } from '../../../types';
 
 export const MAX_RESOLVE_REASON_LENGTH = 200;
@@ -13,10 +12,8 @@ export function methodLabel(method: string | null): string {
   return method ?? 'Not recorded';
 }
 
-const percentOverFormat = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
-
 export function percentOverText(percentOver: number): string {
-  return `${percentOverFormat.format(percentOver)}%`;
+  return `${formatDecimal(percentOver)}%`;
 }
 
 export type Enforcement = 'on' | 'off' | 'loading' | 'unknown';
@@ -76,20 +73,14 @@ export function requestUsage(
   return { domains: request.current_usage, source: 'stored' };
 }
 
-export interface RequestStatusDescription {
-  tone: StatusTone;
-  icon: IconName;
-  label: string;
-}
-
-const REQUEST_STATUS: Record<LimitRequest['status'], RequestStatusDescription> = {
+const REQUEST_STATUS: Record<LimitRequest['status'], StatusDescription> = {
   pending: { tone: 'warn', icon: 'clock', label: 'Waiting' },
   approved: { tone: 'ok', icon: 'check', label: 'Approved' },
   denied: { tone: 'fail', icon: 'fail', label: 'Denied' },
   superseded: { tone: 'neutral', icon: 'dash', label: 'Replaced' },
 };
 
-export function requestStatus(status: LimitRequest['status']): RequestStatusDescription {
+export function requestStatus(status: LimitRequest['status']): StatusDescription {
   return REQUEST_STATUS[status] ?? { tone: 'neutral', icon: 'dash', label: status };
 }
 

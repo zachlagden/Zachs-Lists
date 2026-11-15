@@ -4,8 +4,8 @@ import { ProgressBar } from '../../components/ui/ProgressBar';
 import { cn } from '../../lib/cn';
 import { formatBytes, formatInteger, pluralise } from '../../lib/format';
 import type { Job } from '../../types';
+import { attemptStartedAt } from '../../lib/builds';
 import {
-  attemptStartedAt,
   buildSources,
   buildSteps,
   type BuildStep,

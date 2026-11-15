@@ -32,20 +32,22 @@ export function Pagination({
           ? `No ${noun}`
           : `${formatInteger(first)} to ${formatInteger(last)} of ${formatInteger(total)} ${noun}`}
       </p>
-      <Button
-        size="sm"
-        icon="arrow-left"
-        disabled={page <= 1}
-        onClick={() => onPageChange(page - 1)}
-      >
-        Previous
-      </Button>
-      <span className="num">
-        Page {formatInteger(page)} of {formatInteger(Math.max(pages, 1))}
-      </span>
-      <Button size="sm" disabled={page >= pages} onClick={() => onPageChange(page + 1)}>
-        Next
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          icon="arrow-left"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </Button>
+        <span className="num whitespace-nowrap">
+          Page {formatInteger(page)} of {formatInteger(Math.max(pages, 1))}
+        </span>
+        <Button size="sm" disabled={page >= pages} onClick={() => onPageChange(page + 1)}>
+          Next
+        </Button>
+      </div>
     </nav>
   );
 }

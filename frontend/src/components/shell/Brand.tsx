@@ -5,7 +5,10 @@ export function Brand({ to, className }: { to: string; className?: string }) {
   return (
     <Link
       to={to}
-      className={cn('flex items-center gap-2.5 text-[15px] font-semibold no-underline', className)}
+      className={cn(
+        'flex items-center gap-2.5 text-[15px] font-semibold no-underline narrow:min-h-11',
+        className,
+      )}
     >
       <span
         aria-hidden="true"

@@ -3,7 +3,8 @@ import { Card, CardBody } from '../../components/ui/Card';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { JobStatusPill, StatusPill } from '../../components/ui/StatusPill';
 import type { Job } from '../../types';
-import { attemptStartedAt, buildSources, buildSummary } from './buildFacts';
+import { attemptStartedAt } from '../../lib/builds';
+import { buildSources, buildSummary } from './buildFacts';
 import { LiveDuration } from './Durations';
 import { sourceTally } from './sourceFacts';
 
@@ -40,7 +41,7 @@ export function RunningBuild({ job, paused }: { job: Job; paused: boolean }) {
           </Button>
         </div>
         <p className="text-text-secondary">
-          {summary.detail} {summary.publication}
+          {[summary.detail, summary.publication].filter(Boolean).join(' ')}
         </p>
         {queued ? null : (
           <ProgressBar

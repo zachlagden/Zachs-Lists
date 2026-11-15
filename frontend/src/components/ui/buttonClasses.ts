@@ -15,13 +15,13 @@ const VARIANTS: Record<ButtonVariant, string> = {
 };
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'h-[30px] px-2.5 text-[13px] narrow:min-h-10',
-  md: 'h-9 px-3.5 narrow:min-h-11',
+  sm: 'h-[30px] px-2.5 text-[13px] narrow:min-h-11 narrow:min-w-11',
+  md: 'h-9 px-3.5 narrow:min-h-11 narrow:min-w-11',
   lg: 'h-11 px-5',
 };
 
 const ICON_ONLY: Record<ButtonSize, string> = {
-  sm: 'w-[30px] px-0 narrow:min-w-10',
+  sm: 'w-[30px] px-0 narrow:min-w-11',
   md: 'w-9 px-0 narrow:min-w-11',
   lg: 'w-11 px-0',
 };

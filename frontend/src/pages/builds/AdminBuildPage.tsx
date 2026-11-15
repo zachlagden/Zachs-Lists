@@ -9,6 +9,9 @@ import type { Job } from '../../types';
 import { BuildProblem } from './BuildProblem';
 import { BuildView, BuildViewSkeleton } from './BuildView';
 import { useUpdatesPaused } from './useBuildPageState';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
+import { adminTitle } from '../admin/shared/sections';
+import { buildSummary } from './buildFacts';
 
 function newest(jobId: string, current: Job | undefined, incoming: Job[]): Job | undefined {
   return incoming.reduce<Job | undefined>(
@@ -33,9 +36,7 @@ export default function AdminBuildPage() {
 
   const applyMany = useCallback(
     (incoming: Job[]) => {
-      client.setQueryData<Job>(adminKeys.job(jobId), (current) =>
-        newest(jobId, current, incoming),
-      );
+      client.setQueryData<Job>(adminKeys.job(jobId), (current) => newest(jobId, current, incoming));
     },
     [client, jobId],
   );
@@ -55,15 +56,27 @@ export default function AdminBuildPage() {
     onJobCompleted: apply,
     onReconnect: refetch,
     knownJobs: known,
+    fetchJob: fetchAdminJob,
     onJobsSynced: applyMany,
     onResyncFailed: refetch,
   });
+
+  const notFound = build.isError && toApiError(build.error).status === 404;
+  useDocumentMeta(
+    adminTitle(
+      build.data
+        ? buildSummary(build.data, 'admin').heading
+        : notFound
+          ? 'Build not found'
+          : 'Build',
+    ),
+  );
 
   if (!build.data) {
     if (build.isError) {
       return (
         <BuildProblem
-          notFound={toApiError(build.error).status === 404}
+          notFound={notFound}
           error={build.error}
           onRetry={() => void build.refetch()}
           retrying={build.isFetching}

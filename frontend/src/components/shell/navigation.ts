@@ -1,3 +1,4 @@
+import type { JobStatus } from '../../types';
 import type { IconName } from '../ui/icons';
 
 export interface NavItem {
@@ -49,9 +50,9 @@ const ADMIN_SECTION_TITLES: Record<string, string> = {
   users: 'Users',
   limits: 'Limits',
   'default-lists': 'Default lists',
-  featured: 'Featured',
+  featured: 'Featured lists',
   builds: 'Builds',
-  library: 'Library',
+  library: 'Source library',
   announcements: 'Announcements',
 };
 
@@ -78,4 +79,11 @@ export function breadcrumbsFor(pathname: string): Breadcrumb[] {
 
 export function visibleNav(items: ReadonlyArray<NavItem>, isAdmin: boolean): NavItem[] {
   return items.filter((item) => !item.adminOnly || isAdmin);
+}
+
+export function buildsBadge(jobs: ReadonlyArray<{ status: JobStatus }>): string | null {
+  const building = jobs.filter((job) => job.status === 'processing').length;
+  if (building > 0) return `${building} building`;
+  const queued = jobs.filter((job) => job.status === 'queued').length;
+  return queued > 0 ? `${queued} queued` : null;
 }

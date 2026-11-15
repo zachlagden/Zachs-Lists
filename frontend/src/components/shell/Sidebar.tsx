@@ -3,7 +3,6 @@ import type { Ref } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { jobsQuery, type JobsResponse } from '../../api/jobs';
 import { cn } from '../../lib/cn';
-import { isActive } from '../../realtime/jobMerge';
 import type { User } from '../../types';
 import { Icon } from '../ui/Icon';
 import { IconButton } from '../ui/IconButton';
@@ -12,13 +11,14 @@ import {
   BUILDS_PATH,
   MAIN_NAV,
   MORE_NAV,
+  buildsBadge,
   isNavActive,
   visibleNav,
   type NavItem,
 } from './navigation';
 
-function countRunning(data: JobsResponse): number {
-  return data.jobs.filter(isActive).length;
+function activeBuildsBadge(data: JobsResponse): string | null {
+  return buildsBadge(data.jobs);
 }
 
 function NavLinkRow({
@@ -76,7 +76,7 @@ export function Sidebar({
   ref,
 }: SidebarProps) {
   const { pathname } = useLocation();
-  const { data: running = 0 } = useQuery({ ...jobsQuery(), select: countRunning });
+  const { data: badge = null } = useQuery({ ...jobsQuery(), select: activeBuildsBadge });
   const displayName = user.name || user.username;
   return (
     <aside
@@ -98,7 +98,7 @@ export function Sidebar({
             item={item}
             pathname={pathname}
             onNavigate={onNavigate}
-            badge={item.to === BUILDS_PATH && running > 0 ? `${running} running` : undefined}
+            badge={item.to === BUILDS_PATH && badge ? badge : undefined}
           />
         ))}
         <div className="px-2.5 pt-3.5 pb-1.5 text-[11px] tracking-[0.06em] text-text-tertiary uppercase">

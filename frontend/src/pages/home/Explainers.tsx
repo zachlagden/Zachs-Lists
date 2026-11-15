@@ -1,5 +1,5 @@
 import { Card } from '../../components/ui/Card';
-import { INLINE_LINK } from '../../components/lists/linkClasses';
+import { INLINE_LINK } from '../../components/ui/linkClasses';
 import { REPOSITORY_URL, SPONSOR_URL } from '../../config/site';
 import { REBUILD_SCHEDULE } from '../../lib/listCatalogue';
 
