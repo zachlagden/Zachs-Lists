@@ -18,6 +18,7 @@ import {
   combineHistory,
   finishedBuilds,
   historyFilterFrom,
+  historyPaging,
   legacyBuildPath,
   nextHistoryLimit,
 } from './historyFacts';
@@ -507,6 +508,40 @@ describe('build history', () => {
     expect(nextHistoryLimit(20, 12)).toBeNull();
     expect(nextHistoryLimit(50, 50)).toBe(100);
     expect(nextHistoryLimit(100, 100)).toBeNull();
+  });
+
+  it('keeps the older-builds button loading until the larger page arrives', () => {
+    const waitingForFirstOlderPage = historyPaging({
+      limit: 50,
+      recentCount: 20,
+      olderCount: null,
+      olderIsForThisLimit: false,
+    });
+    expect(waitingForFirstOlderPage).toEqual({
+      shown: 20,
+      loadingOlder: true,
+      nextLimit: null,
+      showsEveryBuild: false,
+    });
+    const waitingWithThePreviousPage = historyPaging({
+      limit: 100,
+      recentCount: 20,
+      olderCount: 50,
+      olderIsForThisLimit: false,
+    });
+    expect(waitingWithThePreviousPage.loadingOlder).toBe(true);
+    expect(waitingWithThePreviousPage.showsEveryBuild).toBe(false);
+    expect(waitingWithThePreviousPage.shown).toBe(50);
+  });
+
+  it('says every build is shown only when the server returned fewer than asked for', () => {
+    const page = (limit: number, recentCount: number, olderCount: number | null) =>
+      historyPaging({ limit, recentCount, olderCount, olderIsForThisLimit: olderCount !== null });
+    expect(page(20, 12, null)).toMatchObject({ showsEveryBuild: true, nextLimit: null });
+    expect(page(20, 20, null)).toMatchObject({ showsEveryBuild: false, nextLimit: 50 });
+    expect(page(50, 20, 31)).toMatchObject({ showsEveryBuild: true, nextLimit: null, shown: 31 });
+    expect(page(50, 20, 50)).toMatchObject({ showsEveryBuild: false, nextLimit: 100 });
+    expect(page(100, 20, 100)).toMatchObject({ showsEveryBuild: false, nextLimit: null });
   });
 
   it('marks only failures that have not been read', () => {

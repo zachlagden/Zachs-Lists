@@ -41,6 +41,39 @@ export function nextHistoryLimit(limit: number, shown: number): number | null {
   return HISTORY_LIMITS.find((candidate) => candidate > limit) ?? null;
 }
 
+export interface HistoryRequest {
+  limit: number;
+  recentCount: number;
+  olderCount: number | null;
+  olderIsForThisLimit: boolean;
+}
+
+export interface HistoryPaging {
+  shown: number;
+  loadingOlder: boolean;
+  nextLimit: number | null;
+  showsEveryBuild: boolean;
+}
+
+export function historyPaging(request: HistoryRequest): HistoryPaging {
+  const extended = request.limit > HISTORY_LIMITS[0];
+  if (extended && !(request.olderIsForThisLimit && request.olderCount !== null)) {
+    return {
+      shown: Math.max(request.recentCount, request.olderCount ?? 0),
+      loadingOlder: true,
+      nextLimit: null,
+      showsEveryBuild: false,
+    };
+  }
+  const returned = extended ? (request.olderCount ?? 0) : request.recentCount;
+  return {
+    shown: returned,
+    loadingOlder: false,
+    nextLimit: nextHistoryLimit(request.limit, returned),
+    showsEveryBuild: returned < request.limit,
+  };
+}
+
 export function legacyBuildPath(search: string): string | null {
   const params = new URLSearchParams(search);
   const jobId = params.get('job') ?? params.get('jobId') ?? params.get('id');

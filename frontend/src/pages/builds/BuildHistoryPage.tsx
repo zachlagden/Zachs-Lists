@@ -15,8 +15,8 @@ import {
   combineHistory,
   finishedBuilds,
   historyFilterFrom,
+  historyPaging,
   legacyBuildPath,
-  nextHistoryLimit,
   type HistoryFilter,
 } from './historyFacts';
 import { RunningBuild } from './RunningBuild';
@@ -70,8 +70,13 @@ export default function BuildHistoryPage() {
   const jobs = recent.data ? combineHistory(recent.data.jobs, older.data?.jobs ?? []) : [];
   const running = activeBuilds(jobs);
   const finished = finishedBuilds(jobs, filter);
-  const fetched = extended && older.data ? older.data.jobs.length : (recent.data?.jobs.length ?? 0);
-  const nextLimit = nextHistoryLimit(limit, fetched);
+  const paging = historyPaging({
+    limit,
+    recentCount: recent.data?.jobs.length ?? 0,
+    olderCount: extended && older.data ? older.data.jobs.length : null,
+    olderIsForThisLimit: !older.isPlaceholderData,
+  });
+  const nextLimit = paging.nextLimit;
 
   return (
     <>
@@ -137,20 +142,26 @@ export default function BuildHistoryPage() {
                   retrying={older.isFetching}
                   className="border-t border-border"
                 />
-              ) : nextLimit !== null ? (
+              ) : paging.loadingOlder || nextLimit !== null ? (
                 <div className="flex flex-wrap items-center gap-3 border-t border-border px-[18px] py-3">
-                  <Button size="sm" loading={older.isFetching} onClick={() => setLimit(nextLimit)}>
+                  <Button
+                    size="sm"
+                    loading={paging.loadingOlder}
+                    onClick={() => {
+                      if (nextLimit !== null) setLimit(nextLimit);
+                    }}
+                  >
                     Show older builds
                   </Button>
                   <span className="text-[13px] text-text-tertiary">
-                    Showing the latest {fetched}.
+                    Showing the latest {paging.shown}.
                   </span>
                 </div>
               ) : (
                 <p className="border-t border-border px-[18px] py-3 text-[13px] text-text-tertiary">
-                  {fetched >= limit
-                    ? `Showing the latest ${fetched} builds, which is the most this page lists. `
-                    : 'Showing every build. '}
+                  {paging.showsEveryBuild
+                    ? 'Showing every build. '
+                    : `Showing the latest ${paging.shown} builds, which is the most this page lists. `}
                   Finished builds are deleted after 30 days.
                 </p>
               )}
