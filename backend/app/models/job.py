@@ -40,6 +40,7 @@ class Job:
 
     DEFAULT_TARGET_ID = "__default__"
     ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_PROCESSING)
+    COOLDOWN_STATUSES = (STATUS_COMPLETED, STATUS_SKIPPED)
     ERROR_WORKER_ABANDONED = "worker_abandoned"
     ERROR_SUPERSEDED = "superseded"
 
@@ -410,25 +411,6 @@ class Job:
         return cls(data) if data else None
 
     @classmethod
-    def get_last_completed_for_user(
-        cls, user_id: ObjectId, job_type: str = None
-    ) -> Optional["Job"]:
-        """
-        Get the most recently completed job for a user.
-        Optionally filter by job type (manual, scheduled, admin).
-        """
-        query = {
-            "user_id": user_id,
-            "status": cls.STATUS_COMPLETED,
-        }
-        if job_type:
-            query["type"] = job_type
-
-        doc = mongo.db[cls.COLLECTION].find(query).sort("completed_at", -1).limit(1)
-        docs = list(doc)
-        return cls(docs[0]) if docs else None
-
-    @classmethod
     def user_completed_recently(
         cls, user_id: ObjectId, minutes: int = 5, job_type: str = None
     ) -> bool:
@@ -455,11 +437,20 @@ class Job:
         Get remaining cooldown time in seconds for a user.
         Returns 0 if no cooldown active.
         """
-        last_job = cls.get_last_completed_for_user(user_id, job_type=cls.TYPE_MANUAL)
-        if not last_job or not last_job.completed_at:
+        last_ended = mongo.db[cls.COLLECTION].find_one(
+            {
+                "user_id": user_id,
+                "type": cls.TYPE_MANUAL,
+                "status": {"$in": list(cls.COOLDOWN_STATUSES)},
+                "completed_at": {"$type": "date"},
+            },
+            {"completed_at": 1},
+            sort=[("completed_at", -1)],
+        )
+        if last_ended is None:
             return 0
 
-        elapsed = (datetime.utcnow() - last_job.completed_at).total_seconds()
+        elapsed = (datetime.utcnow() - last_ended["completed_at"]).total_seconds()
         cooldown_seconds = cooldown_minutes * 60
         remaining = cooldown_seconds - elapsed
 

@@ -422,6 +422,66 @@ def test_cooldown_refuses_without_charging(site: Site) -> None:
     assert site.used(site.sam) == 1
 
 
+def test_skipped_build_is_refunded_and_still_starts_the_cooldown(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {"$set": {"status": Job.STATUS_SKIPPED, "completed_at": datetime.utcnow()}},
+    )
+    assert refund_quota_if_due(job.job_id) is True
+
+    refused = refusal(site.sam, Job.TYPE_MANUAL, site.sam)
+
+    assert (refused.code, refused.status) == ("cooldown", 429)
+    assert 0 < refused.details["cooldown_remaining"] <= 300
+    assert refused.details["remaining_updates"] == WEEKLY_LIMIT
+    assert site.used(site.sam) == 0
+    assert site.db.jobs.count_documents({}) == 1
+
+
+def test_cooldown_counts_from_the_latest_completed_or_skipped_build(
+    site: Site,
+) -> None:
+    user_id = ObjectId(site.sam.id)
+    now = datetime.utcnow()
+    for status, minutes_ago in [
+        (Job.STATUS_COMPLETED, 4),
+        (Job.STATUS_SKIPPED, 1),
+        (Job.STATUS_FAILED, 0),
+    ]:
+        site.db.jobs.insert_one(
+            {
+                "job_id": f"ended-{status}",
+                "target_id": f"ended-{status}",
+                "user_id": user_id,
+                "type": Job.TYPE_MANUAL,
+                "status": status,
+                "completed_at": now - timedelta(minutes=minutes_ago),
+            }
+        )
+
+    assert 230 < Job.get_cooldown_remaining(user_id, cooldown_minutes=5) <= 240
+
+
+@pytest.mark.parametrize("job_type", [Job.TYPE_SCHEDULED, Job.TYPE_ADMIN])
+def test_failed_and_other_kinds_of_build_start_no_cooldown(
+    site: Site, job_type: str
+) -> None:
+    failed = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.db.jobs.update_one(
+        {"job_id": failed.job_id},
+        {"$set": {"status": Job.STATUS_FAILED, "completed_at": datetime.utcnow()}},
+    )
+    other = admit_build(site.sam, job_type, site.admin)
+    site.db.jobs.update_one(
+        {"job_id": other.job_id},
+        {"$set": {"status": Job.STATUS_SKIPPED, "completed_at": datetime.utcnow()}},
+    )
+
+    assert Job.get_cooldown_remaining(ObjectId(site.sam.id)) == 0
+    admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+
+
 def test_invalid_config_is_refused_with_errors_and_no_charge(site: Site) -> None:
     site.db.users.update_one(
         {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": INVALID_CONFIG}}
