@@ -854,9 +854,13 @@ class User:
         show_enabled: bool = True,
         show_disabled: bool = True,
         exclude_user_id: ObjectId = None,
+        banned_only: bool = False,
     ) -> Tuple[List["User"], int]:
         """Get users with filtering, sorting, and pagination."""
         conditions: List[Dict[str, Any]] = []
+
+        if banned_only:
+            conditions.append({"banned_until": {"$gt": datetime.utcnow()}})
 
         if exclude_user_id:
             conditions.append({"_id": {"$ne": exclude_user_id}})

@@ -19,6 +19,7 @@ from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
 from app.models.featured_list import FeaturedList
 from app.models.limit_request import LimitRequest
+from app.models.worker import Worker
 from app.services.admin_forms import (
     MAX_DESCRIPTION_LENGTH,
     DefaultConfigCheckUnavailable,
@@ -78,6 +79,7 @@ def list_users(user: User):
     show_regular = query_flag("show_regular", True)
     show_enabled = query_flag("show_enabled", True)
     show_disabled = query_flag("show_disabled", True)
+    banned_only = query_flag("banned_only", False)
 
     # Get filtered users (exclude current user)
     users, total = User.get_all_filtered(
@@ -89,6 +91,7 @@ def list_users(user: User):
         show_enabled=show_enabled,
         show_disabled=show_disabled,
         exclude_user_id=ObjectId(user.id),
+        banned_only=banned_only,
     )
 
     return jsonify(
@@ -394,6 +397,11 @@ def get_stats(admin: User):
                 "total_mb": round(disk_usage / (1024 * 1024), 2),
             },
             "analytics": analytics,
+            "workers": {
+                "alive": Worker.count_alive(
+                    current_app.config.get("WORKER_STALE_AFTER_SECONDS", 60)
+                ),
+            },
             "limits": {
                 "enforce_domain_limit": limit_review.enforcing_domain_limit(),
             },

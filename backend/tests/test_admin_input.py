@@ -302,6 +302,37 @@ def test_user_listing_clamps_pagination(
     assert body["total"] == 1
 
 
+def test_banned_only_lists_accounts_with_a_ban_still_running(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    now = datetime.utcnow()
+    api.account(3010, "banned-now", banned_until=now + timedelta(days=1))
+    api.account(3011, "ban-ended", banned_until=now - timedelta(days=1))
+
+    def names(**query: str) -> list[str]:
+        response = admin_client.get("/api/admin/users", query_string=query)
+        assert response.status_code == 200
+        return [user["username"] for user in response.get_json()["users"]]
+
+    assert names() == ["ban-ended", "banned-now", "sam"]
+    assert names(banned_only="true") == ["banned-now"]
+
+
+def test_admin_stats_count_the_workers_with_a_recent_heartbeat(
+    api: Api, admin_client: FlaskClient
+) -> None:
+    now = datetime.utcnow()
+    api.db.workers.insert_many(
+        [
+            {"worker_id": "recent", "last_seen_at": now},
+            {"worker_id": "silent", "last_seen_at": now - timedelta(hours=1)},
+        ]
+    )
+    response = admin_client.get("/api/admin/stats")
+    assert response.status_code == 200
+    assert response.get_json()["workers"] == {"alive": 1}
+
+
 @pytest.mark.parametrize(
     "path",
     [
