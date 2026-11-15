@@ -8,11 +8,7 @@ const pagesAwaitingRebuild = [
   'src/pages/AdminPage.tsx',
   'src/pages/AdminJobDetailPage.tsx',
   'src/pages/AdminUserDetailPage.tsx',
-  'src/pages/BrowsePage.tsx',
-  'src/pages/HomePage.tsx',
   'src/pages/JobsPage.tsx',
-  'src/pages/ListsPage.tsx',
-  'src/components/home/**',
   'src/components/jobs/**',
 ];
 

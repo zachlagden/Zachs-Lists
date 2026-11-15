@@ -1,4 +1,4 @@
-import { authKeys, fetchCurrentUser, signOut } from './api/auth';
+import { authKeys, fetchSession, signOut } from './api/auth';
 import { onUnauthorized } from './api/http';
 import { queryClient } from './api/queryClient';
 import { endSession } from './hooks/socketConnection';
@@ -10,7 +10,7 @@ export async function startSession(): Promise<User | null> {
   try {
     const user = await queryClient.fetchQuery({
       queryKey: authKeys.me(),
-      queryFn: fetchCurrentUser,
+      queryFn: fetchSession,
       retry: false,
       staleTime: 0,
     });
@@ -27,11 +27,11 @@ export async function refreshSession(): Promise<void> {
   try {
     const user = await queryClient.fetchQuery({
       queryKey: authKeys.me(),
-      queryFn: fetchCurrentUser,
+      queryFn: fetchSession,
       retry: false,
       staleTime: 0,
     });
-    if (useAuthStore.getState().isAuthenticated) useAuthStore.getState().setUser(user);
+    if (user && useAuthStore.getState().isAuthenticated) useAuthStore.getState().setUser(user);
   } catch {
     return;
   }
