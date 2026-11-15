@@ -1,9 +1,9 @@
 import { durationBetween, formatClockTime, formatFullDateTime } from '../../lib/format';
 import { describeSeconds } from '../../lib/text';
-import { useSecondsClock } from './useSecondsClock';
+import { useNowEverySecond } from '../../lib/useNow';
 
 export function LiveDuration({ since }: { since: string }) {
-  const now = useSecondsClock();
+  const now = useNowEverySecond();
   const seconds = durationBetween(since, now);
   return <>{seconds === null ? '' : describeSeconds(seconds)}</>;
 }
