@@ -125,6 +125,16 @@ async fn run_worker() -> Result<()> {
             error!("Cache cleanup failed: {}", e);
         }
     }
+    match downloader.cleanup_orphaned_cache_bodies().await {
+        Ok(removed) => {
+            if removed > 0 {
+                info!("Removed {} orphaned cached source bodies", removed);
+            }
+        }
+        Err(e) => {
+            error!("Orphaned cache body cleanup failed: {}", e);
+        }
+    }
 
     // Create and run worker
     let worker = Worker::new(config, db, shutdown);

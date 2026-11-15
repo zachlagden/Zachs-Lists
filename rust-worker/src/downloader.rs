@@ -9,7 +9,7 @@ use tracing::warn;
 use crate::config::Config;
 use crate::db::cache::{
     content_hash, CacheEntry, CacheRepository, CheckedDownload, MAX_FALLBACK_AGE_DAYS,
-    MAX_SOURCE_SIZE_BYTES,
+    MAX_ORPHANED_BODIES_PER_SWEEP, MAX_SOURCE_SIZE_BYTES,
 };
 use crate::safe_http::{get_source_conditional, parse_source_url, SourceValidators};
 
@@ -447,6 +447,12 @@ impl Downloader {
     pub async fn cleanup_cache(&self) -> Result<u64> {
         self.cache_repo
             .cleanup_stale(self.config.cache_ttl_days as i64)
+            .await
+    }
+
+    pub async fn cleanup_orphaned_cache_bodies(&self) -> Result<u64> {
+        self.cache_repo
+            .cleanup_orphaned_bodies(MAX_ORPHANED_BODIES_PER_SWEEP)
             .await
     }
 }
