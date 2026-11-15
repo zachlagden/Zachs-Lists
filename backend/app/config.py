@@ -54,6 +54,14 @@ class Config:
     MAX_SOURCE_LISTS_LIMIT = 1000
     MAX_CONFIG_SIZE_MB_LIMIT = 10
     MAX_MANUAL_UPDATES_PER_WEEK_LIMIT = 100
+    ENFORCE_DOMAIN_LIMIT = os.environ.get(
+        "ENFORCE_DOMAIN_LIMIT", ""
+    ).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     # Processing
     MAX_CONCURRENT_JOBS = 5

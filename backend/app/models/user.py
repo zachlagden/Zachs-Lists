@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
+from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 from flask import current_app
 
@@ -34,6 +35,8 @@ class User:
     }
     MAX_NOTIFICATIONS = 100
     MAX_IP_LOG_ENTRIES = 50
+    LIMIT_REVIEW_OPEN = "open"
+    LIMIT_REVIEW_RESOLVED = "resolved"
     PERMANENT_BAN = timedelta(days=36500)
     LONGEST_TIMED_BAN = timedelta(days=3650)
 
@@ -454,6 +457,134 @@ class User:
         """Get unread notifications."""
         return [n for n in self.notifications if not n.get("read", False)]
 
+    @property
+    def limit_review(self) -> Optional[Dict[str, Any]]:
+        review = self._data.get("limit_review")
+        return review if isinstance(review, dict) else None
+
+    def serialized_limit_review(self) -> Optional[Dict[str, Any]]:
+        review = self.limit_review
+        if review is None:
+            return None
+        return {
+            "actual_domains": review.get("actual_domains"),
+            "max_domains": review.get("max_domains"),
+            "method": review.get("method"),
+            "detected_at": utc_iso(review.get("detected_at")),
+            "notified_at": utc_iso(review.get("notified_at")),
+            "status": review.get("status"),
+            "resolved_at": utc_iso(review.get("resolved_at")),
+            "resolved_by": review.get("resolved_by"),
+            "resolved_reason": review.get("resolved_reason"),
+        }
+
+    @classmethod
+    def _users(cls, users: Optional[Collection[Any]]) -> Collection[Any]:
+        return users if users is not None else mongo.db[cls.COLLECTION]
+
+    @classmethod
+    def open_limit_review(
+        cls,
+        user_id: ObjectId,
+        actual_domains: int,
+        max_domains: int,
+        method: str,
+        now: datetime,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        opened = cls._users(users).update_one(
+            {"_id": user_id, "limit_review.status": {"$ne": cls.LIMIT_REVIEW_OPEN}},
+            {
+                "$set": {
+                    "limit_review": {
+                        "actual_domains": actual_domains,
+                        "max_domains": max_domains,
+                        "method": method,
+                        "detected_at": now,
+                        "notified_at": None,
+                        "status": cls.LIMIT_REVIEW_OPEN,
+                        "resolved_at": None,
+                        "resolved_by": None,
+                        "resolved_reason": None,
+                    }
+                }
+            },
+        )
+        return opened.matched_count == 1
+
+    @classmethod
+    def refresh_limit_review(
+        cls,
+        user_id: ObjectId,
+        changes: Dict[str, Any],
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        refreshed = cls._users(users).update_one(
+            {"_id": user_id, "limit_review.status": cls.LIMIT_REVIEW_OPEN},
+            {
+                "$set": {
+                    f"limit_review.{name}": value for name, value in changes.items()
+                }
+            },
+        )
+        return refreshed.matched_count == 1
+
+    @classmethod
+    def resolve_limit_review(
+        cls,
+        user_id: ObjectId,
+        resolved_by: str,
+        reason: str,
+        now: datetime,
+        covered_by_limit: Optional[int] = None,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        still_open: Dict[str, Any] = {
+            "_id": user_id,
+            "limit_review.status": cls.LIMIT_REVIEW_OPEN,
+        }
+        if covered_by_limit is not None:
+            still_open["limit_review.actual_domains"] = {"$lte": covered_by_limit}
+        resolved = cls._users(users).update_one(
+            still_open,
+            {
+                "$set": {
+                    "limit_review.status": cls.LIMIT_REVIEW_RESOLVED,
+                    "limit_review.resolved_at": now,
+                    "limit_review.resolved_by": resolved_by,
+                    "limit_review.resolved_reason": reason,
+                }
+            },
+        )
+        return resolved.matched_count == 1
+
+    @classmethod
+    def notify_limit_review_once(
+        cls,
+        user_id: ObjectId,
+        notification: Dict[str, Any],
+        now: datetime,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        notified = cls._users(users).update_one(
+            {
+                "_id": user_id,
+                "limit_review.status": cls.LIMIT_REVIEW_OPEN,
+                "limit_review.notified_at": None,
+            },
+            {
+                "$set": {"limit_review.notified_at": now, "updated_at": now},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": cls.MAX_NOTIFICATIONS,
+                    }
+                },
+            },
+        )
+        return notified.matched_count == 1
+
     def log_ip_access(self, ip: str) -> None:
         from app.services.download_recorder import access_log_hash
 
@@ -575,6 +706,7 @@ class User:
             "lists": self.lists,
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
+            "limit_review": self.serialized_limit_review(),
             "created_at": utc_iso(self.created_at),
         }
 

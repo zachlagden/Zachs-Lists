@@ -35,7 +35,14 @@ ChartJS.register(
   Filler,
 );
 
-import type { AdminAnalytics, AdminStats, LimitRequest, Announcement } from '../types';
+import LimitReviewTable from '../components/LimitReviewTable';
+import type {
+  AdminAnalytics,
+  AdminLimitReviewPage,
+  AdminStats,
+  LimitRequest,
+  Announcement,
+} from '../types';
 import { INTENDED_USE_LABELS } from '../types';
 
 type TabType =
@@ -144,6 +151,7 @@ export default function AdminPage() {
   // Limit requests
   const [limitRequests, setLimitRequests] = useState<LimitRequest[]>([]);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [limitReviews, setLimitReviews] = useState<AdminLimitReviewPage | null>(null);
 
   // Library state
   const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
@@ -289,6 +297,7 @@ export default function AdminPage() {
           limitRequestsData,
           libraryData,
           announcementsData,
+          limitReviewsData,
         ] = await Promise.all([
           adminApi.getStats().catch(() => null),
           adminApi.getAllJobs().catch(() => ({ jobs: [] })),
@@ -300,6 +309,7 @@ export default function AdminPage() {
           adminApi.getLimitRequests().catch(() => ({ requests: [], pending_count: 0 })),
           adminApi.getLibraryEntries().catch(() => ({ library: [] })),
           adminApi.getAnnouncements().catch(() => ({ announcements: [] })),
+          adminApi.getLimitReviews().catch(() => null),
         ]);
 
         setStats(statsData);
@@ -312,6 +322,7 @@ export default function AdminPage() {
         setUserGrowth(userGrowthData?.user_growth || []);
         setLimitRequests(limitRequestsData?.requests || []);
         setPendingRequestCount(limitRequestsData?.pending_count || 0);
+        setLimitReviews(limitReviewsData);
         setLibraryEntries(libraryData?.library || []);
         setAnnouncements(announcementsData?.announcements || []);
       } catch (error) {
@@ -436,6 +447,19 @@ export default function AdminPage() {
     } catch (error) {
       console.error('Failed to approve limit request:', error);
       setMessage({ type: 'error', text: 'Failed to approve limit request' });
+    }
+  };
+
+  const handleResolveLimitReview = async (userId: string, reason: string): Promise<boolean> => {
+    try {
+      await adminApi.resolveLimitReview(userId, reason);
+      setLimitReviews(await adminApi.getLimitReviews());
+      setMessage({ type: 'success', text: 'Limit review resolved' });
+      return true;
+    } catch (error) {
+      console.error('Failed to resolve limit review:', error);
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to resolve limit review') });
+      return false;
     }
   };
 
@@ -1215,6 +1239,13 @@ export default function AdminPage() {
               Review and manage user requests for higher domain limits
             </p>
           </div>
+
+          <LimitReviewTable
+            reviews={limitReviews?.reviews ?? []}
+            total={limitReviews?.total ?? 0}
+            enforcing={stats?.limits?.enforce_domain_limit ?? null}
+            onResolve={handleResolveLimitReview}
+          />
 
           {limitRequests.length === 0 ? (
             <div className="card">

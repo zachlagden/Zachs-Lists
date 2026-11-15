@@ -20,6 +20,7 @@ import { Line } from 'react-chartjs-2';
 import LoadingSpinner from '../components/LoadingSpinner';
 import NotificationBanner from '../components/NotificationBanner';
 import LimitRequestModal from '../components/LimitRequestModal';
+import { limitReviewSummary, openLimitReview } from '../utils/limitReview';
 
 ChartJS.register(
   CategoryScale,
@@ -54,6 +55,7 @@ export default function DashboardPage() {
   const [showLimitRequestModal, setShowLimitRequestModal] = useState(false);
   const [availableTiers, setAvailableTiers] = useState<number[]>([]);
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
+  const overLimit = user?.is_admin ? null : openLimitReview(user?.limit_review);
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -128,14 +130,7 @@ export default function DashboardPage() {
       }
     };
     fetchData();
-  }, [
-    setLists,
-    setStats,
-    setLimits,
-    setRemainingUpdates,
-    mergeFetchedJobs,
-    setHasUnreadFailures,
-  ]);
+  }, [setLists, setStats, setLimits, setRemainingUpdates, mergeFetchedJobs, setHasUnreadFailures]);
 
   const handleTriggerBuild = async () => {
     if (buildLoading || (!user?.is_admin && remainingUpdates <= 0)) return;
@@ -318,6 +313,30 @@ export default function DashboardPage() {
               <span className="text-sm text-yellow-400">Limit request pending</span>
             )}
           </div>
+          {overLimit ? (
+            <div
+              role="alert"
+              className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-pihole-text"
+            >
+              <p className="font-semibold text-red-400">Your lists are over the domain limit</p>
+              <p className="mt-1">{limitReviewSummary(overLimit)}</p>
+              <p className="mt-1 text-pihole-text-muted">
+                Builds over the limit will start to fail once the limit is enforced. Your current
+                lists stay published. Remove some sources, or request a higher limit.
+              </p>
+              {hasPendingRequest ? (
+                <p className="mt-2 text-yellow-400">Your limit request is waiting for review.</p>
+              ) : availableTiers.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowLimitRequestModal(true)}
+                  className="mt-2 text-pihole-accent underline"
+                >
+                  Request a higher limit
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {user?.is_admin ? (
             <div className="grid md:grid-cols-3 gap-6">
               <div>

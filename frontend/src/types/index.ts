@@ -12,6 +12,7 @@ export interface User {
   stats: UserStats;
   lists: UserList[];
   notifications: Notification[];
+  limit_review?: LimitReview | null;
   remaining_updates: number;
   created_at: string;
 }
@@ -329,6 +330,9 @@ export interface AdminStats {
     total_bandwidth: number;
     period_days: number;
   };
+  limits?: {
+    enforce_domain_limit: boolean;
+  };
 }
 
 // Announcement types
@@ -382,3 +386,36 @@ export const INTENDED_USE_LABELS: Record<IntendedUse, string> = {
   organization: 'Organization/Business',
   other: 'Other',
 };
+
+// Domain limit review types
+export interface LimitReview {
+  actual_domains: number;
+  max_domains: number;
+  method: string;
+  detected_at: string | null;
+  notified_at: string | null;
+  status: 'open' | 'resolved';
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolved_reason: string | null;
+}
+
+export interface AdminLimitReview {
+  user_id: string;
+  username: string;
+  max_domains: number;
+  actual_domains: number;
+  percent_over: number;
+  method: string;
+  detected_at: string | null;
+  notified: boolean;
+  has_pending_request: boolean;
+}
+
+export interface AdminLimitReviewPage {
+  reviews: AdminLimitReview[];
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
+}

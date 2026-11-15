@@ -183,6 +183,7 @@ class JobStatusPoller:
 
     def _relay(self, job: Job, info: QueueInfo | None, watermark: datetime) -> bool:
         from app.services.build_admission import refund_quota_if_due
+        from app.services.limit_review import record_job_result
         from app.socketio import (
             emit_job_completed,
             emit_job_created,
@@ -211,6 +212,7 @@ class JobStatusPoller:
             emit_job_created(payload, user_id)
         if terminal:
             refund_quota_if_due(job.job_id)
+            record_job_result(job)
             emit_job_completed(payload, user_id)
         else:
             emit_job_progress(payload, user_id)
