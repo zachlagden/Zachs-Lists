@@ -9,7 +9,13 @@ import {
   toApiError,
 } from './api/errors';
 import { JOBS_PAGE_SIZE, jobsKeys, type JobsResponse } from './api/jobs';
-import { breadcrumbsFor, isNavActive, MORE_NAV, visibleNav } from './components/shell/navigation';
+import {
+  breadcrumbsFor,
+  buildsBadge,
+  isNavActive,
+  MORE_NAV,
+  visibleNav,
+} from './components/shell/navigation';
 import { jobStatusDescription, sourceOutcome } from './components/ui/status';
 import { nextTabIndex } from './components/ui/tabKeys';
 import { applyJobToCache, applyJobsToCache, cachedJobs } from './realtime/jobsCacheBridge';
@@ -191,7 +197,18 @@ describe('navigation', () => {
       { label: 'User' },
     ]);
     expect(breadcrumbsFor('/admin/jobs/abc')[1]).toEqual({ label: 'Build' });
-    expect(breadcrumbsFor('/jobs/abc')).toEqual([{ label: 'Builds', to: '/jobs' }, { label: 'Build' }]);
+    expect(breadcrumbsFor('/jobs/abc')).toEqual([
+      { label: 'Builds', to: '/jobs' },
+      { label: 'Build' },
+    ]);
+  });
+
+  it('says whether builds are running or only waiting', () => {
+    expect(buildsBadge([{ status: 'queued' }])).toBe('1 queued');
+    expect(buildsBadge([{ status: 'queued' }, { status: 'queued' }])).toBe('2 queued');
+    expect(buildsBadge([{ status: 'processing' }, { status: 'queued' }])).toBe('1 building');
+    expect(buildsBadge([{ status: 'completed' }, { status: 'failed' }])).toBeNull();
+    expect(buildsBadge([])).toBeNull();
   });
 
   it('hides admin links from other users', () => {

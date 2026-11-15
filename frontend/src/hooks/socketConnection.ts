@@ -1,9 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 import { fetchCurrentUser } from '../api/auth';
 import { toApiError } from '../api/errors';
-import { queryClient } from '../api/queryClient';
 import { useAuthStore, useConnectionStore } from '../store';
 import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
+import { endSession, onSessionEnd } from '../session';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || '';
 let socket: Socket | null = null;
@@ -29,12 +29,6 @@ function disconnectSocket(): void {
   failures = 0;
   connections = 0;
   useConnectionStore.getState().setState('connecting');
-}
-
-export function endSession(): void {
-  disconnectSocket();
-  useAuthStore.getState().setUser(null);
-  queryClient.clear();
 }
 
 function scheduleReconnect(current: Socket): void {
@@ -89,6 +83,7 @@ export function getSocket(): Socket {
       reconnection: false,
     });
     socket = current;
+    onSessionEnd(disconnectSocket);
     current.on('connect', () => {
       clearRetry();
       failures = 0;

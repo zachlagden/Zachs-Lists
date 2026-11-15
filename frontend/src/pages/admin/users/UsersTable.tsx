@@ -12,6 +12,8 @@ import {
 } from '../../../components/ui/Table';
 import { formatDate, formatInteger, formatRelativeTime } from '../../../lib/format';
 import { avatarInitial, lastSeen, roleDescription, stateDescription } from './userFacts';
+import { CELL_LINK } from '../../../components/ui/linkClasses';
+import { cn } from '../../../lib/cn';
 
 export function Avatar({ username, large = false }: { username: string; large?: boolean }) {
   return (
@@ -56,7 +58,7 @@ export function UsersTable({ users, now }: { users: AdminUserDetail[]; now: Date
                   <span className="grid min-w-0">
                     <Link
                       to={`/admin/users/${encodeURIComponent(user.id)}`}
-                      className="font-medium break-all underline hover:text-accent-text"
+                      className={cn(CELL_LINK, 'font-medium break-all')}
                     >
                       {user.username}
                     </Link>

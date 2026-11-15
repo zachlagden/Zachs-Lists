@@ -1,16 +1,10 @@
 import { durationBetween, formatInteger, pluralise } from '../../lib/format';
 import { isActive } from '../../realtime/jobMerge';
-import type {
-  FormatProgress,
-  Job,
-  JobType,
-  OutputFile,
-  SourceProgress,
-  StageTiming,
-} from '../../types';
+import type { FormatProgress, Job, OutputFile, SourceProgress, StageTiming } from '../../types';
 import { UNKNOWN_FAILURE_TITLE, buildFailure } from './failureFacts';
 import { sourceTally } from './sourceFacts';
 import { sentence } from '../../lib/text';
+import type { BuildViewer } from '../../lib/builds';
 
 export type BuildPhase =
   | 'queued'
@@ -127,7 +121,7 @@ export function queueWaitSeconds(job: Job, now: Date): number | null {
   return durationBetween(job.created_at, started);
 }
 
-export type Viewer = 'owner' | 'admin';
+export type Viewer = BuildViewer;
 
 function publishedLists(viewer: Viewer, capital: boolean): string {
   if (viewer === 'owner') return capital ? 'Your published lists' : 'your published lists';
@@ -215,7 +209,7 @@ export function buildSummary(job: Job, viewer: Viewer): BuildSummary {
       return {
         heading: failure?.title ?? UNKNOWN_FAILURE_TITLE,
         detail: failure?.serverMessage ?? '',
-        publication: `Nothing was published. ${unchanged}`,
+        publication: failure?.statesNothingPublished ? '' : `Nothing was published. ${unchanged}`,
       };
     }
     case 'skipped':
@@ -225,18 +219,6 @@ export function buildSummary(job: Job, viewer: Viewer): BuildSummary {
         publication: `Nothing needed rebuilding. ${unchanged}`,
       };
   }
-}
-
-export function requestedBy(job: Pick<Job, 'type' | 'username'>, viewer: Viewer): string {
-  const labels: Record<JobType, string> = {
-    manual:
-      viewer === 'owner' || job.username === '__default__'
-        ? 'Manual'
-        : `Manual, by ${job.username}`,
-    scheduled: 'Scheduled rebuild',
-    admin: 'Started by an admin',
-  };
-  return labels[job.type] ?? job.type;
 }
 
 const OUTPUT_NAME = /^(.*)_(hosts|plain|adblock)\.txt(\.gz)?$/;

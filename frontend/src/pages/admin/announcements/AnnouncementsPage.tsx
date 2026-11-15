@@ -28,6 +28,8 @@ import type { Announcement } from '../../../types';
 import { ActionDialog } from '../shared/ActionDialog';
 import { AnnouncementDialog } from './AnnouncementDialog';
 import { announcementState, statePill, typePill } from './announcementFacts';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 function DeleteAnnouncementDialog({
   announcement,
@@ -41,6 +43,7 @@ function DeleteAnnouncementDialog({
     <ActionDialog
       title="Delete this announcement?"
       confirmLabel="Delete the announcement"
+      destructive
       run={() => deleteAnnouncement(announcement.id)}
       onDone={() => {
         showToast('ok', 'The announcement is deleted.');
@@ -62,6 +65,7 @@ function DeleteAnnouncementDialog({
 type Editing = { announcement: Announcement | null };
 
 export default function AnnouncementsPage() {
+  useDocumentMeta(adminTitle('Announcements'));
   const client = useQueryClient();
   const now = useNow();
   const announcements = useQuery(adminAnnouncementsQuery());

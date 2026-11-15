@@ -64,7 +64,7 @@ export function BuildView({
         description={
           <>
             {summary.detail ? <span className="block">{summary.detail}</span> : null}
-            <span className="block">{summary.publication}</span>
+            {summary.publication ? <span className="block">{summary.publication}</span> : null}
             {running && paused && job.updated_at ? (
               <span className="block text-warn">
                 Showing the state at {formatClockTime(job.updated_at)}. It catches up when the
@@ -100,7 +100,9 @@ export function BuildView({
               }
             />
           ) : null}
-          <Stack className={showSources ? 'content-start' : 'col-span-full max-w-[32rem] content-start'}>
+          <Stack
+            className={showSources ? 'content-start' : 'col-span-full max-w-[32rem] content-start'}
+          >
             <ThisBuildCard job={job} viewer={viewer} />
             {showPipeline ? (
               <>

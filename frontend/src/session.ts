@@ -1,10 +1,23 @@
 import { authKeys, fetchSession, signOut } from './api/auth';
 import { onUnauthorized } from './api/http';
 import { queryClient } from './api/queryClient';
-import { endSession } from './hooks/socketConnection';
 import { rememberReturnPath } from './routes/returnPath';
 import { useAuthStore } from './store';
 import type { User } from './types';
+
+type SessionCleanup = () => void;
+
+const sessionCleanups = new Set<SessionCleanup>();
+
+export function onSessionEnd(cleanup: SessionCleanup): void {
+  sessionCleanups.add(cleanup);
+}
+
+export function endSession(): void {
+  for (const cleanup of sessionCleanups) cleanup();
+  useAuthStore.getState().setUser(null);
+  queryClient.clear();
+}
 
 export async function startSession(): Promise<User | null> {
   try {

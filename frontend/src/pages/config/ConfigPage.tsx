@@ -10,6 +10,7 @@ import { ErrorState } from '../../components/ui/States';
 import { useAuthStore } from '../../store';
 import type { Job } from '../../types';
 import { ConfigEditor } from './ConfigEditor';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
 const NO_JOBS: Job[] = [];
 
@@ -43,6 +44,7 @@ function EditorSkeleton() {
 }
 
 export default function ConfigPage() {
+  useDocumentMeta('Configuration');
   const user = useAuthStore((state) => state.user);
   const config = useQuery(configQuery());
   const whitelist = useQuery(whitelistQuery());

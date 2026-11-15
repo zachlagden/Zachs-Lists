@@ -1,6 +1,6 @@
 import type { ApiError } from '../api/errors';
 import { buildRefusal } from '../api/jobs';
-import type { Job, ListFormat } from '../types';
+import type { Job, JobType, ListFormat } from '../types';
 import { durationBetween, formatDateTime, formatDuration, parseApiDate } from './format';
 import { sentence } from './text';
 
@@ -92,4 +92,23 @@ export function describeBuildRefusal(error: ApiError, now: Date = new Date()): s
 export function runningBuildId(error: ApiError): string | null {
   const refusal = buildRefusal(error);
   return refusal?.code === 'build_active' ? (refusal.job_id ?? null) : null;
+}
+
+export const BUILD_TYPE_LABELS: Record<JobType, string> = {
+  manual: 'Manual',
+  scheduled: 'Scheduled',
+  admin: 'Started by an admin',
+};
+
+export type BuildViewer = 'owner' | 'admin';
+
+export function requestedBy(job: Pick<Job, 'type' | 'username'>, viewer: BuildViewer): string {
+  if (job.type === 'manual' && viewer === 'admin' && job.username !== DEFAULT_LISTS_USERNAME) {
+    return `Manual, by ${job.username}`;
+  }
+  return BUILD_TYPE_LABELS[job.type] ?? job.type;
+}
+
+export function isUnreadFailure(job: Pick<Job, 'status' | 'read'>): boolean {
+  return job.status === 'failed' && job.read === false;
 }

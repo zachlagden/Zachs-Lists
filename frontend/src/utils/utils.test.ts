@@ -60,10 +60,15 @@ describe('login error messages', () => {
     }
   });
 
-  it('includes the end of a timed ban in local time', () => {
+  it('includes the end of a timed ban in the given zone', () => {
     const until = '2026-01-15T14:30:00.000Z';
-    const message = loginErrorMessage('account_banned', until);
-    expect(message).toContain(new Date(until).toLocaleString());
+    const options = { timeZone: 'Europe/London', now: new Date('2026-01-10T09:00:00.000Z') };
+    expect(loginErrorMessage('account_banned', until, options)).toBe(
+      'Your account is banned until 15 Jan, 14:30. You cannot sign in until then.',
+    );
+    expect(
+      loginErrorMessage('account_banned', until, { ...options, timeZone: 'Asia/Tokyo' }),
+    ).toContain('15 Jan, 23:30');
     expect(loginErrorMessage('account_banned')).not.toContain('until');
     expect(loginErrorMessage('account_banned', 'garbage')).not.toContain('until');
   });

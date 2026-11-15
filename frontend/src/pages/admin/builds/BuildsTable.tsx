@@ -9,16 +9,17 @@ import {
   TableHeaderCell,
   TableRow,
 } from '../../../components/ui/Table';
-import { durationBetween, formatDateTime, formatDuration } from '../../../lib/format';
-import { isActive } from '../../../realtime/jobMerge';
+import { BUILD_TYPE_LABELS, attemptSeconds } from '../../../lib/builds';
+import { formatDateTime } from '../../../lib/format';
+import { describeSeconds } from '../../../lib/text';
 import type { Job } from '../../../types';
-import { BUILD_TYPE_LABELS, ownerLabel, progressSummary } from './buildFacts';
+import { ownerLabel, progressSummary } from './buildFacts';
+import { CELL_LINK } from '../../../components/ui/linkClasses';
+import { cn } from '../../../lib/cn';
 
-function took(job: Job, now: Date): string {
-  const start = job.attempt_started_at ?? job.started_at;
-  if (!start) return '';
-  const seconds = durationBetween(start, isActive(job) ? now : job.completed_at);
-  return seconds === null ? '' : formatDuration(seconds);
+function describeTook(job: Job, now: Date): string {
+  const seconds = attemptSeconds(job, now);
+  return seconds === null ? '' : describeSeconds(seconds);
 }
 
 function Progress({ job }: { job: Job }) {
@@ -68,7 +69,7 @@ export function BuildsTable({ jobs, now, caption, showOwner = true }: BuildsTabl
             <TableCell>
               <Link
                 to={`/admin/jobs/${encodeURIComponent(job.job_id)}`}
-                className="whitespace-nowrap underline hover:text-accent-text"
+                className={cn(CELL_LINK, 'whitespace-nowrap')}
                 aria-label={`Build for ${ownerLabel(job)} queued ${formatDateTime(job.created_at, { now })}`}
               >
                 {formatDateTime(job.created_at, { now })}
@@ -79,7 +80,7 @@ export function BuildsTable({ jobs, now, caption, showOwner = true }: BuildsTabl
                 {job.user_id ? (
                   <Link
                     to={`/admin/users/${encodeURIComponent(job.user_id)}`}
-                    className="break-all underline hover:text-accent-text"
+                    className={cn(CELL_LINK, 'break-all')}
                   >
                     {job.username}
                   </Link>
@@ -98,7 +99,7 @@ export function BuildsTable({ jobs, now, caption, showOwner = true }: BuildsTabl
               <Progress job={job} />
             </TableCell>
             <TableCell align="right" hideOnNarrow className="whitespace-nowrap">
-              {took(job, now)}
+              {describeTook(job, now)}
             </TableCell>
           </TableRow>
         ))}

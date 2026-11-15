@@ -15,7 +15,7 @@ import { LoadingRegion } from '../ui/Layout';
 import { EmptyState, ErrorState } from '../ui/States';
 import { DefaultListsTable, ListRowsSkeleton } from './DefaultListsTable';
 import { FormatSwitch } from './FormatSwitch';
-import { INLINE_LINK } from './linkClasses';
+import { INLINE_LINK } from '../ui/linkClasses';
 
 export interface DefaultListsCardProps {
   query: Pick<

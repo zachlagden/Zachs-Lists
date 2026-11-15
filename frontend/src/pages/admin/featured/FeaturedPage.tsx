@@ -35,6 +35,8 @@ import {
   draftErrors,
   type FeaturedDraft,
 } from './featuredFacts';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 const EMPTY_DRAFT: FeaturedDraft = { username: '', listName: '', description: '' };
 
@@ -143,6 +145,7 @@ function RemoveFeaturedDialog({ entry, onClose }: { entry: FeaturedList; onClose
     <ActionDialog
       title="Stop featuring this list?"
       confirmLabel="Remove from featured"
+      destructive
       run={() => removeFeaturedList(entry.id)}
       onDone={() => {
         client.setQueryData<AdminFeaturedResponse>(adminKeys.featured(), (current) =>
@@ -166,6 +169,7 @@ function RemoveFeaturedDialog({ entry, onClose }: { entry: FeaturedList; onClose
 }
 
 export default function FeaturedPage() {
+  useDocumentMeta(adminTitle('Featured lists'));
   const featured = useQuery(adminFeaturedListsQuery());
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<FeaturedList | null>(null);

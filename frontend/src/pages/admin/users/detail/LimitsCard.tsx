@@ -23,6 +23,8 @@ import {
   type LimitValues,
 } from './limitsForm';
 import { storeUser } from './userCache';
+import { LeaveDialog } from '../../../../components/ui/LeaveDialog';
+import { useUnsavedChangesGuard } from '../../../../hooks/useUnsavedChangesGuard';
 
 export function LimitsCard({
   user,
@@ -54,6 +56,7 @@ export function LimitsCard({
     : null;
   const changes = changedLimits(user, values);
   const dirty = hasEdits(user, values);
+  const blocker = useUnsavedChangesGuard(dirty && permission.allowed);
 
   const change = (key: LimitKey, value: string) => {
     setValues((current) => ({ ...current, [key]: value }));
@@ -98,7 +101,7 @@ export function LimitsCard({
                         className="num"
                       />
                     </Field>
-                    <div className="flex min-h-[30px] flex-wrap items-center gap-2 narrow:min-h-10">
+                    <div className="flex min-h-[30px] flex-wrap items-center gap-2 narrow:min-h-11">
                       {override ? (
                         <StatusPill tone="info" icon="info">
                           Override
@@ -111,7 +114,7 @@ export function LimitsCard({
                           size="sm"
                           variant="ghost"
                           onClick={() => change(field.key, standard)}
-                          aria-label={`Reset ${field.label.toLowerCase()} to the default`}
+                          aria-label={`Reset to the default for ${field.label.toLowerCase()}`}
                         >
                           Reset to the default
                         </Button>
@@ -150,6 +153,9 @@ export function LimitsCard({
           </form>
         )}
       </CardBody>
+      <LeaveDialog blocker={blocker}>
+        Your unsaved changes to the limits of {user.username} will be lost.
+      </LeaveDialog>
     </Card>
   );
 }

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { JOBS_PAGE_SIZE, jobsHistoryQuery, jobsQuery } from '../../api/jobs';
+import { BuildHistoryTable } from '../../components/builds/BuildHistoryTable';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { LoadingRegion, PageHeader, Skeleton, Stack } from '../../components/ui/Layout';
@@ -18,9 +19,9 @@ import {
   nextHistoryLimit,
   type HistoryFilter,
 } from './historyFacts';
-import { HistoryTable } from './HistoryTable';
 import { RunningBuild } from './RunningBuild';
 import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
 const FILTER_PARAM = 'result';
 
@@ -46,6 +47,7 @@ function HistorySkeleton() {
 }
 
 export default function BuildHistoryPage() {
+  useDocumentMeta('Builds');
   const location = useLocation();
   const now = useNow();
   const paused = useUpdatesPaused();
@@ -120,7 +122,12 @@ export default function BuildHistoryPage() {
                     : 'None of the builds loaded so far ended this way.'}
                 </EmptyState>
               ) : (
-                <HistoryTable jobs={finished} allJobs={jobs} now={now} />
+                <BuildHistoryTable
+                  jobs={finished}
+                  allJobs={jobs}
+                  now={now}
+                  caption="Finished builds, newest first"
+                />
               )}
               {older.isError ? (
                 <ErrorState
@@ -132,11 +139,7 @@ export default function BuildHistoryPage() {
                 />
               ) : nextLimit !== null ? (
                 <div className="flex flex-wrap items-center gap-3 border-t border-border px-[18px] py-3">
-                  <Button
-                    size="sm"
-                    loading={older.isFetching}
-                    onClick={() => setLimit(nextLimit)}
-                  >
+                  <Button size="sm" loading={older.isFetching} onClick={() => setLimit(nextLimit)}>
                     Show older builds
                   </Button>
                   <span className="text-[13px] text-text-tertiary">

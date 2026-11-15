@@ -8,6 +8,8 @@ import { Field, Textarea } from '../../../components/ui/Field';
 import { showToast } from '../../../components/ui/toasts';
 import type { DefaultConfig } from '../../../types';
 import { errorDetails, formFailure } from '../shared/fieldErrors';
+import { LeaveDialog } from '../../../components/ui/LeaveDialog';
+import { useUnsavedChangesGuard } from '../../../hooks/useUnsavedChangesGuard';
 
 type ConfigField = 'config' | 'whitelist';
 
@@ -67,6 +69,7 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
     ...(whitelist !== config.whitelist ? { whitelist } : {}),
   };
   const dirty = Object.keys(changes).length > 0;
+  const blocker = useUnsavedChangesGuard(dirty);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -122,6 +125,9 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
           Cancel
         </Button>
       </div>
+      <LeaveDialog blocker={blocker}>
+        Your unsaved changes to the default sources or the default whitelist will be lost.
+      </LeaveDialog>
     </form>
   );
 }

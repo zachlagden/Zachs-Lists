@@ -13,12 +13,6 @@ export const BUILD_STATUSES: ReadonlyArray<JobStatus> = [
 
 export const BUILD_TYPES: ReadonlyArray<JobType> = ['manual', 'scheduled', 'admin'];
 
-export const BUILD_TYPE_LABELS: Record<JobType, string> = {
-  manual: 'Manual',
-  scheduled: 'Scheduled',
-  admin: 'Started by an admin',
-};
-
 export interface BuildFilters {
   status: JobStatus | 'all';
   type: JobType | 'all';

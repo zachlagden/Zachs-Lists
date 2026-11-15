@@ -84,10 +84,13 @@ const UNKNOWN_FAILURE: FailureCopy = {
   nextSteps: ['edit-sources', 'build-again'],
 };
 
+const NOTHING_PUBLISHED = /nothing was published/i;
+
 export interface BuildFailure {
   code: string | null;
   title: string;
   serverMessage: string;
+  statesNothingPublished: boolean;
   advice: string;
   nextSteps: NextStep[];
   limit: { max: number | null; actual: number; over: number | null } | null;
@@ -101,11 +104,13 @@ export function buildFailure(job: Job): BuildFailure | null {
   if (job.status !== 'failed') return null;
   const code = job.result?.error_code ?? null;
   const copy = isErrorCode(code) ? FAILURES[code] : UNKNOWN_FAILURE;
+  const serverMessage = sentence(job.result?.errors[0]);
   const measured = code === 'domain_limit_exceeded' ? (job.result?.limit ?? null) : null;
   return {
     code,
     title: copy.title,
-    serverMessage: sentence(job.result?.errors[0]),
+    serverMessage,
+    statesNothingPublished: NOTHING_PUBLISHED.test(serverMessage),
     advice: copy.advice,
     nextSteps: copy.nextSteps,
     limit: measured

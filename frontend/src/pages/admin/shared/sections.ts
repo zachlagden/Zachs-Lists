@@ -9,9 +9,9 @@ export const ADMIN_SECTIONS: ReadonlyArray<AdminSection> = [
   { path: '/admin/users', label: 'Users', legacyTab: 'users' },
   { path: '/admin/limits', label: 'Limits', legacyTab: 'limits' },
   { path: '/admin/default-lists', label: 'Default lists', legacyTab: 'default' },
-  { path: '/admin/featured', label: 'Featured', legacyTab: 'featured' },
+  { path: '/admin/featured', label: 'Featured lists', legacyTab: 'featured' },
   { path: '/admin/builds', label: 'Builds', legacyTab: 'jobs' },
-  { path: '/admin/library', label: 'Library', legacyTab: 'library' },
+  { path: '/admin/library', label: 'Source library', legacyTab: 'library' },
   { path: '/admin/announcements', label: 'Announcements', legacyTab: 'announcements' },
 ];
 
@@ -36,4 +36,8 @@ export function activeSection(pathname: string): AdminSection {
     (section) => current === section.path || current.startsWith(`${section.path}/`),
   );
   return nested ?? ADMIN_SECTIONS[0];
+}
+
+export function adminTitle(page: string): string {
+  return `${page} · Admin`;
 }

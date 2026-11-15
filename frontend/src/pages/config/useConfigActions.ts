@@ -59,7 +59,6 @@ const SAVE_API: SaveApi = {
   saveConfig,
   saveWhitelist,
   fetchConfig,
-  fetchWhitelist,
   now: () => Date.now(),
 };
 
@@ -207,10 +206,8 @@ export function useConfigActions(
       if (result.server) adoptServer(result.server);
       if (result.savedWhitelist) setWhitelistRejection(null);
       const problem = result.problem;
-      if (problem?.kind === 'conflict') {
-        void refetchConfig();
-        return;
-      }
+      if (result.server || problem?.kind === 'conflict') void refetchConfig();
+      if (problem?.kind === 'conflict') return;
       if (problem?.kind === 'sources-invalid') showTab('sources');
       if (problem?.kind === 'whitelist-invalid') {
         setWhitelistRejection({ text: problem.text, issues: problem.issues });

@@ -21,13 +21,16 @@ import { activeJob, publicationState, publishedJob } from './dashboardFacts';
 import { Figures, FiguresSkeleton } from './Figures';
 import { ListAddress } from './ListAddress';
 import { NeedsAttention } from './NeedsAttention';
-import { Announcements, Notifications, OverLimitNotice } from './Notices';
+import { DashboardNotices, OverLimitNotice } from './Notices';
 import { PublishedState, PublishedStateSkeleton } from './PublishedState';
 import { RecentBuilds } from './RecentBuilds';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
-const OVER_LIMIT_NOTIFICATION = 'domain_limit_exceeded';
+const HIDDEN_WITH_A_REVIEW: readonly string[] = ['domain_limit_exceeded'];
+const NOTHING_HIDDEN: readonly string[] = [];
 
 export default function DashboardPage() {
+  useDocumentMeta('Dashboard');
   const user = useAuthStore((state) => state.user);
   const client = useQueryClient();
   const now = useNow();
@@ -85,7 +88,11 @@ export default function DashboardPage() {
               Edit sources
             </Button>
             {running ? (
-              <Button to="/jobs" variant="primary" icon="bolt">
+              <Button
+                to={`/jobs/${encodeURIComponent(running.job_id)}`}
+                variant="primary"
+                icon="bolt"
+              >
                 View build
               </Button>
             ) : (
@@ -108,8 +115,9 @@ export default function DashboardPage() {
             {describeBuildRefusal(toApiError(build.error), now)}
           </Alert>
         ) : null}
-        <Announcements />
-        <Notifications hideTypes={review ? [OVER_LIMIT_NOTIFICATION] : []} />
+        <DashboardNotices
+          hiddenNotificationTypes={review ? HIDDEN_WITH_A_REVIEW : NOTHING_HIDDEN}
+        />
         {review && core ? (
           <OverLimitNotice
             review={review}

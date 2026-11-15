@@ -1,4 +1,4 @@
-import type { ConfigResponse, ValidationResponse, WhitelistResponse } from '../../api/config';
+import type { ConfigResponse, ValidationResponse } from '../../api/config';
 import { toApiError, type ApiError } from '../../api/errors';
 import type { LineDraft } from '../../components/config/lineDraft';
 import {
@@ -15,7 +15,6 @@ export interface SaveApi {
   saveConfig: (config: string, token: string) => Promise<unknown>;
   saveWhitelist: (whitelist: string) => Promise<unknown>;
   fetchConfig: () => Promise<ConfigResponse>;
-  fetchWhitelist: () => Promise<WhitelistResponse>;
   now: () => number;
 }
 
@@ -42,11 +41,6 @@ export interface SaveResult {
 }
 
 const CONFLICT_CODE = 'config_conflict';
-
-async function currentServer(api: SaveApi): Promise<ServerConfig> {
-  const [config, whitelist] = await Promise.all([api.fetchConfig(), api.fetchWhitelist()]);
-  return { sources: config.config, whitelist: whitelist.whitelist, revision: config.revision };
-}
 
 function whitelistProblem(request: SaveRequest, error: ApiError): SaveProblem {
   const details = error.body.details;
@@ -126,15 +120,11 @@ export async function saveDraft(request: SaveRequest, api: SaveApi): Promise<Sav
   }
 
   if (result.savedSources || result.savedWhitelist) {
-    try {
-      result.server = await currentServer(api);
-    } catch {
-      result.server = {
-        sources: result.savedSources ? request.sources.text : request.server.sources,
-        whitelist: result.savedWhitelist ? request.whitelist.text : request.server.whitelist,
-        revision: revision + (result.savedWhitelist ? 1 : 0),
-      };
-    }
+    result.server = {
+      sources: result.savedSources ? request.sources.text : request.server.sources,
+      whitelist: result.savedWhitelist ? request.whitelist.text : request.server.whitelist,
+      revision: revision + (result.savedWhitelist ? 1 : 0),
+    };
   }
   return result;
 }

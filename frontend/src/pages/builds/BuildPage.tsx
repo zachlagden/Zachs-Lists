@@ -11,8 +11,10 @@ import { analyseSources } from '../../components/config/sourceLines';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { BuildProblem } from './BuildProblem';
 import { BuildView, BuildViewSkeleton } from './BuildView';
-import { isUnreadFailure } from './historyFacts';
 import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
+import { isUnreadFailure } from '../../lib/builds';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
+import { buildSummary } from './buildFacts';
 
 function categoriesByUrl(config: string | undefined): ReadonlyMap<string, string> | null {
   if (!config) return null;
@@ -43,12 +45,16 @@ export default function BuildPage() {
   const categories = useMemo(() => categoriesByUrl(config.data?.config), [config.data?.config]);
 
   useMarkFailuresRead(job !== undefined && isUnreadFailure(job), jobId);
+  const notFound = build.isError && toApiError(build.error).status === 404;
+  useDocumentMeta(
+    job ? buildSummary(job, 'owner').heading : notFound ? 'Build not found' : 'Build',
+  );
 
   if (!job) {
     if (build.isError) {
       return (
         <BuildProblem
-          notFound={toApiError(build.error).status === 404}
+          notFound={notFound}
           error={build.error}
           onRetry={() => void build.refetch()}
           retrying={build.isFetching}

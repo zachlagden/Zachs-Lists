@@ -16,6 +16,7 @@ export interface ActionDialogProps<Result, Field extends string = never> {
   fallback: string;
   fields?: ReadonlyArray<Field>;
   confirmDisabled?: boolean;
+  destructive?: boolean;
   children: ReactNode | ((fieldErrors: Partial<Record<Field, string>>) => ReactNode);
 }
 
@@ -29,6 +30,7 @@ export function ActionDialog<Result, Field extends string = never>({
   fallback,
   fields = NO_FIELDS,
   confirmDisabled = false,
+  destructive = false,
   children,
 }: ActionDialogProps<Result, Field>) {
   const action = useMutation({
@@ -48,6 +50,7 @@ export function ActionDialog<Result, Field extends string = never>({
       confirmLabel={confirmLabel}
       busy={action.isPending}
       confirmDisabled={confirmDisabled}
+      destructive={destructive}
     >
       <div className="grid gap-3">
         {typeof children === 'function' ? children(failure?.fields ?? {}) : children}

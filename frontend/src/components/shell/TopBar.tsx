@@ -34,7 +34,10 @@ export function TopBar({ drawerOpen, onToggleDrawer, menuButtonRef }: TopBarProp
               <li key={crumb.label} className="flex min-w-0 items-center gap-2">
                 {index > 0 ? <span aria-hidden="true">/</span> : null}
                 {crumb.to && !last ? (
-                  <Link to={crumb.to} className="no-underline hover:text-text">
+                  <Link
+                    to={crumb.to}
+                    className="inline-flex items-center no-underline hover:text-text narrow:min-h-11 narrow:min-w-11"
+                  >
                     {crumb.label}
                   </Link>
                 ) : (

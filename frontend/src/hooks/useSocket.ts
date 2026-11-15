@@ -1,8 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { Job } from '../types';
-import { fetchAdminJob } from '../api/admin';
-import { fetchJob } from '../api/jobs';
 import { useConnectionStore } from '../store';
 import { resyncJobs, type JobsSubscription } from '../realtime/resync';
 import { createRoomSubscribers } from '../realtime/roomSubscribers';
@@ -16,6 +14,7 @@ interface UseJobSocketOptions {
   onJobCompleted?: (job: Job) => void;
   onReconnect?: () => void;
   knownJobs: () => Job[];
+  fetchJob: (jobId: string) => Promise<Job>;
   onJobsSynced: (jobs: Job[]) => void;
   onResyncFailed: (jobIds: string[]) => void;
 }
@@ -38,6 +37,7 @@ export function useJobSocket({
   onJobCompleted,
   onReconnect,
   knownJobs,
+  fetchJob,
   onJobsSynced,
   onResyncFailed,
 }: UseJobSocketOptions): UseSocketResult {
@@ -47,6 +47,7 @@ export function useJobSocket({
     onJobCompleted,
     onReconnect,
     knownJobs,
+    fetchJob,
     onJobsSynced,
     onResyncFailed,
   });
@@ -58,6 +59,7 @@ export function useJobSocket({
       onJobCompleted,
       onReconnect,
       knownJobs,
+      fetchJob,
       onJobsSynced,
       onResyncFailed,
     };
@@ -78,7 +80,7 @@ export function useJobSocket({
         apply: (jobs) => {
           if (mounted) callbacksRef.current.onJobsSynced(jobs);
         },
-        fetchJob: isAdmin ? fetchAdminJob : fetchJob,
+        fetchJob: (jobId) => callbacksRef.current.fetchJob(jobId),
       });
       if (unresolved.length > 0) callbacksRef.current.onResyncFailed(unresolved);
       if (mounted && reconnected) callbacksRef.current.onReconnect?.();

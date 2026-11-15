@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import domainLimit from '../../../../tests/fixtures/domain-limit.json';
 import fixture from '../../../../tests/fixtures/job-progress.json';
 import type { EnhancedJobProgress, Job, JobResult, JobStatus, SourceProgress } from '../../types';
-import { attemptSeconds, sourceProblemCause } from '../../lib/builds';
+import { attemptSeconds, isUnreadFailure, requestedBy, sourceProblemCause } from '../../lib/builds';
 import {
   buildPhase,
   buildSources,
@@ -11,14 +12,12 @@ import {
   hasStageProgress,
   outputLists,
   queueWaitSeconds,
-  requestedBy,
 } from './buildFacts';
 import { ERROR_CODES, buildFailure } from './failureFacts';
 import {
   combineHistory,
   finishedBuilds,
   historyFilterFrom,
-  isUnreadFailure,
   legacyBuildPath,
   nextHistoryLimit,
 } from './historyFacts';
@@ -205,6 +204,12 @@ describe('build summary', () => {
     expect(failure.publication).toBe(
       'Nothing was published. Your published lists were left unchanged.',
     );
+    const overLimit = buildSummary(
+      failed('domain_limit_exceeded', domainLimit.over_limit.error),
+      'owner',
+    );
+    expect(overLimit.detail).toBe(domainLimit.over_limit.error);
+    expect(overLimit.publication).toBe('');
     const skipped = buildSummary(
       job('skipped', {
         result: { ...EMPTY_RESULT, skip_reason: 'Nothing changed since the last build' },
@@ -456,7 +461,7 @@ describe('who asked for the build', () => {
   it('names the account only to an admin', () => {
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'owner')).toBe('Manual');
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'admin')).toBe('Manual, by alex');
-    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe('Scheduled rebuild');
+    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe('Scheduled');
     expect(requestedBy({ type: 'admin', username: '__default__' }, 'admin')).toBe(
       'Started by an admin',
     );

@@ -4,11 +4,13 @@ import { CopyButton } from '../../components/ui/CopyButton';
 import { KeyValueList, type KeyValueItem } from '../../components/ui/Layout';
 import { formatDate, formatDateTime, formatInteger, pluralise } from '../../lib/format';
 import type { Job } from '../../types';
-import { attemptStartedAt, isDefaultListsBuild } from '../../lib/builds';
-import { buildSources, queueWaitSeconds, requestedBy, type Viewer } from './buildFacts';
+import { attemptStartedAt, isDefaultListsBuild, requestedBy } from '../../lib/builds';
+import { buildSources, queueWaitSeconds, type Viewer } from './buildFacts';
 import { ClockTime, Duration, LiveDuration } from './Durations';
 import { sourceTally } from './sourceFacts';
 import { describeSeconds } from '../../lib/text';
+import { CELL_LINK } from '../../components/ui/linkClasses';
+import { cn } from '../../lib/cn';
 
 function Moment({ at }: { at: string }) {
   const today = formatDateTime(at).startsWith('Today');
@@ -27,7 +29,7 @@ function adminItems(job: Job): KeyValueItem[] {
       value: isDefaultListsBuild(job) ? (
         'Default lists'
       ) : (
-        <Link to={`/admin/users/${job.user_id}`} className="underline hover:text-accent-text">
+        <Link to={`/admin/users/${job.user_id}`} className={cn(CELL_LINK, 'justify-end')}>
           {job.username}
         </Link>
       ),

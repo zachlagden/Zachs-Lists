@@ -97,8 +97,8 @@ export function LimitsCard({
           </p>
         ) : canRequestMore ? (
           <div>
-            <Button size="sm" className="narrow:min-h-11" onClick={onRequestMore}>
-              Ask for a higher limit
+            <Button size="sm" onClick={onRequestMore}>
+              Request a higher limit
             </Button>
           </div>
         ) : null}
@@ -279,7 +279,6 @@ export function CheckCard({
         <div>
           <Button
             size="sm"
-            className="narrow:min-h-11"
             icon="tick"
             loading={status === 'checking'}
             disabled={sourceCount === 0}

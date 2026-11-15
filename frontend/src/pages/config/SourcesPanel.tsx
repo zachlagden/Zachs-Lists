@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  UNCATEGORISED_LIST,
   categoryLabel,
   describeProblem,
   type GroupedSources,
@@ -77,22 +78,10 @@ function RowActions({
 }) {
   return (
     <div className="flex gap-1 narrow:col-span-2 narrow:justify-end">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="narrow:min-h-11"
-        onClick={onEdit}
-        aria-label={`${editLabel} ${label}`}
-      >
+      <Button size="sm" variant="ghost" onClick={onEdit} aria-label={`${editLabel} ${label}`}>
         {editLabel}
       </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="narrow:min-h-11"
-        onClick={onRemove}
-        aria-label={`Remove ${label}`}
-      >
+      <Button size="sm" variant="ghost" onClick={onRemove} aria-label={`Remove ${label}`}>
         Remove
       </Button>
     </div>
@@ -185,8 +174,8 @@ export function SourcesPanel({
   onShowInText,
   emptyAction,
 }: SourcesPanelProps) {
-  const { groups, attention } = grouped;
-  if (groups.length === 0 && attention.length === 0) {
+  const { groups, uncategorised, attention } = grouped;
+  if (groups.length === 0 && uncategorised.length === 0 && attention.length === 0) {
     return (
       <EmptyState title="No sources yet" action={emptyAction}>
         Add lists from the library or by their address. A build combines them into your own
@@ -240,6 +229,28 @@ export function SourcesPanel({
           </section>
         );
       })}
+      {uncategorised.length > 0 ? (
+        <section aria-labelledby="sources-uncategorised">
+          <GroupHeading id="sources-uncategorised">
+            No category
+            <span className="font-normal text-text-tertiary">
+              {pluralise(uncategorised.length, 'source')}, published in a separate list named{' '}
+              <span translate="no">{UNCATEGORISED_LIST}</span>
+            </span>
+          </GroupHeading>
+          <ul className="m-0 list-none p-0">
+            {uncategorised.map((entry) => (
+              <SourceRow
+                key={entry.line.id}
+                entry={entry}
+                state={rowState(entry)}
+                onEdit={() => onEdit(entry.line.id)}
+                onRemove={() => onRemove(entry.line.id)}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {commentCount > 0 ? (
         <p className="px-[18px] py-2.5 text-xs text-text-tertiary narrow:px-3">
           {pluralise(commentCount, 'comment line')} in the file {commentCount === 1 ? 'is' : 'are'}{' '}

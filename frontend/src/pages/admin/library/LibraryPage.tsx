@@ -30,6 +30,8 @@ import {
   groupByCategory,
   strictnessLabel,
 } from './libraryFacts';
+import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
+import { adminTitle } from '../shared/sections';
 
 const CATEGORY_CHOICES = ['all', ...CATEGORY_ORDER] as const;
 const COLUMN_COUNT = 5;
@@ -42,6 +44,7 @@ function DeleteEntryDialog({ entry, onClose }: { entry: LibraryEntry; onClose: (
     <ActionDialog
       title={`Delete ${entry.name}?`}
       confirmLabel="Delete the source"
+      destructive
       run={() => deleteLibraryEntry(entry.id)}
       onDone={() => {
         showToast('ok', `${entry.name} is deleted from the library.`);
@@ -60,6 +63,7 @@ function DeleteEntryDialog({ entry, onClose }: { entry: LibraryEntry; onClose: (
 }
 
 export default function LibraryPage() {
+  useDocumentMeta(adminTitle('Source library'));
   const url = useUrlState();
   const { params, update } = url;
   const [query, setQuery] = useUrlText(url, 'q');

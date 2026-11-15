@@ -1,4 +1,3 @@
-import type { Blocker } from 'react-router-dom';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { ConfirmDialog, Dialog } from '../../components/ui/Dialog';
@@ -75,7 +74,7 @@ export function ConflictDialog({
       footer={
         <>
           <Button onClick={onTakeServerVersion}>Load the saved version</Button>
-          <Button variant="primary" onClick={onKeepMyEdits}>
+          <Button variant="primary" onClick={onKeepMyEdits} data-initial-focus>
             Keep editing mine
           </Button>
         </>
@@ -84,7 +83,7 @@ export function ConflictDialog({
       <div className="grid gap-2 text-text-secondary">
         <p>
           The saved sources or whitelist were changed in another tab or device after you opened this
-          page, so nothing was saved.
+          page, so your unsaved edits were not saved over them.
         </p>
         <p>
           Load the saved version to drop your edits here. Keep editing to hold on to them. Saving
@@ -92,24 +91,6 @@ export function ConflictDialog({
         </p>
       </div>
     </Dialog>
-  );
-}
-
-export function LeaveDialog({ blocker, onLeave }: { blocker: Blocker; onLeave: () => void }) {
-  return (
-    <ConfirmDialog
-      open={blocker.state === 'blocked'}
-      title="Leave without saving?"
-      confirmLabel="Leave and discard"
-      cancelLabel="Stay"
-      onCancel={() => blocker.reset?.()}
-      onConfirm={() => {
-        onLeave();
-        blocker.proceed?.();
-      }}
-    >
-      Your unsaved changes to the sources or the whitelist will be lost.
-    </ConfirmDialog>
   );
 }
 
@@ -128,6 +109,7 @@ export function TemplateDialog({
     <ConfirmDialog
       open={open}
       busy={busy}
+      destructive
       title="Replace your configuration?"
       confirmLabel="Replace with the default template"
       onCancel={onCancel}

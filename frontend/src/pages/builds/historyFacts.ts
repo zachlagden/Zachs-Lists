@@ -31,9 +31,7 @@ export function combineHistory(live: Job[], older: Job[]): Job[] {
     const known = byId.get(job.job_id);
     if (!known || (job.rev ?? 0) >= (known.rev ?? 0)) byId.set(job.job_id, job);
   }
-  return [...byId.values()].sort(
-    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
-  );
+  return [...byId.values()].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
 
 export const HISTORY_LIMITS = [20, 50, 100] as const;
@@ -41,10 +39,6 @@ export const HISTORY_LIMITS = [20, 50, 100] as const;
 export function nextHistoryLimit(limit: number, shown: number): number | null {
   if (shown < limit) return null;
   return HISTORY_LIMITS.find((candidate) => candidate > limit) ?? null;
-}
-
-export function isUnreadFailure(job: Pick<Job, 'status' | 'read'>): boolean {
-  return job.status === 'failed' && job.read === false;
 }
 
 export function legacyBuildPath(search: string): string | null {

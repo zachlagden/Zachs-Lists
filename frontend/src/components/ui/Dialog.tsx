@@ -22,6 +22,16 @@ export interface DialogProps {
   children?: ReactNode;
 }
 
+const FIELD_SELECTOR = ':is(input:not([type="hidden"]), select, textarea):not(:disabled)';
+
+function initialFocusTarget(dialog: HTMLDialogElement): HTMLElement | null {
+  return (
+    dialog.querySelector<HTMLElement>('[data-initial-focus]:not(:disabled)') ??
+    dialog.querySelector<HTMLElement>(`[data-dialog-body] ${FIELD_SELECTOR}`) ??
+    dialog.querySelector<HTMLElement>('[data-default-action]:not(:disabled)')
+  );
+}
+
 export function Dialog({
   open,
   onClose,
@@ -41,7 +51,10 @@ export function Dialog({
     const dialog = dialogRef.current;
     if (!dialog || !open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog.showModal();
+      initialFocusTarget(dialog)?.focus();
+    }
     return () => {
       if (dialog.open) dialog.close();
       if (opener?.isConnected) opener.focus();
@@ -94,7 +107,9 @@ export function Dialog({
           ) : null}
         </div>
         {children ? (
-          <div className="overflow-y-auto overscroll-contain p-[18px]">{children}</div>
+          <div data-dialog-body className="overflow-y-auto overscroll-contain p-[18px]">
+            {children}
+          </div>
         ) : null}
         {footer ? (
           <div className="flex flex-wrap justify-end gap-2 border-t border-border px-[18px] py-3">
@@ -115,6 +130,7 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   busy?: boolean;
   confirmDisabled?: boolean;
+  destructive?: boolean;
   children?: ReactNode;
 }
 
@@ -127,6 +143,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   busy = false,
   confirmDisabled = false,
+  destructive = false,
   children,
 }: ConfirmDialogProps) {
   return (
@@ -138,10 +155,20 @@ export function ConfirmDialog({
       dismissible={!busy}
       footer={
         <>
-          <Button onClick={onCancel} disabled={busy}>
+          <Button
+            onClick={onCancel}
+            disabled={busy}
+            data-default-action={destructive ? '' : undefined}
+          >
             {cancelLabel}
           </Button>
-          <Button variant="primary" onClick={onConfirm} loading={busy} disabled={confirmDisabled}>
+          <Button
+            variant="primary"
+            onClick={onConfirm}
+            loading={busy}
+            disabled={confirmDisabled}
+            data-default-action={destructive ? undefined : ''}
+          >
             {confirmLabel}
           </Button>
         </>
