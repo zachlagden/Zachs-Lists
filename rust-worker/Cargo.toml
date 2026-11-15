@@ -1,6 +1,6 @@
 [package]
 name = "blocklist-worker"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Zach Lagden"]
 description = "High-performance blocklist worker for lists.zachlagden.uk"

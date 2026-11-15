@@ -19,6 +19,7 @@ def socket_app(monkeypatch: pytest.MonkeyPatch) -> tuple[Flask, Mock]:
     account = Mock(spec=User)
     account.id = "000000000000000000000001"
     account.is_enabled = True
+    account.auth_version = 0
     account.is_banned = False
     account.is_admin = False
     monkeypatch.setattr(User, "get_by_id", Mock(return_value=account))

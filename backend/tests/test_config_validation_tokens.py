@@ -89,6 +89,17 @@ def test_tabs_validate_independently_but_cannot_overwrite_newer_revision(
     assert sam.get("/api/user/config").get_json()["config"] == first
 
 
+def test_logout_revokes_replayed_cookie(
+    config_clients: tuple[FlaskClient, FlaskClient],
+) -> None:
+    sam, _ = config_clients
+    cookie = sam.get_cookie("session")
+    assert cookie is not None
+    assert sam.post("/api/auth/logout").status_code == 200
+    sam.set_cookie("session", cookie.value)
+    assert sam.get("/api/user/config").status_code == 401
+
+
 def test_expired_token_cannot_save(
     config_clients: tuple[FlaskClient, FlaskClient],
 ) -> None:

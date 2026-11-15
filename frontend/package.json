@@ -1,7 +1,7 @@
 {
   "name": "lists-zachlagden-uk",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -43,6 +43,6 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
-    "vite": "^6.4.3"
+    "vite": "^6.4.5"
   }
 }

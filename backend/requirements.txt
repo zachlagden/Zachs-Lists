@@ -4,7 +4,7 @@ flask-pymongo==2.3.0
 flask-cors==6.0.0
 flask-limiter==3.5.0
 flask-socketio==5.6.1
-Werkzeug==3.1.6
+Werkzeug==3.1.9
 
 # WebSocket
 python-socketio==5.16.2
