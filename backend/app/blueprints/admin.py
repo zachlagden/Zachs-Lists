@@ -30,6 +30,7 @@ from app.services.admin_forms import (
     review_response,
 )
 from app.services.build_admission import DEFAULT_TARGET, AdmissionError, admit_build
+from app.services import default_refresh, default_sync
 from app.services.job_feed import job_payload, job_payloads
 from app.services import limit_review
 from app.services.site_stats import storage_bytes
@@ -482,10 +483,13 @@ def get_user_growth(admin: User):
 def get_default_config(admin: User):
     """Get default lists configuration from MongoDB."""
     config_data = SystemConfig.get_default_config()
+    status = default_sync.sync_status()
     return jsonify(
         {
             "config": config_data["blocklists"],
             "whitelist": config_data["whitelist"],
+            "sync_enabled": status["sync_enabled"],
+            "source": status["source"],
         }
     )
 
@@ -494,6 +498,17 @@ def get_default_config(admin: User):
 @admin_required
 def update_default_config(admin: User):
     """Update default lists configuration in MongoDB."""
+    if default_sync.sync_enabled():
+        return (
+            jsonify(
+                {
+                    "error": "The default lists are synced from "
+                    f"{current_app.config['DEFAULT_SYNC_REPO']}. Change them there.",
+                    "code": "default_config_managed",
+                }
+            ),
+            409,
+        )
     try:
         fields = default_config_fields(json_object())
     except DefaultConfigCheckUnavailable:
@@ -518,6 +533,35 @@ def update_default_config(admin: User):
         current_app.logger.info(f"Admin {admin.username} updated default whitelist")
 
     return jsonify({"success": True})
+
+
+@admin_bp.route("/default/sync", methods=["GET"])
+@admin_required
+def get_default_sync(admin: User):
+    return jsonify(default_sync.sync_status())
+
+
+@admin_bp.route("/default/sync", methods=["POST"])
+@limiter.limit(configured_limit("RATELIMIT_DEFAULT_SYNC"))
+@admin_required
+def run_default_sync(admin: User):
+    force = optional_bool(json_object(), "force") or False
+    if not default_sync.sync_enabled():
+        return (
+            jsonify(
+                {
+                    "error": "Default list sync is switched off",
+                    "code": "default_sync_disabled",
+                }
+            ),
+            409,
+        )
+    result = default_refresh.sync_now(force)
+    current_app.logger.info(
+        f"Admin {admin.username} ran the default list sync: "
+        f"{result.sync.status if result.sync else 'not run'}"
+    )
+    return jsonify({**result.to_dict(), **default_sync.sync_status()})
 
 
 @admin_bp.route("/featured", methods=["GET"])

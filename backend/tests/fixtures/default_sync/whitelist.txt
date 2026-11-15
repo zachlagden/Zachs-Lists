@@ -1,0 +1,31 @@
+# Zach's Lists - Default Whitelist
+# Last Updated: 10/10/2026 - Shared hosting platforms allow only their own hosts, not customer sites
+#
+# A bare entry also allows every subdomain. For a shared hosting platform (GitHub Pages, S3,
+# Cloud Storage, CDN edge hostnames) that would unblock every customer site on it, including
+# phishing and malware, so platform entries use a regex that matches only the platform's own hosts.
+
+# ============================================================================
+# GOOGLE SERVICES
+# ============================================================================
+# Core Google functionality
+clients.google.com
+clients1.google.com
+clients2.google.com
+clients3.google.com
+clients4.google.com
+clients5.google.com
+clients6.google.com
+accounts.google.com
+dl.google.com
+cse.google.com
+
+
+# Wildcards and patterns
+*.skype.com
+*.fbcdn.net
+*.hwcdn.net
+/^([a-z0-9-]+\.)?googleapis\.com$/
+/^amazonaws\.com$/
+/^s3\.amazonaws\.com$/
+/^akamaihd\.net$/

@@ -63,6 +63,20 @@ class Config:
         "on",
     )
 
+    # Default list sync
+    DEFAULT_SYNC_ENABLED = os.environ.get(
+        "DEFAULT_SYNC_ENABLED", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    DEFAULT_SYNC_REPO = (
+        os.environ.get("DEFAULT_SYNC_REPO", "").strip()
+        or "zachlagden/Pi-hole-Optimized-Blocklists"
+    )
+    DEFAULT_SYNC_COMMIT_PREFIX = (
+        os.environ.get("DEFAULT_SYNC_COMMIT_PREFIX", "").strip()
+        or "Weekly blocklist update"
+    )
+    GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or None
+
     # Processing
     MAX_CONCURRENT_JOBS = 5
     JOB_TIMEOUT_SECONDS = 600  # 10 minutes
@@ -86,6 +100,7 @@ class Config:
     RATELIMIT_JOBS = "120 per minute"
     RATELIMIT_URL_METADATA = "60 per minute"
     RATELIMIT_ADMIN_STATS = "60 per minute"
+    RATELIMIT_DEFAULT_SYNC = "6 per hour"
     TRUSTED_PROXY_HOSTS = tuple(
         host.strip()
         for host in os.environ.get("TRUSTED_PROXY_HOSTS", "").split(",")

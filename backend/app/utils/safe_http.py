@@ -1,6 +1,8 @@
 import ipaddress
 import socket
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import SplitResult, urljoin, urlsplit
 
@@ -169,6 +171,7 @@ def source_response(
     value: str,
     timeout: int = 15,
     headers: dict[str, str] | None = None,
+    follow_redirects: bool = True,
 ) -> requests.Response:
     current = value
     for attempt in range(6):
@@ -182,6 +185,8 @@ def source_response(
             headers=headers,
         )
         if response.status_code not in (301, 302, 303, 307, 308):
+            return response
+        if not follow_redirects:
             return response
         location = response.headers.get("Location")
         response.close()
@@ -207,3 +212,40 @@ def source_headers(value: str, timeout: int = 15) -> tuple[int, dict[str, str]]:
             session, "GET", value, timeout, {"Range": "bytes=0-1023"}
         ) as response:
             return response.status_code, dict(response.headers)
+
+
+class BodyTooLarge(requests.exceptions.RequestException):
+    pass
+
+
+@dataclass(frozen=True)
+class FetchedBody:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+def source_body(
+    value: str,
+    max_bytes: int,
+    timeout: int = 15,
+    headers: dict[str, str] | None = None,
+    follow_redirects: bool = True,
+) -> FetchedBody:
+    deadline = time.monotonic() + timeout * 2
+    with source_session() as session:
+        with source_response(
+            session, "GET", value, timeout, headers, follow_redirects
+        ) as response:
+            body = bytearray()
+            for chunk in response.iter_content(64 * 1024):
+                if len(chunk) > max_bytes - len(body):
+                    raise BodyTooLarge(f"Response is larger than {max_bytes} bytes")
+                if time.monotonic() > deadline:
+                    raise requests.exceptions.Timeout("Response took too long")
+                body.extend(chunk)
+            return FetchedBody(
+                response.status_code,
+                {name.lower(): text for name, text in response.headers.items()},
+                bytes(body),
+            )

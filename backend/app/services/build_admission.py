@@ -10,6 +10,7 @@ from app.extensions import mongo
 from app.models.job import Job
 from app.models.system_config import SystemConfig
 from app.models.user import User
+from app.services.default_sync import pin_repository_sources
 from app.utils.job_document import initial_progress, revision_bump
 from app.utils.time import next_week_start, utc_iso, week_start
 from app.utils.validators import MAX_CONFIG_SOURCES, validate_blocklist_config
@@ -196,7 +197,7 @@ def _admit_user_build(
 def _admit_default_build(job_type: str, force_rebuild: bool) -> Job:
     stored = SystemConfig.get_default_config()
     config_snapshot: dict[str, Any] = {
-        "blocklists": stored["blocklists"],
+        "blocklists": pin_repository_sources(stored["blocklists"]),
         "whitelist": stored["whitelist"],
         "revision": None,
         "limits": None,

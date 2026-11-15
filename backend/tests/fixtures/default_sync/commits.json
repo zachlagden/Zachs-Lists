@@ -1,0 +1,50 @@
+[
+  {
+    "sha": "1ea7e1669a20b88fdf767cf6f8c626f590c129cb",
+    "commit": {
+      "message": "Weekly blocklist update 2026-11-08\n\n- Total domains: 2,076,566\n- Duplicates removed: 916,084\n- Whitelist entries: 496\n- Updated: all_domains.txt advertising.txt tracking.txt malicious.txt suspicious.txt comprehensive.txt nsfw.txt nsfw_abp.txt",
+      "committer": {
+        "date": "2026-11-08T04:54:31Z"
+      }
+    },
+    "author": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "sha": "96bf49b462614302afb5edb7855df3b700078224",
+    "commit": {
+      "message": "Weekly blocklist update 2026-11-07\n\n- Total domains: 2,063,087\n- Duplicates removed: 909,907\n- Whitelist entries: 496\n- Updated: all_domains.txt advertising.txt tracking.txt malicious.txt suspicious.txt comprehensive.txt nsfw.txt nsfw_abp.txt",
+      "committer": {
+        "date": "2026-11-07T20:20:11Z"
+      }
+    },
+    "author": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "sha": "45348bb0798fc1567dcc53cf59a822b0d2989573",
+    "commit": {
+      "message": "Weekly blocklist update 2026-11-01\n\n- Total domains: 2,455,924\n- Duplicates removed: 914,375\n- Whitelist entries: 496\n- Updated: all_domains.txt advertising.txt tracking.txt malicious.txt suspicious.txt comprehensive.txt nsfw.txt nsfw_abp.txt",
+      "committer": {
+        "date": "2026-11-01T04:51:37Z"
+      }
+    },
+    "author": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "sha": "44e820c218071ffd8ee9d516fc128cb2d3df9e52",
+    "commit": {
+      "message": "Weekly blocklist update 2026-10-25\n\n- Total domains: 2,688,795\n- Duplicates removed: 921,651\n- Whitelist entries: 496\n- Updated: all_domains.txt advertising.txt tracking.txt malicious.txt suspicious.txt comprehensive.txt nsfw.txt nsfw_abp.txt",
+      "committer": {
+        "date": "2026-10-25T03:35:54Z"
+      }
+    },
+    "author": {
+      "login": "github-actions[bot]"
+    }
+  }
+]
