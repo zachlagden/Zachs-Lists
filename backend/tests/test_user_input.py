@@ -108,17 +108,17 @@ def test_domain_tiers_come_from_the_configuration(
     api: Api, client: FlaskClient
 ) -> None:
     body = client.get("/api/user/limit-request").get_json()
-    assert body["current_limit"] == api.app.config["DEFAULT_MAX_DOMAINS"] == 4_000_000
+    assert body["current_limit"] == api.app.config["DEFAULT_MAX_DOMAINS"] == 6_000_000
     assert body["available_tiers"] == [10_000_000, 20_000_000]
     assert body["max_limit"] == api.app.config["MAX_DOMAINS_LIMIT"] == 20_000_000
 
-    api.app.config["DOMAIN_TIERS"] = [4_000_000, 6_000_000]
+    api.app.config["DOMAIN_TIERS"] = [6_000_000, 8_000_000]
     assert client.get("/api/user/limit-request").get_json()["available_tiers"] == [
-        6_000_000
+        8_000_000
     ]
     accepted = client.post(
         "/api/user/limit-request",
-        json={"requested_tier": 6_000_000, "reason": "A reason for more"},
+        json={"requested_tier": 8_000_000, "reason": "A reason for more"},
     )
     assert accepted.status_code == 201
 
