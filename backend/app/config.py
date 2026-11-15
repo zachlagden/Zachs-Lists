@@ -38,7 +38,8 @@ class Config:
     USERS_DIR = os.path.join(DATA_DIR, "users")
     DEFAULT_DIR = os.path.join(DATA_DIR, "default")
 
-    # Frontend
+    # Frontend. List-file headers use this URL's hostname. The worker reads the
+    # resolved value from BLOCKLIST_GENERATOR_HOST (see app.generator_host).
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
     # User limits

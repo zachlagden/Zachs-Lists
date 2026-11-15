@@ -33,8 +33,9 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
     && cargo build --release \
     && rm -rf src target/release/deps/blocklist_worker*
 
-# Build actual worker
+# Build actual worker. The fallback hostname is shared with the Python app.
 COPY rust-worker/src ./src
+COPY backend/app/blocklist_generator_host.txt /build/backend/app/blocklist_generator_host.txt
 RUN cargo build --release
 
 # ==============================================================================

@@ -21,7 +21,8 @@ export default function AllowlistUrlCard({ username }: AllowlistUrlCardProps) {
       <div>
         <h3 className="text-lg font-semibold text-pihole-text">Pi-hole v6 allowlist</h3>
         <p className="text-sm text-yellow-500 mt-1">
-          This URL is world-readable. On a public instance anyone can download your whitelist.
+          Like your blocklists, this URL is readable by anyone who can reach this instance. It
+          contains your whitelist entries.
         </p>
         <p className="text-sm text-pihole-text-muted mt-1">
           Add this URL in Pi-hole v6 as an allow-type adlist. Plain format (

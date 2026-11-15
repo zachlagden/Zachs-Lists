@@ -4,6 +4,7 @@ mod db;
 mod downloader;
 mod extractor;
 mod generator;
+mod generator_host;
 mod processor;
 mod safe_http;
 #[cfg(test)]
@@ -62,6 +63,7 @@ async fn main() -> Result<()> {
     let config = Config::from_env();
     info!("Worker ID: {}", config.worker_id);
     info!("Data directory: {:?}", config.data_dir);
+    info!("List file hostname: {}", config.generator_host);
 
     // Setup shutdown signal handling
     let shutdown = Arc::new(AtomicBool::new(false));

@@ -1329,8 +1329,8 @@ export default function AdminPage() {
                 <span>
                   <span className="font-medium">Publish as a Pi-hole v6 allowlist</span>
                   <span className="block text-yellow-500 mt-1">
-                    Published lists are world-readable. On a public instance anyone with the URL can
-                    download this whitelist.
+                    Like your blocklists, this allowlist is readable by anyone who can reach this
+                    instance. It contains this whitelist.
                   </span>
                 </span>
               </label>

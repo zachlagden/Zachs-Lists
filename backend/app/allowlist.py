@@ -10,15 +10,11 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
+from app.generator_host import BLOCKLIST_GENERATOR_HOST
 from app.utils.validators import validate_domain
 
 ALLOWLIST_NAME = "allowlist"
-# Blocklist files stamp this host in rust-worker/src/generator.rs. The
-# allowlist uses FRONTEND_URL when the app publishes a file, and this host
-# only when that setting has no hostname.
-BLOCKLIST_GENERATOR_HOST = "lists.zachlagden.uk"
 BLOCKLIST_FORMATS = ("hosts", "plain", "adblock")
 ALLOWLIST_FORMATS = ("adblock", "plain")
 ALLOWLIST_PRIMARY_FORMAT = "adblock"
@@ -55,19 +51,6 @@ def allowlist_format(requested: str | None) -> str | None:
     if requested in ALLOWLIST_FORMATS:
         return requested
     return None
-
-
-def host_from_public_url(public_url: str | None) -> str:
-    """Hostname for file headers, from the instance's public URL."""
-    if not public_url or not public_url.strip():
-        return BLOCKLIST_GENERATOR_HOST
-    parsed = urlparse(public_url.strip())
-    hostname = parsed.hostname
-    if not hostname:
-        return BLOCKLIST_GENERATOR_HOST
-    if parsed.port and parsed.port not in (80, 443):
-        return f"{hostname}:{parsed.port}"
-    return hostname
 
 
 def parse_whitelist(whitelist: str) -> list[ParsedWhitelistEntry]:
