@@ -11,7 +11,7 @@ from app.models.analytics import Analytics
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.job import Job
 from app.models.limit_request import LimitRequest
-from app.utils.job_document import revision_bump
+from app.utils.job_document import failure_result, revision_bump
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +54,11 @@ def prepare_active_job_targets(db: Database) -> None:
                         "claimed_at": None,
                         "heartbeat_at": None,
                         "completed_at": datetime.utcnow(),
-                        "result": {
-                            "sources_processed": 0,
-                            "sources_failed": 0,
-                            "total_domains": 0,
-                            "unique_domains": 0,
-                            "whitelisted_removed": 0,
-                            "output_files": [],
-                            "errors": [
-                                "Cancelled because another build for the same "
-                                "lists was already active"
-                            ],
-                            "error_code": Job.ERROR_SUPERSEDED,
-                        },
+                        "result": failure_result(
+                            Job.ERROR_SUPERSEDED,
+                            "Cancelled because another build for the same "
+                            "lists was already active",
+                        ),
                     },
                     **revision_bump(),
                 },

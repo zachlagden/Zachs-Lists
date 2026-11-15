@@ -24,6 +24,7 @@ pub fn test_config(db: &Database, data_dir: &Path, worker_id: &str) -> Config {
         source_fresh_secs: 0,
         mongo_connect_timeout_secs: 2,
         progress_update_interval_ms: 100,
+        enforce_domain_limit: false,
     }
 }
 

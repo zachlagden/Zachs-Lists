@@ -7,7 +7,12 @@ from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 
 from app.extensions import mongo
-from app.utils.job_document import initial_progress, revision_bump
+from app.utils.job_document import (
+    failure_result,
+    initial_progress,
+    normalised_result,
+    revision_bump,
+)
 from app.utils.time import utc_iso
 
 
@@ -154,7 +159,7 @@ class Job:
             "status": self.status,
             "priority": self.priority,
             "progress": self.progress,
-            "result": self.result,
+            "result": normalised_result(self.result),
             "started_at": utc_iso(self.started_at),
             "attempt_started_at": utc_iso(self.attempt_started_at),
             "completed_at": utc_iso(self.completed_at),
@@ -300,19 +305,11 @@ class Job:
                     "claimed_at": None,
                     "heartbeat_at": None,
                     "completed_at": datetime.utcnow(),
-                    "result": {
-                        "sources_processed": 0,
-                        "sources_failed": 0,
-                        "total_domains": 0,
-                        "unique_domains": 0,
-                        "whitelisted_removed": 0,
-                        "output_files": [],
-                        "errors": [
-                            f"Abandoned after {max_attempts} attempts that each "
-                            f"died before completing (worker crashed or ran out of memory)"
-                        ],
-                        "error_code": cls.ERROR_WORKER_ABANDONED,
-                    },
+                    "result": failure_result(
+                        cls.ERROR_WORKER_ABANDONED,
+                        f"Abandoned after {max_attempts} attempts that each "
+                        f"died before completing (worker crashed or ran out of memory)",
+                    ),
                 },
                 **revision_bump(),
             },

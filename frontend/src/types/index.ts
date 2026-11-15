@@ -212,6 +212,12 @@ export interface JobResult {
   error_code: string | null;
   skip_reason: string | null;
   generation_id: string | null;
+  limit: JobLimitMeasurement | null;
+}
+
+export interface JobLimitMeasurement {
+  max_domains: number | null;
+  actual_domains: number;
 }
 
 export interface OutputFile {

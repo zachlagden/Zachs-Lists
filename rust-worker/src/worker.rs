@@ -209,6 +209,20 @@ impl Worker {
                     job_repo.fail(job_id, code, vec![message], progress).await,
                 );
             }
+            BuildError::OverDomainLimit { limit, message } => {
+                info!(
+                    "Job {} failed ({}): {}",
+                    job_name,
+                    error_code::DOMAIN_LIMIT_EXCEEDED,
+                    message
+                );
+                Self::log_write(
+                    job_name,
+                    job_repo
+                        .fail_over_domain_limit(job_id, message, limit, progress)
+                        .await,
+                );
+            }
             BuildError::Internal(e) => {
                 error!("Job {} failed with an internal error: {:#}", job_name, e);
                 self.fail_internal(job_repo, job_id, job_name, progress)
