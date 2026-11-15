@@ -86,11 +86,11 @@ export function ConfigEditor({
   );
   const actions = useConfigActions(user.id, draft, setTab);
   const navigate = useNavigate();
-  const leaveForBuild = actions.buildStarted && !draft.dirty;
+  const buildToOpen = draft.dirty ? null : actions.startedBuildId;
 
   useEffect(() => {
-    if (leaveForBuild) navigate('/jobs');
-  }, [leaveForBuild, navigate]);
+    if (buildToOpen) navigate(`/jobs/${encodeURIComponent(buildToOpen)}`);
+  }, [buildToOpen, navigate]);
 
   const entries = useMemo(
     () => analyseSources(state.sources, categories),
@@ -216,7 +216,7 @@ export function ConfigEditor({
               Use default template
             </Button>
             {running ? (
-              <Button to="/jobs" icon="bolt">
+              <Button to={`/jobs/${encodeURIComponent(running.job_id)}`} icon="bolt">
                 View build
               </Button>
             ) : draft.dirty ? null : (

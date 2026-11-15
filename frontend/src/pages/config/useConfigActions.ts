@@ -33,7 +33,7 @@ export interface EditorNotice {
   tone: AlertTone;
   title: string;
   message: string;
-  showBuildLink?: boolean;
+  buildJobId?: string | null;
 }
 
 export interface WhitelistRejection {
@@ -48,7 +48,7 @@ export interface ConfigActions {
   whitelistRejection: WhitelistRejection | null;
   notice: EditorNotice | null;
   busy: 'save' | 'build' | null;
-  buildStarted: boolean;
+  startedBuildId: string | null;
   replacing: boolean;
   dismissNotice: () => void;
   runCheck: () => void;
@@ -120,7 +120,7 @@ export function useConfigActions(
   const [checkProgress, setCheckProgress] = useState<CheckProgress | null>(null);
   const [whitelistRejection, setWhitelistRejection] = useState<WhitelistRejection | null>(null);
   const [notice, setNotice] = useState<EditorNotice | null>(null);
-  const [buildStarted, setBuildStarted] = useState(false);
+  const [startedBuildId, setStartedBuildId] = useState<string | null>(null);
 
   useValidationSocket({
     userId,
@@ -157,9 +157,9 @@ export function useConfigActions(
       tone: 'ok',
       title: 'The build has started',
       message: 'It uses the configuration that is saved now.',
-      showBuildLink: true,
+      buildJobId: started.job_id,
     });
-    setBuildStarted(true);
+    setStartedBuildId(started.job_id);
   };
 
   const refuseBuild = (error: ApiError, saved: boolean) => {
@@ -168,7 +168,7 @@ export function useConfigActions(
       tone: 'warn',
       title: saved ? 'Saved, but the build was not started' : 'The build was not started',
       message: refusal.message,
-      showBuildLink: refusal.runningJobId !== null,
+      buildJobId: refusal.runningJobId,
     });
   };
 
@@ -282,7 +282,7 @@ export function useConfigActions(
       : buildMutation.isPending
         ? 'build'
         : null,
-    buildStarted,
+    startedBuildId,
     replacing: templateMutation.isPending,
     dismissNotice: () => setNotice(null),
     runCheck: () => checkMutation.mutate(),

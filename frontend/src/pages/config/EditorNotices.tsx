@@ -17,8 +17,8 @@ export function NoticeAlert({
       title={notice.title}
       onDismiss={onDismiss}
       actions={
-        notice.showBuildLink ? (
-          <Button to="/jobs" size="sm">
+        notice.buildJobId ? (
+          <Button to={`/jobs/${encodeURIComponent(notice.buildJobId)}`} size="sm">
             View the running build
           </Button>
         ) : undefined
