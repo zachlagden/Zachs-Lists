@@ -696,6 +696,7 @@ impl JobProcessor {
         let body = SourceBody {
             source_index: index,
             category: categories.get(index).cloned().flatten(),
+            abp: result.source.abp,
             content,
         };
 

@@ -13,11 +13,14 @@ use crate::db::cache::{
 };
 use crate::safe_http::{get_source_conditional, parse_source_url, SourceValidators};
 
+pub const ABP_FLAG: &str = "abp";
+
 #[derive(Debug, Clone)]
 pub struct Source {
     pub name: String,
     pub url: String,
     pub category: Option<String>,
+    pub abp: bool,
 }
 
 #[derive(Debug)]
@@ -335,7 +338,7 @@ impl Downloader {
     }
 
     /// Parse sources from config file content
-    /// Format: url|name|category or url|name or just url
+    /// Format: url|name|category|abp, url|name|category, url|name or just url
     /// Deduplicates by URL (first occurrence wins)
     pub fn parse_config(content: &str) -> Result<Vec<Source>> {
         let mut sources = Vec::new();
@@ -364,9 +367,14 @@ impl Downloader {
             let url = parts[0].trim();
 
             let parsed = parse_source_url(url)?;
-            if parts.len() > 3 || parts.iter().any(|part| part.trim().is_empty()) {
+            if parts.len() > 4 || parts.iter().any(|part| part.trim().is_empty()) {
                 anyhow::bail!("Invalid source configuration fields");
             }
+            let abp = match parts.get(3).map(|flag| flag.trim()) {
+                None => false,
+                Some(ABP_FLAG) => true,
+                Some(_) => anyhow::bail!("Invalid source configuration flag"),
+            };
 
             let name = if parts.len() > 1 {
                 parts[1].trim().to_string()
@@ -420,6 +428,7 @@ impl Downloader {
                     name,
                     url: url.to_string(),
                     category,
+                    abp,
                 });
             }
         }

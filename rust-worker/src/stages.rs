@@ -113,6 +113,7 @@ pub struct SourceExtraction {
 pub struct SourceBody {
     pub source_index: usize,
     pub category: Option<String>,
+    pub abp: bool,
     pub content: Vec<u8>,
 }
 
@@ -126,11 +127,12 @@ pub fn extract_source(
     let SourceBody {
         source_index,
         category,
+        abp,
         content,
     } = body;
     let extraction = {
         let text = String::from_utf8_lossy(&content);
-        extractor.extract(&text, cancellation, report_extracted)?
+        extractor.extract(&text, abp, cancellation, report_extracted)?
     };
     drop(content);
 

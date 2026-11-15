@@ -15,6 +15,7 @@ fn sources(count: usize) -> Vec<Source> {
             name: format!("list_{n}"),
             url: format!("https://lists.example.com/{n}.txt"),
             category: None,
+            abp: false,
         })
         .collect()
 }
