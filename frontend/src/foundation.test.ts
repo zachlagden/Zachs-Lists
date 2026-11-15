@@ -191,6 +191,7 @@ describe('navigation', () => {
       { label: 'User' },
     ]);
     expect(breadcrumbsFor('/admin/jobs/abc')[1]).toEqual({ label: 'Build' });
+    expect(breadcrumbsFor('/jobs/abc')).toEqual([{ label: 'Builds', to: '/jobs' }, { label: 'Build' }]);
   });
 
   it('hides admin links from other users', () => {

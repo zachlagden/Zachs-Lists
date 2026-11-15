@@ -1,10 +1,11 @@
-import { queryOptions } from '@tanstack/react-query';
-import { mergeFetchedList } from '../realtime/jobMerge';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { isStale, mergeFetchedList } from '../realtime/jobMerge';
 import type { Job, JobStatus } from '../types';
 import type { ApiError } from './errors';
 import { get, post } from './http';
 
 export const JOBS_PAGE_SIZE = 20;
+export const JOBS_HISTORY_MAX = 100;
 
 export interface JobsResponse {
   jobs: Job[];
@@ -40,6 +41,7 @@ export const jobsKeys = {
   all: ['jobs'] as const,
   list: () => [...jobsKeys.all, 'list'] as const,
   detail: (jobId: string) => [...jobsKeys.all, 'detail', jobId] as const,
+  history: (limit: number) => [...jobsKeys.all, 'history', limit] as const,
 };
 
 export function fetchJobs(limit: number = JOBS_PAGE_SIZE): Promise<JobsResponse> {
@@ -79,4 +81,18 @@ export const jobsQuery = () =>
   });
 
 export const jobQuery = (jobId: string) =>
-  queryOptions({ queryKey: jobsKeys.detail(jobId), queryFn: () => fetchJob(jobId) });
+  queryOptions({
+    queryKey: jobsKeys.detail(jobId),
+    queryFn: async ({ client }): Promise<Job> => {
+      const fetched = await fetchJob(jobId);
+      const stored = client.getQueryData<Job>(jobsKeys.detail(jobId));
+      return stored && isStale(fetched, stored) ? stored : fetched;
+    },
+  });
+
+export const jobsHistoryQuery = (limit: number) =>
+  queryOptions({
+    queryKey: jobsKeys.history(limit),
+    queryFn: () => fetchJobs(Math.min(limit, JOBS_HISTORY_MAX)),
+    placeholderData: keepPreviousData,
+  });
