@@ -760,3 +760,165 @@ async fn stale_fallback_warning_reaches_source_progress() {
         .any(|warning| warning.starts_with("Stale source:") && warning.contains("HTTP 503")));
     db.drop().await.unwrap();
 }
+
+async fn require_one_entry_per_url(db: &Database) {
+    db.collection::<bson::Document>("cache")
+        .create_index(
+            mongodb::IndexModel::builder()
+                .keys(doc! { "url_hash": 1 })
+                .options(
+                    mongodb::options::IndexOptions::builder()
+                        .unique(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .await
+        .unwrap();
+}
+
+fn checked<'a>(url: &'a str, content: &'a [u8]) -> CheckedDownload<'a> {
+    CheckedDownload {
+        url,
+        final_url: url,
+        content,
+        etag: None,
+        last_modified: None,
+        domain_count: 1,
+    }
+}
+
+async fn stored_body_ids(db: &Database) -> Vec<Bson> {
+    use futures::TryStreamExt;
+
+    db.collection::<bson::Document>("cache_files.files")
+        .find(doc! {})
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|file| file.get("_id").unwrap().clone())
+        .collect()
+}
+
+async fn assert_one_body_that_the_entry_points_at(db: &Database, url_hash: &str) {
+    let repo = CacheRepository::new(db);
+    let entry = repo.get_entry(url_hash).await.unwrap().unwrap();
+    assert_eq!(
+        stored_body_ids(db).await,
+        vec![Bson::ObjectId(entry.gridfs_id.unwrap())]
+    );
+    repo.get_verified_content(&entry).await.unwrap();
+    assert_eq!(
+        db.collection::<bson::Document>("cache")
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
+async fn concurrent_stores_for_one_url_leave_exactly_one_body() {
+    let url = "https://source.example/list";
+    let url_hash = Downloader::hash_url(url);
+    let same: (&[u8], &[u8]) = (b"same.example\n", b"same.example\n");
+    let different: (&[u8], &[u8]) = (b"one.example\n", b"two.example\n");
+    for ((first, second), replaces_an_entry) in [
+        (same, false),
+        (same, true),
+        (different, false),
+        (different, true),
+    ] {
+        let db = test_database("source_cache_race").await;
+        require_one_entry_per_url(&db).await;
+        let repo = CacheRepository::new(&db);
+        if replaces_an_entry {
+            repo.store_checked(&url_hash, checked(url, b"old.example\n"))
+                .await
+                .unwrap();
+        }
+        let (stored_first, stored_second) = tokio::join!(
+            repo.store_checked(&url_hash, checked(url, first)),
+            repo.store_checked(&url_hash, checked(url, second)),
+        );
+        stored_first.unwrap();
+        stored_second.unwrap();
+        assert_one_body_that_the_entry_points_at(&db, &url_hash).await;
+        db.drop().await.unwrap();
+    }
+}
+
+async fn upload_body_aged(db: &Database, name: &str, age_hours: i64) -> Bson {
+    use futures::io::AsyncWriteExt;
+
+    let mut upload = cache_bucket(db).open_upload_stream(name).await.unwrap();
+    upload.write_all(b"body.example\n").await.unwrap();
+    upload.close().await.unwrap();
+    let id = upload.id().clone();
+    set_body_age(db, &id, age_hours).await;
+    id
+}
+
+async fn set_body_age(db: &Database, id: &Bson, age_hours: i64) {
+    let uploaded = BsonDateTime::from_millis(
+        BsonDateTime::now().timestamp_millis() - age_hours * 60 * 60 * 1000,
+    );
+    db.collection::<bson::Document>("cache_files.files")
+        .update_one(
+            doc! { "_id": id },
+            doc! { "$set": { "uploadDate": uploaded } },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
+async fn startup_sweep_removes_only_old_bodies_that_no_entry_references() {
+    let db = test_database("source_cache_orphans").await;
+    let repo = CacheRepository::new(&db);
+    let url = "https://source.example/list";
+    let url_hash = Downloader::hash_url(url);
+    repo.store_checked(&url_hash, checked(url, b"kept.example\n"))
+        .await
+        .unwrap();
+    let referenced = Bson::ObjectId(
+        repo.get_entry(&url_hash)
+            .await
+            .unwrap()
+            .unwrap()
+            .gridfs_id
+            .unwrap(),
+    );
+    set_body_age(&db, &referenced, 48).await;
+    let recent_orphan = upload_body_aged(&db, "recent", 23).await;
+    for name in ["old-one", "old-two", "old-three"] {
+        upload_body_aged(&db, name, 25).await;
+    }
+
+    assert_eq!(repo.cleanup_orphaned_bodies(2).await.unwrap(), 2);
+    assert_eq!(stored_body_ids(&db).await.len(), 3);
+    assert_eq!(repo.cleanup_orphaned_bodies(2).await.unwrap(), 1);
+    assert_eq!(repo.cleanup_orphaned_bodies(2).await.unwrap(), 0);
+    let downloader =
+        Downloader::new(test_config(&db, &std::env::temp_dir(), "sweep"), &db).unwrap();
+    assert_eq!(downloader.cleanup_orphaned_cache_bodies().await.unwrap(), 0);
+
+    let mut remaining = stored_body_ids(&db).await;
+    remaining.sort_by_key(|id| id.to_string());
+    let mut expected = vec![referenced, recent_orphan];
+    expected.sort_by_key(|id| id.to_string());
+    assert_eq!(remaining, expected);
+    assert_eq!(
+        db.collection::<bson::Document>("cache_files.chunks")
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
+        2
+    );
+    db.drop().await.unwrap();
+}

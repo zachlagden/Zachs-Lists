@@ -26,6 +26,7 @@ from app.services.default_refresh import (
 logger = logging.getLogger(__name__)
 
 JOB_HISTORY_DAYS = 30
+SCHEDULE_TIMEZONE = "UTC"
 
 
 def delete_finished_jobs_before(cutoff: datetime) -> int:
@@ -49,7 +50,7 @@ def register_scheduled_tasks(app, scheduler):
     """
 
     @scheduler.scheduled_job(
-        CronTrigger(minute=HOURLY_SYNC_MINUTE),
+        CronTrigger(minute=HOURLY_SYNC_MINUTE, timezone=SCHEDULE_TIMEZONE),
         id="hourly_default_sync",
         name="Hourly Default Lists Sync Check",
     )
@@ -63,7 +64,10 @@ def register_scheduled_tasks(app, scheduler):
 
     @scheduler.scheduled_job(
         CronTrigger(
-            day_of_week="sun", hour=DEFAULT_REBUILD_HOUR, minute=DEFAULT_REBUILD_MINUTE
+            day_of_week="sun",
+            hour=DEFAULT_REBUILD_HOUR,
+            minute=DEFAULT_REBUILD_MINUTE,
+            timezone=SCHEDULE_TIMEZONE,
         ),
         id="weekly_default_rebuild",
         name="Weekly Default Lists Rebuild",
@@ -79,7 +83,10 @@ def register_scheduled_tasks(app, scheduler):
 
     @scheduler.scheduled_job(
         CronTrigger(
-            day_of_week="sun", hour=USER_REBUILD_HOUR, minute=USER_REBUILD_MINUTE
+            day_of_week="sun",
+            hour=USER_REBUILD_HOUR,
+            minute=USER_REBUILD_MINUTE,
+            timezone=SCHEDULE_TIMEZONE,
         ),
         id="weekly_user_rebuild",
         name="Weekly User Lists Rebuild",
@@ -99,7 +106,7 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed to queue user rebuilds: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(hour=3, minute=0),
+        CronTrigger(hour=3, minute=0, timezone=SCHEDULE_TIMEZONE),
         id="daily_cache_cleanup",
         name="Daily Cache Cleanup",
     )
@@ -119,7 +126,7 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed cache cleanup: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(hour=4, minute=0),
+        CronTrigger(hour=4, minute=0, timezone=SCHEDULE_TIMEZONE),
         id="daily_job_cleanup",
         name="Daily Job History Cleanup",
     )

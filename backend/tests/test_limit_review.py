@@ -106,7 +106,9 @@ class Site:
             }
         )
 
-    def flag(self, user: User, actual: int, limit: int = LIMIT) -> None:
+    def flag(
+        self, user: User, actual: int, limit: int = LIMIT, enforcing: bool = False
+    ) -> None:
         limit_review.flag_over_limit(
             self.db.users,
             ObjectId(user.id),
@@ -114,6 +116,7 @@ class Site:
             limit,
             limit_review.METHOD_EXACT,
             datetime.utcnow(),
+            enforcing,
         )
 
     def audit(self, apply: bool, users_dir: Path | None = None) -> dict[str, Any]:
@@ -492,6 +495,59 @@ def test_notification_is_sent_once_for_each_open_review(site: Site) -> None:
     assert len(site.notices(site.sam)) == 2
 
 
+def test_notification_says_builds_fail_when_the_limit_is_enforced(site: Site) -> None:
+    site.flag(site.sam, LIMIT + 5, enforcing=True)
+
+    assert site.notices(site.sam)[0]["message"] == (
+        f"Your lists contain {LIMIT + 5:,} domains across all categories. "
+        f"Your limit is {LIMIT:,}. "
+        "Builds over the limit fail, and your current lists stay published. "
+        "To get back within the limit, remove some sources, "
+        "or request a higher limit from your dashboard."
+    )
+
+
+@pytest.mark.parametrize(
+    ("enforcing", "consequence"),
+    [
+        (False, "will start to fail once the limit is enforced"),
+        (True, "Builds over the limit fail, and"),
+    ],
+)
+def test_build_result_notification_follows_the_enforcement_setting(
+    site: Site, enforcing: bool, consequence: str
+) -> None:
+    site.app.config["ENFORCE_DOMAIN_LIMIT"] = enforcing
+    result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT + 5}}
+
+    limit_review.record_job_result(finished(site, site.sam, Job.STATUS_FAILED, result))
+
+    assert consequence in site.notices(site.sam)[0]["message"]
+
+
+@pytest.mark.parametrize("enforcing", [False, True])
+def test_audit_notification_follows_the_enforcement_setting(
+    site: Site, enforcing: bool
+) -> None:
+    site.publish(site.sam, LIMIT + 5)
+
+    audit.run(site.db, True, LIMIT, ROOT_GITHUB_ID, enforcing=enforcing)
+
+    message = site.notices(site.sam)[0]["message"]
+    assert ("Builds over the limit fail, and" in message) is enforcing
+
+
+@pytest.mark.parametrize("enforcing", [False, True])
+def test_dashboard_payload_says_whether_the_limit_is_enforced(
+    site: Site, enforcing: bool
+) -> None:
+    site.app.config["ENFORCE_DOMAIN_LIMIT"] = enforcing
+
+    lists = site.client(site.sam).get("/api/user/lists").get_json()
+
+    assert lists["enforce_domain_limit"] is enforcing
+
+
 def test_an_open_review_that_missed_its_notification_is_notified_on_refresh(
     site: Site,
 ) -> None:
@@ -762,6 +818,25 @@ def test_build_measured_against_an_older_limit_uses_the_raised_limit(
     assert site.review(site.sam) is None
 
 
+@pytest.mark.parametrize("stored_limit", ["100", None, 12.5, True])
+def test_job_result_is_recorded_when_the_stored_limit_is_not_an_integer(
+    site: Site, stored_limit: Any
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"limits.max_domains": stored_limit}}
+    )
+    result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT + 5}}
+
+    change = limit_review.record_job_result(
+        finished(site, site.sam, Job.STATUS_COMPLETED, result)
+    )
+
+    assert change.opened is True
+    review = site.review(site.sam)
+    assert review is not None
+    assert (review["actual_domains"], review["max_domains"]) == (LIMIT + 5, LIMIT)
+
+
 def test_job_results_never_flag_admins_or_root(site: Site) -> None:
     result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT * 2}}
 
@@ -939,6 +1014,18 @@ def test_user_and_admin_payloads_carry_the_review(site: Site) -> None:
         "resolved_reason": None,
     }
     assert own["detected_at"].endswith("Z") and own["notified_at"].endswith("Z")
+
+
+def test_admin_stats_count_the_queued_builds(site: Site) -> None:
+    admit_build(site.sam, Job.TYPE_SCHEDULED, None)
+    admit_build(site.alex, Job.TYPE_SCHEDULED, None)
+    site.db.jobs.update_one(
+        {"target_id": site.alex.id}, {"$set": {"status": Job.STATUS_PROCESSING}}
+    )
+
+    jobs = site.client(site.admin).get("/api/admin/stats").get_json()["jobs"]
+
+    assert (jobs["queued"], jobs["processing"]) == (1, 1)
 
 
 @pytest.mark.parametrize("enforcing", [False, True])

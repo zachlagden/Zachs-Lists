@@ -331,7 +331,6 @@ def test_counter_from_an_earlier_week_resets_on_the_next_charge(site: Site) -> N
     stale = User.get_by_id(site.sam.id)
     assert stale is not None
     assert stale.get_remaining_manual_updates() == WEEKLY_LIMIT
-    assert stale.can_do_manual_update()
     assert stale.stats["manual_updates_this_week"] == 0
 
     admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
@@ -377,7 +376,6 @@ def test_counter_in_the_current_week_keeps_counting(site: Site) -> None:
     current = User.get_by_id(site.sam.id)
     assert current is not None
     assert current.get_remaining_manual_updates() == 0
-    assert not current.can_do_manual_update()
 
     assert refusal(site.sam, Job.TYPE_MANUAL, site.sam).code == "weekly_limit"
 
@@ -420,6 +418,66 @@ def test_cooldown_refuses_without_charging(site: Site) -> None:
     assert 0 < refused.details["cooldown_remaining"] <= 300
     assert refused.details["remaining_updates"] == WEEKLY_LIMIT - 1
     assert site.used(site.sam) == 1
+
+
+def test_skipped_build_is_refunded_and_still_starts_the_cooldown(site: Site) -> None:
+    job = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {"$set": {"status": Job.STATUS_SKIPPED, "completed_at": datetime.utcnow()}},
+    )
+    assert refund_quota_if_due(job.job_id) is True
+
+    refused = refusal(site.sam, Job.TYPE_MANUAL, site.sam)
+
+    assert (refused.code, refused.status) == ("cooldown", 429)
+    assert 0 < refused.details["cooldown_remaining"] <= 300
+    assert refused.details["remaining_updates"] == WEEKLY_LIMIT
+    assert site.used(site.sam) == 0
+    assert site.db.jobs.count_documents({}) == 1
+
+
+def test_cooldown_counts_from_the_latest_completed_or_skipped_build(
+    site: Site,
+) -> None:
+    user_id = ObjectId(site.sam.id)
+    now = datetime.utcnow()
+    for status, minutes_ago in [
+        (Job.STATUS_COMPLETED, 4),
+        (Job.STATUS_SKIPPED, 1),
+        (Job.STATUS_FAILED, 0),
+    ]:
+        site.db.jobs.insert_one(
+            {
+                "job_id": f"ended-{status}",
+                "target_id": f"ended-{status}",
+                "user_id": user_id,
+                "type": Job.TYPE_MANUAL,
+                "status": status,
+                "completed_at": now - timedelta(minutes=minutes_ago),
+            }
+        )
+
+    assert 230 < Job.get_cooldown_remaining(user_id, cooldown_minutes=5) <= 240
+
+
+@pytest.mark.parametrize("job_type", [Job.TYPE_SCHEDULED, Job.TYPE_ADMIN])
+def test_failed_and_other_kinds_of_build_start_no_cooldown(
+    site: Site, job_type: str
+) -> None:
+    failed = admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
+    site.db.jobs.update_one(
+        {"job_id": failed.job_id},
+        {"$set": {"status": Job.STATUS_FAILED, "completed_at": datetime.utcnow()}},
+    )
+    other = admit_build(site.sam, job_type, site.admin)
+    site.db.jobs.update_one(
+        {"job_id": other.job_id},
+        {"$set": {"status": Job.STATUS_SKIPPED, "completed_at": datetime.utcnow()}},
+    )
+
+    assert Job.get_cooldown_remaining(ObjectId(site.sam.id)) == 0
+    admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
 
 
 def test_invalid_config_is_refused_with_errors_and_no_charge(site: Site) -> None:
@@ -628,7 +686,6 @@ def test_no_client_payload_carries_the_config_snapshot(
 
     assert stored.to_dict()["target_id"] == site.sam.id
     assert "config_snapshot" not in stored.to_dict()
-    assert "config_snapshot" not in stored.get_progress_snapshot()
     events = {event for event, _, _ in site.emitted}
     assert {"job:created", "job:progress", "job:completed"} <= events
     for _, payload, _ in site.emitted:
@@ -779,6 +836,107 @@ def test_scheduled_rebuild_skips_active_recent_and_unconfigured_users(
 
     assert queue_scheduled_user_builds() == (1, 1)
     assert site.db.jobs.count_documents({"target_id": site.sam.id}) == 1
+
+
+def weekly_skip_notices(site: Site, user: User) -> list[dict[str, Any]]:
+    return [
+        notice
+        for notice in site.stored_user(user).get("notifications", [])
+        if notice["type"] == build_admission.WEEKLY_REBUILD_SKIPPED_TYPE
+    ]
+
+
+def test_scheduled_rebuild_refused_for_an_invalid_config_notifies_the_user_once(
+    site: Site, caplog: pytest.LogCaptureFixture
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": INVALID_CONFIG}}
+    )
+
+    with caplog.at_level("WARNING", logger="app.services.build_admission"):
+        assert queue_scheduled_user_builds() == (1, 1)
+        site.db.jobs.delete_many({})
+        assert queue_scheduled_user_builds() == (1, 1)
+
+    notices = weekly_skip_notices(site, site.sam)
+    assert len(notices) == 1
+    assert notices[0]["title"] == "Your weekly rebuild was skipped"
+    assert notices[0]["message"] == (
+        "The weekly rebuild of your lists was skipped because your saved "
+        "configuration is not valid. "
+        'The first problem is "Line 1: Invalid or unsafe source URL". '
+        "Your current lists stay published until you fix and save the configuration."
+    )
+    assert notices[0]["read"] is False
+    assert notices[0]["data"] == {"error_count": 1}
+    assert weekly_skip_notices(site, site.alex) == []
+    assert site.db.jobs.count_documents({"target_id": site.sam.id}) == 0
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "WARNING"
+    ]
+    assert (
+        warnings
+        == [
+            f"Weekly rebuild refused for user {site.sam.id}: "
+            "configuration validation errors: 1"
+        ]
+        * 2
+    )
+    assert INVALID_CONFIG not in caplog.text
+    shown = site.client(site.sam).get("/api/user/notifications").get_json()
+    assert [notice["id"] for notice in shown["notifications"]] == [notices[0]["id"]]
+
+
+def test_scheduled_rebuild_notifies_again_once_the_earlier_notice_is_read(
+    site: Site,
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": INVALID_CONFIG}}
+    )
+    queue_scheduled_user_builds()
+    site.db.jobs.delete_many({})
+    first = weekly_skip_notices(site, site.sam)[0]
+    stored = User.get_by_id(site.sam.id)
+    assert stored is not None
+    assert stored.mark_notification_read(first["id"])
+
+    queue_scheduled_user_builds()
+
+    notices = weekly_skip_notices(site, site.sam)
+    assert [notice["read"] for notice in notices] == [False, True]
+
+
+def test_weekly_skip_notice_keeps_the_notification_cap(site: Site) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)},
+        {
+            "$set": {
+                "config.blocklists": INVALID_CONFIG,
+                "notifications": [
+                    {"id": str(index), "type": "example", "read": False}
+                    for index in range(User.MAX_NOTIFICATIONS)
+                ],
+            }
+        },
+    )
+
+    queue_scheduled_user_builds()
+
+    stored = site.stored_user(site.sam)["notifications"]
+    assert len(stored) == User.MAX_NOTIFICATIONS
+    assert stored[0]["type"] == build_admission.WEEKLY_REBUILD_SKIPPED_TYPE
+
+
+def test_scheduled_rebuild_without_a_config_sends_no_notice(site: Site) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"config.blocklists": ""}}
+    )
+
+    assert queue_scheduled_user_builds() == (1, 0)
+
+    assert weekly_skip_notices(site, site.sam) == []
 
 
 def test_scheduled_rebuild_continues_after_one_user_fails(

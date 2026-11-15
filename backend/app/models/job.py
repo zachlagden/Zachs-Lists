@@ -3,7 +3,7 @@ Job model for MongoDB.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, cast
 from bson import ObjectId
 
 from app.extensions import mongo
@@ -40,6 +40,7 @@ class Job:
 
     DEFAULT_TARGET_ID = "__default__"
     ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_PROCESSING)
+    COOLDOWN_STATUSES = (STATUS_COMPLETED, STATUS_SKIPPED)
     ERROR_WORKER_ABANDONED = "worker_abandoned"
     ERROR_SUPERSEDED = "superseded"
 
@@ -53,19 +54,19 @@ class Job:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         return str(self._id) if self._id else None
 
     @property
     def job_id(self) -> str:
-        return self._data.get("job_id")
+        return cast(str, self._data.get("job_id"))
 
     @property
-    def user_id(self) -> ObjectId:
+    def user_id(self) -> Optional[ObjectId]:
         return self._data.get("user_id")
 
     @property
-    def username(self) -> str:
+    def username(self) -> Optional[str]:
         return self._data.get("username")
 
     @staticmethod
@@ -172,14 +173,6 @@ class Job:
             "updated_at": utc_iso(self.updated_at),
         }
 
-    def get_progress_snapshot(self) -> Dict[str, Any]:
-        """Get a snapshot of job state for comparison in poller."""
-        return {
-            "status": self.status,
-            "progress": self.progress,
-            "result": self.result,
-        }
-
     # Class methods
     @classmethod
     def get_by_id(cls, job_id: str) -> Optional["Job"]:
@@ -198,10 +191,10 @@ class Job:
 
     @classmethod
     def get_by_user(
-        cls, user_id: ObjectId, limit: int = 20, status: str = None
+        cls, user_id: ObjectId, limit: int = 20, status: Optional[str] = None
     ) -> List["Job"]:
         """Get jobs for a user."""
-        query = {"user_id": user_id}
+        query: Dict[str, Any] = {"user_id": user_id}
         if status:
             query["status"] = status
 
@@ -214,16 +207,6 @@ class Job:
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
         cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
-        return [cls(data) for data in cursor]
-
-    @classmethod
-    def get_queued(cls) -> List["Job"]:
-        """Get queued jobs."""
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find({"status": cls.STATUS_QUEUED})
-            .sort("created_at", 1)
-        )
         return [cls(data) for data in cursor]
 
     @classmethod
@@ -353,53 +336,6 @@ class Job:
         """Count jobs waiting in queue."""
         return mongo.db[cls.COLLECTION].count_documents({"status": cls.STATUS_QUEUED})
 
-    @classmethod
-    def get_queue_position(cls, job_id: str) -> int:
-        """
-        Get the position of a job in the queue (1-based).
-        Returns 0 if job is not queued.
-        """
-        job = cls.get_by_id(job_id)
-        if not job or job.status != cls.STATUS_QUEUED:
-            return 0
-
-        # Count jobs ahead in queue (higher priority or same priority but earlier)
-        count = mongo.db[cls.COLLECTION].count_documents(
-            {
-                "status": cls.STATUS_QUEUED,
-                "$or": [
-                    {
-                        "priority": {"$lt": job.priority}
-                    },  # Higher priority (lower number)
-                    {"priority": job.priority, "created_at": {"$lt": job.created_at}},
-                ],
-            }
-        )
-        return count + 1  # 1-based position
-
-    @classmethod
-    def get_active_worker_count(cls) -> int:
-        """Count the number of active workers (distinct worker_ids processing jobs)."""
-        pipeline = [
-            {"$match": {"status": cls.STATUS_PROCESSING, "worker_id": {"$ne": None}}},
-            {"$group": {"_id": "$worker_id"}},
-            {"$count": "count"},
-        ]
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-        return result[0]["count"] if result else 0
-
-    @classmethod
-    def get_queue_stats(cls) -> dict:
-        """
-        Get comprehensive queue statistics.
-        Returns dict with queue_length, active_workers, processing_count.
-        """
-        return {
-            "queue_length": cls.count_queued(),
-            "active_workers": cls.get_active_worker_count(),
-            "processing_count": cls.count_processing(),
-        }
-
     # Cooldown and scheduling methods
 
     @classmethod
@@ -408,25 +344,6 @@ class Job:
             {"target_id": target_id, "status": {"$in": list(cls.ACTIVE_STATUSES)}}
         )
         return cls(data) if data else None
-
-    @classmethod
-    def get_last_completed_for_user(
-        cls, user_id: ObjectId, job_type: str = None
-    ) -> Optional["Job"]:
-        """
-        Get the most recently completed job for a user.
-        Optionally filter by job type (manual, scheduled, admin).
-        """
-        query = {
-            "user_id": user_id,
-            "status": cls.STATUS_COMPLETED,
-        }
-        if job_type:
-            query["type"] = job_type
-
-        doc = mongo.db[cls.COLLECTION].find(query).sort("completed_at", -1).limit(1)
-        docs = list(doc)
-        return cls(docs[0]) if docs else None
 
     @classmethod
     def user_completed_recently(
@@ -455,11 +372,20 @@ class Job:
         Get remaining cooldown time in seconds for a user.
         Returns 0 if no cooldown active.
         """
-        last_job = cls.get_last_completed_for_user(user_id, job_type=cls.TYPE_MANUAL)
-        if not last_job or not last_job.completed_at:
+        last_ended = mongo.db[cls.COLLECTION].find_one(
+            {
+                "user_id": user_id,
+                "type": cls.TYPE_MANUAL,
+                "status": {"$in": list(cls.COOLDOWN_STATUSES)},
+                "completed_at": {"$type": "date"},
+            },
+            {"completed_at": 1},
+            sort=[("completed_at", -1)],
+        )
+        if last_ended is None:
             return 0
 
-        elapsed = (datetime.utcnow() - last_job.completed_at).total_seconds()
+        elapsed = (datetime.utcnow() - last_ended["completed_at"]).total_seconds()
         cooldown_seconds = cooldown_minutes * 60
         remaining = cooldown_seconds - elapsed
 

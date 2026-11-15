@@ -27,6 +27,7 @@ uv venv .venv && uv pip install -r backend/requirements-dev.txt
 PYTHONPATH=backend uv run --no-project pytest backend/tests --disable-warnings
 pnpm --dir frontend install --frozen-lockfile
 pnpm --dir frontend lint
+pnpm --dir frontend test
 pnpm --dir frontend build
 cargo test --manifest-path rust-worker/Cargo.toml --locked
 cargo fmt --manifest-path rust-worker/Cargo.toml --check

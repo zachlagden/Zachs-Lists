@@ -327,11 +327,6 @@ class User:
         used = stats.get("manual_updates_this_week", 0)
         return used if isinstance(used, int) and used > 0 else 0
 
-    def can_do_manual_update(self, now: Optional[datetime] = None) -> bool:
-        if self.is_admin:
-            return True
-        return self.get_remaining_manual_updates(now) > 0
-
     def get_remaining_manual_updates(self, now: Optional[datetime] = None) -> int:
         limit = self.limits["manual_updates_per_week"]
         return max(0, limit - self.manual_updates_used(now))
@@ -574,6 +569,31 @@ class User:
             },
             {
                 "$set": {"limit_review.notified_at": now, "updated_at": now},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": cls.MAX_NOTIFICATIONS,
+                    }
+                },
+            },
+        )
+        return notified.matched_count == 1
+
+    @classmethod
+    def notify_unless_unread(
+        cls,
+        user_id: ObjectId,
+        notification: Dict[str, Any],
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        same_type_unread = {
+            "$elemMatch": {"type": notification["type"], "read": {"$ne": True}}
+        }
+        notified = cls._users(users).update_one(
+            {"_id": user_id, "notifications": {"$not": same_type_unread}},
+            {
+                "$set": {"updated_at": notification["created_at"]},
                 "$push": {
                     "notifications": {
                         "$each": [notification],

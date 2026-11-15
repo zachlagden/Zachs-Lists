@@ -529,6 +529,46 @@ def test_admin_and_public_report_endpoints(
     assert public["totals"]["requests"] == 1
 
 
+def test_public_report_is_cached_for_each_clamped_period(
+    api: Flask, database: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record()
+    client = api.test_client()
+    aggregations: list[str] = []
+    for collection in (Analytics.COLLECTION, Analytics.VISITORS_COLLECTION):
+        aggregate = database[collection].aggregate
+
+        def counted(
+            *args: Any, _run: Any = aggregate, _name: str = collection, **kwargs: Any
+        ) -> Any:
+            aggregations.append(_name)
+            return _run(*args, **kwargs)
+
+        monkeypatch.setattr(database[collection], "aggregate", counted)
+
+    first: Any = client.get("/api/analytics/default?days=7").json
+    first_run = len(aggregations)
+    assert Analytics.VISITORS_COLLECTION in aggregations
+    record()
+    assert client.get("/api/analytics/default?days=7").json == first
+    assert len(aggregations) == first_run
+    assert first["totals"]["requests"] == 1
+
+    over_the_maximum: Any = client.get("/api/analytics/default?days=5000").json
+    after_clamped_run = len(aggregations)
+    assert after_clamped_run > first_run
+    assert over_the_maximum["period_days"] == Analytics.RETENTION_DAYS
+    assert (
+        client.get(f"/api/analytics/default?days={Analytics.RETENTION_DAYS}").json
+        == over_the_maximum
+    )
+    assert len(aggregations) == after_clamped_run
+
+    site_stats.clear_caches()
+    refreshed: Any = client.get("/api/analytics/default?days=7").json
+    assert refreshed["totals"]["requests"] == 2
+
+
 def test_public_stats_come_from_build_metadata_and_are_cached(
     api: Flask, database: Any
 ) -> None:

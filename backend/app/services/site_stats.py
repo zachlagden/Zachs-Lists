@@ -10,9 +10,11 @@ from app.utils.timed_cache import TimedCache
 logger = logging.getLogger(__name__)
 
 PUBLIC_STATS_SECONDS = 300
+PUBLIC_REPORT_SECONDS = 300
 STORAGE_SECONDS = 60
 
 _public_stats: TimedCache[dict[str, Any]] = TimedCache(PUBLIC_STATS_SECONDS)
+_public_reports: TimedCache[dict[str, Any]] = TimedCache(PUBLIC_REPORT_SECONDS)
 _storage: TimedCache[int] = TimedCache(STORAGE_SECONDS)
 
 
@@ -29,6 +31,10 @@ def _load_public_stats() -> dict[str, Any]:
 
 def public_stats() -> dict[str, Any]:
     return _public_stats.get("public", _load_public_stats)
+
+
+def public_report(days: int) -> dict[str, Any]:
+    return _public_reports.get(days, lambda: Analytics.public_report(days))
 
 
 def _directory_bytes(path: str) -> int:
@@ -51,4 +57,5 @@ def storage_bytes(path: str) -> int:
 
 def clear_caches() -> None:
     _public_stats.clear()
+    _public_reports.clear()
     _storage.clear()

@@ -11,6 +11,12 @@ export function limitReviewMethodLabel(method: string): string {
   return method;
 }
 
+export function limitConsequence(enforcing: boolean): string {
+  return enforcing
+    ? 'Builds over the limit fail, and your current lists stay published.'
+    : 'Builds over the limit will start to fail once the limit is enforced. Your current lists stay published.';
+}
+
 export function limitReviewSummary(review: LimitReview): string {
   const measured = review.actual_domains.toLocaleString('en-GB');
   const limit = review.max_domains.toLocaleString('en-GB');

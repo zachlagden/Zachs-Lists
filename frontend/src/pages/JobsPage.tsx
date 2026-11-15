@@ -13,12 +13,10 @@ function defaultSelection(jobs: Job[]): Job | null {
 
 export default function JobsPage() {
   const { user } = useAuthStore();
-  const { jobs, mergeFetchedJobs, addJob, updateJob, setHasUnreadFailures, clearJobProgress } =
-    useJobsStore();
+  const { jobs, mergeFetchedJobs, addJob, updateJob, setHasUnreadFailures } = useJobsStore();
   const [loading, setLoading] = useState(true);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const selectedJob =
-    jobs.find((job) => job.job_id === selectedJobId) ?? defaultSelection(jobs);
+  const selectedJob = jobs.find((job) => job.job_id === selectedJobId) ?? defaultSelection(jobs);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -49,12 +47,8 @@ export default function JobsPage() {
       if (job.status === 'failed') {
         setHasUnreadFailures(true);
       }
-      // Clear granular progress state after a delay
-      setTimeout(() => {
-        clearJobProgress(job.job_id);
-      }, 5000);
     },
-    [updateJob, setHasUnreadFailures, clearJobProgress],
+    [updateJob, setHasUnreadFailures],
   );
 
   // Subscribe to real-time updates

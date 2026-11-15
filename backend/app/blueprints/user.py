@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.job import Job
 from app.services.build_admission import AdmissionError, admit_build
 from app.services.job_feed import job_payload, job_payloads
+from app.services.limit_review import enforcing_domain_limit
 from app.utils.validators import (
     WhitelistValidationUnavailable,
     validate_whitelist,
@@ -370,6 +371,7 @@ def get_lists(user: User):
             },
             "limits": user.limits,
             "remaining_updates": user.get_remaining_manual_updates(),
+            "enforce_domain_limit": enforcing_domain_limit(),
         }
     )
 

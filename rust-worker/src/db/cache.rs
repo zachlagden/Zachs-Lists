@@ -1,15 +1,20 @@
 use anyhow::{anyhow, bail, Context, Result};
-use bson::{doc, oid::ObjectId, Bson, DateTime as BsonDateTime};
+use bson::{doc, oid::ObjectId, Bson, DateTime as BsonDateTime, Document};
 use chrono::Utc;
 use futures::io::AsyncReadExt;
 use mongodb::{gridfs::GridFsBucket, options::GridFsBucketOptions, Collection, Database};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 
 pub const MAX_SOURCE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
 pub const MAX_FALLBACK_AGE_DAYS: i64 = 8;
 pub const MAX_FALLBACK_AGE_MILLIS: i64 = MAX_FALLBACK_AGE_DAYS * MILLIS_PER_DAY;
+pub const MAX_ORPHANED_BODIES_PER_SWEEP: u64 = 1000;
 const MILLIS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
+const STORE_ATTEMPTS: usize = 3;
+const DUPLICATE_KEY_CODE: i32 = 11000;
+const ORPHANED_BODY_MIN_AGE_MILLIS: i64 = MILLIS_PER_DAY;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CacheStats {
@@ -84,6 +89,23 @@ impl CacheEntry {
         }
         Ok(())
     }
+}
+
+fn write_error(error: &mongodb::error::Error) -> Option<&mongodb::error::WriteError> {
+    match error.kind.as_ref() {
+        mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(write_error)) => {
+            Some(write_error)
+        }
+        _ => None,
+    }
+}
+
+fn is_write_error(error: &mongodb::error::Error) -> bool {
+    write_error(error).is_some()
+}
+
+fn is_duplicate_key(error: &mongodb::error::Error) -> bool {
+    write_error(error).is_some_and(|write_error| write_error.code == DUPLICATE_KEY_CODE)
 }
 
 pub fn content_hash(content: &[u8]) -> String {
@@ -174,7 +196,8 @@ impl CacheRepository {
             bail!("Source body exceeds the cache size limit");
         }
         let bucket = self.get_bucket();
-        let existing = self.get_entry(url_hash).await?;
+        let body_hash = content_hash(content);
+        let mut existing = self.get_entry(url_hash).await?;
         let mut upload_stream = bucket.open_upload_stream(url_hash).await?;
         if let Err(error) = upload_stream.write_all(content).await {
             let _ = upload_stream.abort().await;
@@ -190,7 +213,7 @@ impl CacheRepository {
                 "gridfs_id": &gridfs_id,
                 "etag": etag,
                 "last_modified": last_modified,
-                "content_hash": content_hash(content),
+                "content_hash": &body_hash,
                 "stats.size_bytes": content.len() as i64,
                 "stats.domain_count": domain_count,
                 "stats.last_download_at": checked_at,
@@ -201,35 +224,81 @@ impl CacheRepository {
             "$inc": { "stats.download_count": 1_i64 },
             "$setOnInsert": { "created_at": now }
         };
-        if let Err(error) = self
-            .collection
-            .update_one(doc! { "url_hash": url_hash }, update)
-            .upsert(true)
-            .await
-        {
-            if matches!(
-                error.kind.as_ref(),
-                mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(_))
-            ) {
-                if let Err(cleanup_error) = bucket.delete(gridfs_id).await {
-                    tracing::warn!(
-                        "Could not remove rejected cached source body: {}",
-                        cleanup_error
-                    );
+        for _ in 0..STORE_ATTEMPTS {
+            let replaced = match self
+                .write_unless_replaced(url_hash, existing.as_ref(), update.clone())
+                .await
+            {
+                Ok(replaced) => replaced,
+                Err(error) => {
+                    if is_write_error(&error) {
+                        self.discard_body(&bucket, gridfs_id, "rejected").await;
+                    } else {
+                        tracing::warn!(
+                            "Source cache write outcome is uncertain; retaining the uploaded body"
+                        );
+                    }
+                    return Err(error.into());
                 }
-            } else {
-                tracing::warn!(
-                    "Source cache write outcome is uncertain; retaining the uploaded body"
-                );
+            };
+            if replaced {
+                if let Some(old_id) = existing.and_then(|entry| entry.gridfs_id) {
+                    self.discard_body(&bucket, Bson::ObjectId(old_id), "replaced")
+                        .await;
+                }
+                return Ok(checked_at);
             }
-            return Err(error.into());
-        }
-        if let Some(old_id) = existing.and_then(|entry| entry.gridfs_id) {
-            if let Err(error) = bucket.delete(Bson::ObjectId(old_id)).await {
-                tracing::warn!("Could not remove replaced cached source body: {}", error);
+            existing = match self.get_entry(url_hash).await {
+                Ok(current) => current,
+                Err(error) => {
+                    self.discard_body(&bucket, gridfs_id, "superseded").await;
+                    return Err(error);
+                }
+            };
+            let winner_checked_at = existing
+                .as_ref()
+                .filter(|entry| {
+                    entry.gridfs_id.is_some()
+                        && entry.content_hash.as_deref() == Some(body_hash.as_str())
+                })
+                .map(|entry| entry.last_checked_at.unwrap_or(checked_at));
+            if let Some(winner_checked_at) = winner_checked_at {
+                self.discard_body(&bucket, gridfs_id, "superseded").await;
+                return Ok(winner_checked_at);
             }
         }
-        Ok(checked_at)
+        self.discard_body(&bucket, gridfs_id, "superseded").await;
+        bail!("Cached source kept changing while the download was being stored")
+    }
+
+    async fn write_unless_replaced(
+        &self,
+        url_hash: &str,
+        existing: Option<&CacheEntry>,
+        update: Document,
+    ) -> mongodb::error::Result<bool> {
+        let expected_body = existing
+            .and_then(|entry| entry.gridfs_id)
+            .map_or(Bson::Null, Bson::ObjectId);
+        let written = self
+            .collection
+            .update_one(
+                doc! { "url_hash": url_hash, "gridfs_id": expected_body },
+                update,
+            )
+            .upsert(existing.is_none())
+            .await;
+        match written {
+            Ok(result) => Ok(result.matched_count == 1 || result.upserted_id.is_some()),
+            Err(error) if is_duplicate_key(&error) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn discard_body(&self, bucket: &GridFsBucket, gridfs_id: Bson, reason: &str) {
+        if let Err(error) = bucket.delete(gridfs_id).await {
+            tracing::warn!("Could not remove {} cached source body: {}", reason, error);
+        }
     }
 
     pub async fn confirm_not_modified(
@@ -310,6 +379,59 @@ impl CacheRepository {
             }
         }
         Ok(deleted)
+    }
+
+    pub async fn cleanup_orphaned_bodies(&self, max_deleted: u64) -> Result<u64> {
+        use futures::TryStreamExt;
+
+        let cutoff = BsonDateTime::from_millis(
+            Utc::now()
+                .timestamp_millis()
+                .saturating_sub(ORPHANED_BODY_MIN_AGE_MILLIS),
+        );
+        let referenced: HashSet<ObjectId> = self
+            .collection
+            .distinct("gridfs_id", doc! {})
+            .await?
+            .iter()
+            .filter_map(Bson::as_object_id)
+            .collect();
+        let bucket = self.get_bucket();
+        let mut old_bodies = self
+            .db
+            .collection::<Document>("cache_files.files")
+            .find(doc! { "uploadDate": { "$lt": cutoff } })
+            .projection(doc! { "_id": 1 })
+            .await?;
+        let mut deleted = 0;
+        while deleted < max_deleted {
+            let Some(body) = old_bodies.try_next().await? else {
+                break;
+            };
+            let Some(id) = body.get("_id") else {
+                continue;
+            };
+            let known_reference = id.as_object_id().is_some_and(|id| referenced.contains(&id));
+            if known_reference || self.body_is_referenced(id).await? {
+                continue;
+            }
+            match bucket.delete(id.clone()).await {
+                Ok(()) => deleted += 1,
+                Err(error) => {
+                    tracing::warn!("Could not remove orphaned cached source body: {}", error)
+                }
+            }
+        }
+        Ok(deleted)
+    }
+
+    async fn body_is_referenced(&self, gridfs_id: &Bson) -> Result<bool> {
+        let references = self
+            .collection
+            .count_documents(doc! { "gridfs_id": gridfs_id })
+            .limit(1)
+            .await?;
+        Ok(references > 0)
     }
 }
 

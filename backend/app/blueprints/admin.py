@@ -359,8 +359,6 @@ def get_admin_job(admin: User, job_id: str):
 @admin_required
 def get_stats(admin: User):
     """Get system-wide statistics."""
-    from app.services.job_queue import JobQueue
-
     # User stats
     total_users = User.count()
     active_users = User.count(is_enabled=True)
@@ -368,7 +366,7 @@ def get_stats(admin: User):
     # Job stats
     jobs_today = Job.count_today()
     jobs_processing = Job.count_processing()
-    queue_length = JobQueue.queue_length()
+    queue_length = Job.count_queued()
 
     # Cache stats
     cache_size = CacheMetadata.get_total_size()
@@ -397,9 +395,7 @@ def get_stats(admin: User):
             },
             "analytics": analytics,
             "limits": {
-                "enforce_domain_limit": bool(
-                    current_app.config.get("ENFORCE_DOMAIN_LIMIT", False)
-                ),
+                "enforce_domain_limit": limit_review.enforcing_domain_limit(),
             },
         }
     )

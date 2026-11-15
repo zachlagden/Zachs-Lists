@@ -127,6 +127,7 @@ def run(
     default_max_domains: int,
     root_github_id: int | None,
     users_dir: Path | None = None,
+    enforcing: bool = False,
 ) -> dict[str, Any]:
     method = METHOD_EXACT if users_dir is not None else METHOD_STORED
     totals: Counter[str] = Counter(
@@ -221,6 +222,7 @@ def run(
             max_domains,
             method,
             datetime.utcnow(),
+            enforcing,
         )
         totals["reviews_opened"] += change.opened
         totals["reviews_refreshed"] += change.refreshed
@@ -257,5 +259,6 @@ if __name__ == "__main__":
             Config.DEFAULT_MAX_DOMAINS,
             args.root_github_id,
             args.data_dir / "users" if args.exact else None,
+            Config.ENFORCE_DOMAIN_LIMIT,
         )
     print(json.dumps(summary, indent=2))
