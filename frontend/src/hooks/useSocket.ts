@@ -4,6 +4,7 @@ import type { Job } from '../types';
 import { adminApi, userApi } from '../api/client';
 import { useConnectionStore, useJobsStore } from '../store';
 import { resyncJobs, type JobsSubscription } from '../realtime/resync';
+import { createRoomSubscribers } from '../realtime/roomSubscribers';
 import { getSocket, hasReconnected } from './socketConnection';
 export { disconnectSocket } from './socketConnection';
 
@@ -16,7 +17,10 @@ interface UseJobSocketOptions {
   onReconnect?: () => void;
   knownJobs?: () => Job[];
   onJobsSynced?: (jobs: Job[]) => void;
+  onResyncFailed?: (jobIds: string[]) => void;
 }
+
+const jobRoomSubscribers = createRoomSubscribers();
 
 interface UseSocketResult {
   isConnected: boolean;
@@ -35,6 +39,7 @@ export function useJobSocket({
   onReconnect,
   knownJobs,
   onJobsSynced,
+  onResyncFailed,
 }: UseJobSocketOptions): UseSocketResult {
   const callbacksRef = useRef({
     onJobCreated,
@@ -43,6 +48,7 @@ export function useJobSocket({
     onReconnect,
     knownJobs,
     onJobsSynced,
+    onResyncFailed,
   });
 
   useEffect(() => {
@@ -53,6 +59,7 @@ export function useJobSocket({
       onReconnect,
       knownJobs,
       onJobsSynced,
+      onResyncFailed,
     };
   });
 
@@ -78,12 +85,16 @@ export function useJobSocket({
         fetchJob: isAdmin ? adminApi.getJob : userApi.getJob,
       });
       if (unresolved.length > 0) {
-        console.error('Could not refresh jobs after connecting:', unresolved);
+        const report = callbacksRef.current.onResyncFailed;
+        if (report) report(unresolved);
+        else console.error('Could not refresh jobs after connecting:', unresolved);
       }
       if (mounted && reconnected) callbacksRef.current.onReconnect?.();
     };
 
+    const roomKey = JSON.stringify(room);
     const subscribe = (reconnected: boolean) => {
+      if (!subscribed) jobRoomSubscribers.join(roomKey);
       subscribed = true;
       s.emit('subscribe:jobs', room, (subscription: JobsSubscription) => {
         void catchUp(subscription, reconnected);
@@ -107,14 +118,14 @@ export function useJobSocket({
       s.off('job:progress', handleJobProgress);
       s.off('job:completed', handleJobCompleted);
       s.off('connect', handleConnect);
-      if (subscribed && s.connected) s.emit('unsubscribe:jobs', room);
+      if (!subscribed) return;
+      const lastSubscriber = jobRoomSubscribers.leave(roomKey);
+      if (lastSubscriber && s.connected) s.emit('unsubscribe:jobs', room);
     };
   }, [userId, isAdmin]);
 
   return { isConnected: useIsConnected() };
 }
-
-// Validation progress types
 interface ValidationProgress {
   current: number;
   total: number;
@@ -141,10 +152,6 @@ interface UseValidationSocketOptions {
   onProgress?: (progress: ValidationProgress) => void;
   onComplete?: (result: ValidationResult) => void;
 }
-
-/**
- * Hook for subscribing to config validation progress.
- */
 export function useValidationSocket({
   userId,
   onProgress,
@@ -152,8 +159,6 @@ export function useValidationSocket({
 }: UseValidationSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
   const subscribedRef = useRef(false);
-
-  // Store callbacks in ref
   const callbacksRef = useRef({ onProgress, onComplete });
 
   useEffect(() => {
@@ -223,15 +228,9 @@ export function useValidationSocket({
 interface UseStatsSocketOptions {
   onStatsUpdated?: () => void;
 }
-
-/**
- * Hook for subscribing to admin stats updates.
- */
 export function useStatsSocket({ onStatsUpdated }: UseStatsSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
   const subscribedRef = useRef(false);
-
-  // Store callback in ref
   const callbackRef = useRef(onStatsUpdated);
 
   useEffect(() => {

@@ -1,4 +1,3 @@
-import axios from 'axios';
 import type {
   AdminAnalytics,
   AdminLimitReviewPage,
@@ -12,34 +11,9 @@ import type {
   PublicStats,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { API_BASE, http } from './http';
 
-export const api = axios.create({
-  baseURL: API_BASE,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Response interceptor for auth errors
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Don't redirect if:
-      // 1. This is the /api/auth/me check (expected to fail when not logged in)
-      // 2. Already on login page
-      const isAuthMeRequest = error.config?.url?.includes('/api/auth/me');
-      const isOnLoginPage = window.location.pathname === '/login';
-
-      if (!isAuthMeRequest && !isOnLoginPage) {
-        window.location.href = '/login';
-      }
-    }
-    return Promise.reject(error);
-  },
-);
+export const api = http;
 
 // Auth API
 export const authApi = {

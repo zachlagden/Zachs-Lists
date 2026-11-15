@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { authApi } from '../api/client';
+import { queryClient } from '../api/queryClient';
 import { useAuthStore, useConnectionStore, useJobsStore, useUserDataStore } from '../store';
 import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
 
@@ -29,11 +30,12 @@ export function disconnectSocket(): void {
   useConnectionStore.getState().setState('connecting');
 }
 
-function endSession(): void {
+export function endSession(): void {
   disconnectSocket();
   useAuthStore.getState().setUser(null);
   useUserDataStore.getState().reset();
   useJobsStore.getState().reset();
+  queryClient.clear();
 }
 
 function scheduleReconnect(current: Socket): void {
