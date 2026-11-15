@@ -286,6 +286,29 @@ def get_user_ips(admin: User, user_id: str):
     )
 
 
+@admin_bp.route("/users/<user_id>/jobs", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
+@admin_required
+def list_user_jobs(admin: User, user_id: str):
+    """List one user's build jobs, newest first."""
+    target_user = User.get_by_id(user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    page, per_page = pagination()
+    jobs, total = Job.page_for_user(ObjectId(target_user.id), page, per_page)
+
+    return jsonify(
+        {
+            "jobs": job_payloads(jobs),
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+    )
+
+
 @admin_bp.route("/rebuild/<user_id>", methods=["POST"])
 @admin_required
 def trigger_rebuild(admin: User, user_id: str):

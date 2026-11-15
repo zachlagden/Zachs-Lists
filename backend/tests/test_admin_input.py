@@ -752,3 +752,91 @@ def test_valid_default_config_is_saved_in_one_document(
         "",
         "robin",
     )
+
+
+def user_job(owner: User, number: int, status: str = "completed") -> dict[str, Any]:
+    return {
+        "job_id": f"{owner.username}-{number}",
+        "user_id": ObjectId(owner.id),
+        "username": owner.username,
+        "type": "manual",
+        "status": status,
+        "created_at": datetime(2026, 1, 1) + timedelta(hours=number),
+    }
+
+
+def test_user_jobs_listing_pages_one_users_jobs_newest_first(
+    api: Api, admin: User, admin_client: FlaskClient, sam: User
+) -> None:
+    api.db.jobs.insert_many(
+        [user_job(sam, number) for number in range(1, 4)]
+        + [user_job(sam, 4, "queued"), user_job(admin, 9)]
+    )
+
+    first = admin_client.get(f"/api/admin/users/{sam.id}/jobs?per_page=3")
+
+    assert first.status_code == 200
+    body = first.get_json()
+    assert set(body) == {"jobs", "page", "per_page", "total", "pages"}
+    assert (body["page"], body["per_page"], body["total"], body["pages"]) == (
+        1,
+        3,
+        4,
+        2,
+    )
+    assert [job["job_id"] for job in body["jobs"]] == ["sam-4", "sam-3", "sam-2"]
+    all_jobs = admin_client.get("/api/admin/jobs").get_json()["jobs"]
+    assert body["jobs"] == [job for job in all_jobs if job["username"] == "sam"][:3]
+    assert body["jobs"][0]["queue_info"]["position"] == 1
+    assert body["jobs"][1]["created_at"] == "2026-01-01T03:00:00.000Z"
+
+    second = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?per_page=3&page=2"
+    ).get_json()
+    assert [job["job_id"] for job in second["jobs"]] == ["sam-1"]
+    beyond = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?per_page=3&page=9"
+    ).get_json()
+    assert (beyond["jobs"], beyond["page"], beyond["total"]) == ([], 9, 4)
+
+
+def test_user_jobs_listing_clamps_pagination_to_its_bounds(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    api.db.jobs.insert_one(user_job(sam, 1))
+
+    default = admin_client.get(f"/api/admin/users/{sam.id}/jobs").get_json()
+    assert (default["page"], default["per_page"]) == (1, 25)
+    low = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?page=0&per_page=0"
+    ).get_json()
+    assert (low["page"], low["per_page"]) == (1, 1)
+    high = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?page=abc&per_page=5000"
+    ).get_json()
+    assert (high["page"], high["per_page"]) == (1, 100)
+    assert len(high["jobs"]) == 1
+
+
+def test_user_jobs_listing_is_empty_for_a_user_without_jobs(
+    admin_client: FlaskClient, sam: User
+) -> None:
+    assert admin_client.get(f"/api/admin/users/{sam.id}/jobs").get_json() == {
+        "jobs": [],
+        "page": 1,
+        "per_page": 25,
+        "total": 0,
+        "pages": 1,
+    }
+
+
+def test_user_jobs_listing_refuses_unknown_users_and_non_admins(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    for user_id in (str(ObjectId()), "undefined"):
+        missing = admin_client.get(f"/api/admin/users/{user_id}/jobs")
+        assert missing.status_code == 404
+        assert missing.get_json() == {"error": "User not found"}
+
+    assert api.client(sam).get(f"/api/admin/users/{sam.id}/jobs").status_code == 403
+    assert api.client().get(f"/api/admin/users/{sam.id}/jobs").status_code == 401

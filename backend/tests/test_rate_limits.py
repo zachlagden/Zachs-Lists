@@ -24,6 +24,7 @@ ROUTE_LIMITS = [
     ("POST", "/api/user/config/url-metadata", "RATELIMIT_URL_METADATA"),
     ("GET", "/api/admin/jobs", "RATELIMIT_JOBS"),
     ("GET", "/api/admin/jobs/example", "RATELIMIT_JOBS"),
+    ("GET", "/api/admin/users/example/jobs", "RATELIMIT_JOBS"),
     ("GET", "/api/admin/stats", "RATELIMIT_ADMIN_STATS"),
 ]
 

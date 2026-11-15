@@ -204,6 +204,21 @@ class Job:
         return [cls(data) for data in cursor]
 
     @classmethod
+    def page_for_user(
+        cls, user_id: ObjectId, page: int, per_page: int
+    ) -> Tuple[List["Job"], int]:
+        query: Dict[str, Any] = {"user_id": user_id}
+        total = mongo.db[cls.COLLECTION].count_documents(query)
+        cursor = (
+            mongo.db[cls.COLLECTION]
+            .find(query)
+            .sort([("created_at", -1), ("_id", -1)])
+            .skip((page - 1) * per_page)
+            .limit(per_page)
+        )
+        return [cls(data) for data in cursor], total
+
+    @classmethod
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
         cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
