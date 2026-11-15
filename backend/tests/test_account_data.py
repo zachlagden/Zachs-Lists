@@ -174,6 +174,44 @@ def test_signed_in_profile_request_records_the_address(api: Api, sam: User) -> N
     ]
 
 
+def test_session_check_answers_200_for_a_signed_out_visitor(api: Api) -> None:
+    response = api.client().get("/api/auth/session")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"user": None}
+
+
+def test_session_check_returns_the_account_and_records_the_address(
+    api: Api, sam: User
+) -> None:
+    response = api.client(sam).get(
+        "/api/auth/session", environ_overrides={"REMOTE_ADDR": ADDRESS}
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["user"]["username"] == "sam"
+    assert [entry["ip_hash"] for entry in ip_log(api)] == [access_log_hash(ADDRESS)]
+
+
+def test_session_check_ends_a_session_that_may_no_longer_be_used(
+    api: Api, sam: User
+) -> None:
+    revoked = api.client(sam)
+    api.reload(sam).revoke_sessions()
+    disabled = api.client(api.reload(sam))
+    api.reload(sam).set_enabled(False)
+
+    for client in (revoked, disabled):
+        assert client.get("/api/auth/session").get_json() == {"user": None}
+        with client.session_transaction() as stored:
+            assert "user_id" not in stored
+
+    api.reload(sam).set_enabled(True)
+    banned = api.client(api.reload(sam))
+    api.reload(sam).ban(datetime.utcnow() + timedelta(days=1), "example")
+    assert banned.get("/api/auth/session").get_json() == {"user": None}
+
+
 def test_notifications_keep_the_newest_hundred(api: Api, sam: User) -> None:
     for number in range(105):
         sam.add_notification("example", f"Title {number}", "Text")

@@ -62,6 +62,22 @@ def login_required(f):
     return decorated
 
 
+def session_user() -> User | None:
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    user = User.get_by_id(user_id)
+    if (
+        user is None
+        or session.get("auth_version", 0) != user.auth_version
+        or not user.is_enabled
+        or user.is_banned
+    ):
+        session.clear()
+        return None
+    return user
+
+
 def admin_required(f):
     """Decorator to require admin access."""
 
@@ -253,6 +269,18 @@ def logout():
             user.revoke_sessions()
     session.clear()
     return jsonify({"success": True})
+
+
+@auth_bp.route("/session")
+@limiter.limit(configured_limit("RATELIMIT_AUTH_ME"))
+def get_session() -> Response:
+    user = session_user()
+    if user is None:
+        return jsonify({"user": None})
+    ip = get_client_ip()
+    if ip != "unknown":
+        user.log_ip_access(ip)
+    return jsonify({"user": user.to_dict()})
 
 
 @auth_bp.route("/me")

@@ -1,20 +1,18 @@
-/**
- * Site configuration - centralizes URL handling for development and production.
- */
+export const SITE_NAME = "Zach's Lists";
+export const SITE_DESCRIPTION =
+  "Zach's Lists builds one DNS blocklist from the sources you choose, removes the domains you whitelist, and publishes it for Pi-hole, AdGuard Home or your browser.";
 
-export const SITE_URL = import.meta.env.VITE_SITE_URL || 'http://localhost:5173';
-export const SITE_DOMAIN = new URL(SITE_URL).host;
+export const REPOSITORY_URL = 'https://github.com/zachlagden/Zachs-Lists';
+export const LICENCE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`;
+export const SPONSOR_URL = 'https://github.com/sponsors/zachlagden';
+export const DEFAULT_SOURCES_URL = 'https://github.com/zachlagden/Pi-hole-Optimized-Blocklists';
 
-/**
- * Get the URL for a default blocklist.
- */
-export const getDefaultListUrl = (name: string): string => {
-  return `${SITE_URL}/lists/${name}.txt`;
-};
+export function resolveSiteUrl(configured: string | undefined, origin: string): string {
+  const trimmed = (configured ?? '').trim().replace(/\/+$/, '');
+  return trimmed || origin;
+}
 
-/**
- * Get the URL for a user's custom blocklist.
- */
-export const getUserListUrl = (username: string, name: string): string => {
-  return `${SITE_URL}/u/${username}/${name}.txt`;
-};
+export const SITE_URL = resolveSiteUrl(
+  import.meta.env.VITE_SITE_URL,
+  typeof window === 'undefined' ? '' : window.location.origin,
+);

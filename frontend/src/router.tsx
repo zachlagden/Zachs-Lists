@@ -27,9 +27,9 @@ export const routes: RouteObject[] = [
           {
             errorElement: <RouteError />,
             children: [
-              { index: true, lazy: page(() => import('./pages/HomePage')) },
+              { index: true, lazy: page(() => import('./pages/home/HomePage')) },
               { path: 'login', lazy: page(() => import('./pages/LoginPage')) },
-              { path: 'browse', lazy: page(() => import('./pages/BrowsePage')) },
+              { path: 'browse', lazy: page(() => import('./pages/browse/BrowsePage')) },
               ...developmentRoutes,
               { path: '*', lazy: page(() => import('./pages/NotFoundPage')) },
             ],
@@ -50,7 +50,7 @@ export const routes: RouteObject[] = [
                     lazy: page(() => import('./pages/dashboard/DashboardPage')),
                   },
                   { path: 'config', lazy: page(() => import('./pages/ConfigPage')) },
-                  { path: 'lists', lazy: page(() => import('./pages/ListsPage')) },
+                  { path: 'lists', lazy: page(() => import('./pages/lists/ListsPage')) },
                   { path: 'jobs', lazy: page(() => import('./pages/builds/BuildHistoryPage')) },
                   { path: 'jobs/:jobId', lazy: page(() => import('./pages/builds/BuildPage')) },
                   {

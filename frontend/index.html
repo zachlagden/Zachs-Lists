@@ -7,11 +7,23 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0f" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f6f9" />
+    <title>Zach's Lists</title>
     <meta
       name="description"
-      content="Zach's Lists builds one DNS blocklist from the sources you choose, for Pi-hole, AdGuard Home or your browser."
+      content="Zach's Lists builds one DNS blocklist from the sources you choose, removes the domains you whitelist, and publishes it for Pi-hole, AdGuard Home or your browser."
     />
-    <title>Zach's Lists</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Zach's Lists" />
+    <meta
+      property="og:title"
+      content="Zach's Lists: one blocklist, built from the sources you choose"
+    />
+    <meta
+      property="og:description"
+      content="Combine public blocklists, remove the domains you need to keep working, and get one address in hosts, plain or Adblock format. Free and open source."
+    />
+    <meta property="og:locale" content="en_GB" />
+    <meta name="twitter:card" content="summary" />
     <script>
       try {
         var storedTheme = localStorage.getItem('zl-theme');
@@ -25,6 +37,20 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p
+        style="
+          max-width: 60ch;
+          margin: 48px auto;
+          padding: 0 24px;
+          font-family: system-ui, sans-serif;
+        "
+      >
+        Zach's Lists builds one DNS blocklist from the sources you choose. This site needs
+        JavaScript to run. The default lists need neither JavaScript nor an account: the combined
+        list is at <a href="/lists/all_domains.txt">/lists/all_domains.txt</a>.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
