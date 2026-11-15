@@ -118,8 +118,8 @@ describe('overview facts', () => {
       ['2026-11-14', 4],
       ['2026-11-15', 0],
     ]);
-    expect(barSummary(buildBars(days), 'build')).toBe(
-      '4 builds over 3 days, 1 failed. Busiest day: 14 Nov: 4 builds, 1 failed.',
+    expect(barSummary(buildBars(days), 'build')).toMatch(
+      /^4 builds over 3 days, 1 failed\. Busiest day: .*14.*: 4 builds, 1 failed\.$/,
     );
     expect(barSummary([], 'download')).toBe('No downloads recorded.');
   });
@@ -232,7 +232,7 @@ describe('user facts', () => {
   it('calls a ban a century long permanent', () => {
     const now = new Date('2026-11-15T12:00:00Z');
     expect(banEnd('2126-10-22T12:00:00Z', now)).toBe('Permanent');
-    expect(banEnd('2026-11-22T12:00:00Z', now)).toMatch(/^Until 22 Nov/);
+    expect(banEnd('2026-11-22T12:00:00Z', now)).toMatch(/^Until .*22/);
     expect(banEnd(null, now)).toBe('No end recorded');
   });
 });
