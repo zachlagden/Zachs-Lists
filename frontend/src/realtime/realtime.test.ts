@@ -7,7 +7,7 @@ import {
   reconnectDelay,
   stateAfterFailures,
 } from './backoff';
-import { mergeFetchedList, mergeJob, mergeJobs } from './jobMerge';
+import { belongsTo, mergeFetchedList, mergeJob, mergeJobs } from './jobMerge';
 import { planResync, resyncJobs } from './resync';
 
 function job(id: string, rev: number, status: Job['status'] = 'processing', minute = 0): Job {
@@ -89,6 +89,15 @@ describe('job merge', () => {
   it('replaces the list when nothing stored is newer', () => {
     const fetched = [job('b', 3, 'completed', 2)];
     expect(mergeFetchedList([job('gone', 9, 'completed', 1)], fetched)).toEqual(fetched);
+  });
+});
+
+describe('job ownership', () => {
+  it('accepts only the signed-in account\'s jobs', () => {
+    expect(belongsTo(job('a', 1), 'user-1')).toBe(true);
+    expect(belongsTo(job('a', 1), 'user-2')).toBe(false);
+    expect(belongsTo({ user_id: null }, 'user-1')).toBe(false);
+    expect(belongsTo(job('a', 1), undefined)).toBe(false);
   });
 });
 

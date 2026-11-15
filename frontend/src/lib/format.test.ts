@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   durationBetween,
   formatBytes,
+  formatClockTime,
   formatDate,
   formatDateTime,
   formatDuration,
@@ -104,6 +105,14 @@ describe('dates', () => {
 
   it('returns an empty string for a missing date', () => {
     expect(formatDateTime(null, uk)).toBe('');
+  });
+
+  it('writes a time of day to the second in the given zone', () => {
+    expect(formatClockTime('2026-11-08T20:41:07.250Z', uk)).toBe('20:41:07');
+    expect(formatClockTime('2026-11-08T20:41:07.250Z', { ...uk, timeZone: 'Asia/Tokyo' })).toBe(
+      '05:41:07',
+    );
+    expect(formatClockTime(undefined, uk)).toBe('');
   });
 });
 
