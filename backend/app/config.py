@@ -46,9 +46,9 @@ class Config:
 
     # User limits
     DEFAULT_MAX_SOURCE_LISTS = 50
-    DEFAULT_MAX_DOMAINS = 4_000_000  # 4 million domains
+    DEFAULT_MAX_DOMAINS = 6_000_000  # 6 million domains
     MAX_DOMAINS_LIMIT = 20_000_000  # Maximum requestable: 20 million
-    DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers
+    DOMAIN_TIERS = [6_000_000, 10_000_000, 20_000_000]  # Available tiers
     DEFAULT_MAX_CONFIG_SIZE_MB = 10
     DEFAULT_MANUAL_UPDATES_PER_WEEK = 3
     MAX_SOURCE_LISTS_LIMIT = 1000

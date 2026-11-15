@@ -176,7 +176,7 @@ def test_limits_are_stored_as_overrides_of_the_defaults(
     defaults = User.default_limits()
     assert defaults == {
         "max_source_lists": 50,
-        "max_domains": 4_000_000,
+        "max_domains": 6_000_000,
         "max_config_size_mb": 10,
         "manual_updates_per_week": 3,
     }
@@ -559,7 +559,7 @@ def test_limit_request_routes_return_conflict_once_handled(
     approve = f"/api/admin/limit-requests/{created.id}/approve"
     deny = f"/api/admin/limit-requests/{created.id}/deny"
 
-    for invalid in ("5000000", 1.5, True, 3_999_999, 20_000_001):
+    for invalid in ("7000000", 1.5, True, 5_999_999, 20_000_001):
         refusal(
             admin_client.post(approve, json={"custom_limit": invalid}), "custom_limit"
         )
@@ -567,11 +567,11 @@ def test_limit_request_routes_return_conflict_once_handled(
     refusal(admin_client.post(deny, json={"response": ["no"]}), "response")
     assert api.db.limit_requests.find_one()["status"] == "pending"
 
-    approved = admin_client.post(approve, json={"custom_limit": 5_000_000})
+    approved = admin_client.post(approve, json={"custom_limit": 7_000_000})
     assert approved.status_code == 200
-    assert approved.get_json()["request"]["approved_limit"] == 5_000_000
+    assert approved.get_json()["request"]["approved_limit"] == 7_000_000
     assert api.db.users.find_one({"username": "sam"})["limits"] == {
-        "max_domains": 5_000_000
+        "max_domains": 7_000_000
     }
     for path in (approve, deny):
         repeated = admin_client.post(path)
