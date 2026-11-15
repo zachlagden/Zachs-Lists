@@ -941,7 +941,7 @@ impl JobProcessor {
 
         // Create output generator
         let output_dir = self.config.output_dir(username);
-        let generator = OutputGenerator::new(output_dir);
+        let generator = OutputGenerator::with_host(output_dir, &self.config.generator_host);
 
         // Clean up old files
         generator.cleanup_old_files()?;

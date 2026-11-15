@@ -22,6 +22,12 @@ pub struct Config {
     pub cache_ttl_days: u64,
     /// How long to keep retrying the initial MongoDB connection, in seconds
     pub mongo_connect_timeout_secs: u64,
+    /// Hostname stamped on generated blocklist files.
+    ///
+    /// `BLOCKLIST_GENERATOR_HOST` when that variable is set. Otherwise the
+    /// hostname of `FRONTEND_URL`, or the shared fallback constant when that
+    /// URL has no hostname. See `generator_host`.
+    pub generator_host: String,
 }
 
 impl Config {
@@ -59,6 +65,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(300),
+            generator_host: crate::generator_host::from_env(),
         }
     }
 

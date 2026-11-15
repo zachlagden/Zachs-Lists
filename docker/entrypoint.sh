@@ -58,6 +58,14 @@ shutdown() {
 
 trap shutdown SIGTERM SIGINT
 
+# Stamp generated files with this instance's host. The fallback constant lives
+# in backend/app/blocklist_generator_host.txt and applies when FRONTEND_URL has
+# no hostname. An explicit BLOCKLIST_GENERATOR_HOST is left unchanged.
+if [ -z "${BLOCKLIST_GENERATOR_HOST:-}" ]; then
+  BLOCKLIST_GENERATOR_HOST="$(python /app/backend/app/generator_host.py)"
+  export BLOCKLIST_GENERATOR_HOST
+fi
+
 # Start Rust workers under supervision
 for i in $(seq 1 "$WORKER_COUNT"); do
   supervise_worker "$i" &

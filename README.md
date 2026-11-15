@@ -83,7 +83,7 @@ That's it. Your blocklist will auto-update weekly.
 
 ### Publish a Pi-hole v6 allowlist
 
-On the Config page, opt in to publish the whitelist itself (not only the domains it removes from blocklists). The URL is world-readable on a public instance.
+On the Config page, opt in to publish the whitelist itself (not only the domains it removes from blocklists). Like your blocklists, that URL is readable by anyone who can reach this instance, and it contains your whitelist entries.
 
 ```bash
 # Pi-hole v6 allow-type adlist
@@ -227,6 +227,8 @@ _Discover community-curated blocklists_
 Want to run your own instance? Full deployment instructions (Docker + manual) are available in the documentation:
 
 **[Self-Hosting Guide →](https://lists.docs.zachlagden.uk/zachs-lists/self-hosting)**
+
+Generated list headers name this instance. The hostname comes from `FRONTEND_URL`, and falls back to `lists.zachlagden.uk` when that URL has no hostname, so the public instance's files stay the same. The container entrypoint passes the resolved host to the worker as `BLOCKLIST_GENERATOR_HOST`. Leave that variable unset unless you need to override it. See `.env.example`.
 
 ---
 

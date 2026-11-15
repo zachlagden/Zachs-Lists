@@ -4,7 +4,8 @@ import os
 
 from flask import current_app
 
-from app.allowlist import host_from_public_url, sync_published_allowlist
+from app.allowlist import sync_published_allowlist
+from app.generator_host import host_from_public_url
 from app.models.system_config import SystemConfig
 from app.models.user import User
 

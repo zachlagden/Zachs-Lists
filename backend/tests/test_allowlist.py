@@ -9,16 +9,15 @@ from flask import Flask, Response
 
 from app.allowlist import (
     ALLOWLIST_NAME,
-    BLOCKLIST_GENERATOR_HOST,
     allowlist_format,
     blocklist_format,
-    host_from_public_url,
     render_allowlist,
     sync_published_allowlist,
 )
 from app.blueprints.lists import community_blocklists, lists_api_bp, lists_public_bp
 from app.config import TestingConfig
 from app.extensions import limiter
+from app.generator_host import BLOCKLIST_GENERATOR_HOST, host_from_public_url
 from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
 from app.models.user import User

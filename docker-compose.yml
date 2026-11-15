@@ -7,10 +7,14 @@ services:
     container_name: zachs-lists-web
     restart: unless-stopped
     ports:
-      - "8080:5000"
+      - '8080:5000'
     # This automatically imports every variable from your .env file
     env_file:
       - .env
+    environment:
+      # Resolved from FRONTEND_URL in docker/entrypoint.sh when empty.
+      # Fallback host: backend/app/blocklist_generator_host.txt.
+      BLOCKLIST_GENERATOR_HOST: ${BLOCKLIST_GENERATOR_HOST:-}
     volumes:
       - ./data:/app/data
     depends_on:
