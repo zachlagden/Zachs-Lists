@@ -21,8 +21,8 @@ from app.db_indexes import ensure_indexes
 from app.extensions import mongo
 from app.models.job import Job
 from app.models.user import User
-from app.services import job_feed
-from app.services.job_poller import JobStatusPoller
+from app.services import build_admission, job_feed, limit_review
+from app.services.job_poller import MAX_SIDE_EFFECT_ATTEMPTS, JobStatusPoller
 from app.utils.job_document import initial_progress, revision_bump
 
 realtime: Any = importlib.import_module("app.socketio")
@@ -364,6 +364,129 @@ def test_startup_sweep_refunds_a_missed_build_once(relay: Relay) -> None:
     assert used() == 1
     assert relay.db.jobs.find_one({"job_id": refundable})["quota_refunded"] is True
     assert relay.emitted == []
+
+
+ONE_FULL_RUN = ["job:created", "job:progress", "job:completed"]
+
+
+def charged_job_ending_skipped(relay: Relay) -> str:
+    relay.db.users.update_one(
+        {"_id": ObjectId(relay.sam.id)},
+        {
+            "$set": {
+                "stats.manual_updates_this_week": 1,
+                "stats.week_reset_at": datetime.utcnow(),
+            }
+        },
+    )
+    job_id = relay.add_job(relay.sam, quota_charged=True)
+    relay.poller.poll_once()
+    relay.worker_write(job_id, status=Job.STATUS_SKIPPED, result={"errors": []})
+    return job_id
+
+
+def failing(times: int, calls: list[str]) -> Any:
+    def side_effect(job: Any) -> None:
+        calls.append(job if isinstance(job, str) else job.job_id)
+        if len(calls) <= times:
+            raise RuntimeError("side effect broke")
+
+    return side_effect
+
+
+def test_failing_limit_review_still_refunds_completes_and_is_retried(
+    relay: Relay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reviews: list[str] = []
+    monkeypatch.setattr(limit_review, "record_job_result", failing(2, reviews))
+    job_id = charged_job_ending_skipped(relay)
+
+    relay.poller.poll_once()
+
+    assert relay.names() == ONE_FULL_RUN
+    assert relay.names(f"jobs:{relay.sam.id}") == ONE_FULL_RUN
+    assert relay.db.jobs.find_one({"job_id": job_id})["quota_refunded"] is True
+    assert relay.poller.has_active_jobs() is False
+    assert relay.poller._relayed[job_id].status == Job.STATUS_SKIPPED
+
+    for _ in range(4):
+        relay.poller.poll_once()
+
+    assert reviews == [job_id] * 3
+    assert relay.poller._failed_side_effects == {}
+    assert relay.names() == ONE_FULL_RUN
+
+
+def test_failing_refund_does_not_stop_the_limit_review_or_the_event(
+    relay: Relay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refunds: list[str] = []
+    reviews: list[str] = []
+    refund = build_admission.refund_quota_if_due
+
+    def refund_after_one_failure(job_id: str) -> bool:
+        failing(1, refunds)(job_id)
+        return refund(job_id)
+
+    monkeypatch.setattr(
+        build_admission, "refund_quota_if_due", refund_after_one_failure
+    )
+    monkeypatch.setattr(limit_review, "record_job_result", failing(0, reviews))
+    job_id = charged_job_ending_skipped(relay)
+
+    relay.poller.poll_once()
+
+    assert reviews == [job_id]
+    assert relay.names() == ONE_FULL_RUN
+    assert "quota_refunded" not in relay.db.jobs.find_one({"job_id": job_id})
+
+    relay.poller.poll_once()
+    relay.poller.poll_once()
+
+    assert refunds == [job_id] * 2
+    assert reviews == [job_id]
+    assert relay.db.jobs.find_one({"job_id": job_id})["quota_refunded"] is True
+    assert relay.names() == ONE_FULL_RUN
+
+
+def test_side_effect_that_keeps_failing_is_dropped_after_bounded_attempts(
+    relay: Relay, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    reviews: list[str] = []
+    monkeypatch.setattr(limit_review, "record_job_result", failing(100, reviews))
+    job_id = charged_job_ending_skipped(relay)
+
+    with caplog.at_level("ERROR", logger="app.services.job_poller"):
+        for _ in range(MAX_SIDE_EFFECT_ATTEMPTS + 3):
+            relay.poller.poll_once()
+
+    assert reviews == [job_id] * MAX_SIDE_EFFECT_ATTEMPTS
+    assert relay.poller._failed_side_effects == {}
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.message.startswith("Gave up")
+    ] == [
+        f"Gave up on the limit review of job {job_id} "
+        f"after {MAX_SIDE_EFFECT_ATTEMPTS} attempts"
+    ]
+    assert relay.names() == ONE_FULL_RUN
+
+
+def test_failing_emit_still_records_the_job_as_relayed(
+    relay: Relay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = relay.add_job(relay.sam)
+    relay.poller.poll_once()
+    relay.worker_write(job_id, status=Job.STATUS_COMPLETED, result={"errors": []})
+    monkeypatch.setattr(
+        realtime, "emit_job_completed", Mock(side_effect=RuntimeError("socket broke"))
+    )
+
+    relay.poller.poll_once()
+
+    assert relay.poller._relayed[job_id].rev == 1
+    assert relay.poller.has_active_jobs() is False
 
 
 def test_poll_loop_survives_failing_ticks(monkeypatch: pytest.MonkeyPatch) -> None:

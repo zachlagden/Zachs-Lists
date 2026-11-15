@@ -199,7 +199,16 @@ def record_job_result(job: Job) -> ReviewChange:
     if user is None or user.is_admin:
         return ReviewChange()
 
-    max_domains = max(max_domains, user.limits["max_domains"])
+    current_limit = _count(user.limits.get("max_domains"))
+    if current_limit is None:
+        logger.warning(
+            "User %s has an unreadable domain limit, so job %s is judged against "
+            "the limit it was built with",
+            user.id,
+            job.job_id,
+        )
+    else:
+        max_domains = max(max_domains, current_limit)
     users = mongo.db[User.COLLECTION]
     now = datetime.utcnow()
     if actual_domains > max_domains:

@@ -1,5 +1,6 @@
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -21,7 +22,10 @@ WRITE_ORDER_OVERLAP = timedelta(seconds=2)
 NEW_JOB_WINDOW = timedelta(minutes=10)
 TERMINAL_RETENTION = timedelta(minutes=15)
 MAX_TRACKED_JOBS = 5000
+MAX_SIDE_EFFECT_ATTEMPTS = 5
 TERMINAL_STATUSES = (Job.STATUS_COMPLETED, Job.STATUS_FAILED, Job.STATUS_SKIPPED)
+
+SideEffect = Callable[[Job], object]
 
 
 @dataclass
@@ -32,9 +36,26 @@ class RelayedJob:
     queue_info: QueueInfo | None = None
 
 
+@dataclass
+class FailedSideEffects:
+    names: tuple[str, ...]
+    attempts: int
+
+
+def _terminal_side_effects() -> dict[str, SideEffect]:
+    from app.services.build_admission import refund_quota_if_due
+    from app.services.limit_review import record_job_result
+
+    return {
+        "quota refund": lambda job: refund_quota_if_due(job.job_id),
+        "limit review": record_job_result,
+    }
+
+
 class JobStatusPoller:
     def __init__(self) -> None:
         self._relayed: dict[str, RelayedJob] = {}
+        self._failed_side_effects: dict[str, FailedSideEffects] = {}
         self._watermark: datetime | None = None
         self._started_at: datetime | None = None
         self._active_interval = DEFAULT_ACTIVE_INTERVAL_SECONDS
@@ -110,6 +131,7 @@ class JobStatusPoller:
         watermark = self._watermark
         if watermark is None:
             raise RuntimeError("Job status poller has no watermark")
+        self._retry_failed_side_effects()
         documents = list(
             mongo.db[Job.COLLECTION]
             .find(
@@ -182,8 +204,6 @@ class JobStatusPoller:
         return job.created_at > floor
 
     def _relay(self, job: Job, info: QueueInfo | None, watermark: datetime) -> bool:
-        from app.services.build_admission import refund_quota_if_due
-        from app.services.limit_review import record_job_result
         from app.socketio import (
             emit_job_completed,
             emit_job_created,
@@ -208,16 +228,63 @@ class JobStatusPoller:
         if info is not None and job.status == Job.STATUS_QUEUED:
             payload["queue_info"] = info
         user_id = str(job.user_id) if job.user_id else None
-        if known is None and self._is_new(job, watermark):
-            emit_job_created(payload, user_id)
         if terminal:
-            refund_quota_if_due(job.job_id)
-            record_job_result(job)
-            emit_job_completed(payload, user_id)
-        else:
-            emit_job_progress(payload, user_id)
+            failed = self._run_side_effects(job, tuple(_terminal_side_effects()))
+            if failed:
+                self._failed_side_effects[job.job_id] = FailedSideEffects(failed, 1)
+        try:
+            if known is None and self._is_new(job, watermark):
+                emit_job_created(payload, user_id)
+            if terminal:
+                emit_job_completed(payload, user_id)
+            else:
+                emit_job_progress(payload, user_id)
+        except PyMongoError:
+            raise
+        except Exception:
+            logger.exception(
+                "Could not emit the events of job %s at revision %d",
+                job.job_id,
+                job.rev,
+            )
         self._relayed[job.job_id] = record
         return known is None or known.status != job.status
+
+    def _run_side_effects(self, job: Job, names: tuple[str, ...]) -> tuple[str, ...]:
+        side_effects = _terminal_side_effects()
+        failed: list[str] = []
+        for name in names:
+            try:
+                side_effects[name](job)
+            except PyMongoError:
+                raise
+            except Exception:
+                logger.exception("The %s of job %s failed", name, job.job_id)
+                failed.append(name)
+        return tuple(failed)
+
+    def _retry_failed_side_effects(self) -> None:
+        for job_id, pending in list(self._failed_side_effects.items()):
+            job = Job.get_by_id(job_id)
+            if job is None or job.status not in TERMINAL_STATUSES:
+                del self._failed_side_effects[job_id]
+                continue
+            still_failed = self._run_side_effects(job, pending.names)
+            attempts = pending.attempts + 1
+            if not still_failed:
+                del self._failed_side_effects[job_id]
+            elif attempts >= MAX_SIDE_EFFECT_ATTEMPTS:
+                del self._failed_side_effects[job_id]
+                logger.error(
+                    "Gave up on the %s of job %s after %d attempts",
+                    " and ".join(still_failed),
+                    job_id,
+                    attempts,
+                )
+            else:
+                self._failed_side_effects[job_id] = FailedSideEffects(
+                    still_failed, attempts
+                )
 
     def _relay_queue_positions(
         self, rows: list[tuple[Job, QueueInfo]], watermark: datetime

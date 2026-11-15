@@ -762,6 +762,25 @@ def test_build_measured_against_an_older_limit_uses_the_raised_limit(
     assert site.review(site.sam) is None
 
 
+@pytest.mark.parametrize("stored_limit", ["100", None, 12.5, True])
+def test_job_result_is_recorded_when_the_stored_limit_is_not_an_integer(
+    site: Site, stored_limit: Any
+) -> None:
+    site.db.users.update_one(
+        {"_id": ObjectId(site.sam.id)}, {"$set": {"limits.max_domains": stored_limit}}
+    )
+    result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT + 5}}
+
+    change = limit_review.record_job_result(
+        finished(site, site.sam, Job.STATUS_COMPLETED, result)
+    )
+
+    assert change.opened is True
+    review = site.review(site.sam)
+    assert review is not None
+    assert (review["actual_domains"], review["max_domains"]) == (LIMIT + 5, LIMIT)
+
+
 def test_job_results_never_flag_admins_or_root(site: Site) -> None:
     result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT * 2}}
 
