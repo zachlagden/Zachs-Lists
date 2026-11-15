@@ -1,6 +1,22 @@
-import { queryOptions } from '@tanstack/react-query';
-import type { LibraryEntry } from '../components/config/types';
-import { get, post, put } from './http';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { get, post, put, request } from './http';
+
+export const VALIDATION_TIMEOUT_MS = 120_000;
+export const URL_METADATA_BATCH_SIZE = 100;
+
+export interface LibraryEntry {
+  id: string;
+  url: string;
+  name: string;
+  category: string;
+  description: string;
+  recommended: boolean;
+  aggressiveness: number;
+  domain_count: number;
+  added_by: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface ConfigResponse {
   config: string;
@@ -38,6 +54,7 @@ export interface ValidationResponse {
   has_warnings: boolean;
   validation_token: string | null;
   validation_id: string;
+  revision: number;
 }
 
 export type UrlMetadataResponse = Record<string, { domain_count: number | null; cached: boolean }>;
@@ -51,6 +68,7 @@ export interface TemplateCopied {
 export const configKeys = {
   all: ['config'] as const,
   sources: () => [...configKeys.all, 'sources'] as const,
+  urlMetadata: (urls: readonly string[]) => [...configKeys.all, 'url-metadata', urls] as const,
   whitelist: () => [...configKeys.all, 'whitelist'] as const,
   categories: () => [...configKeys.all, 'categories'] as const,
   library: () => [...configKeys.all, 'library'] as const,
@@ -68,15 +86,29 @@ export function saveConfig(config: string, validationToken: string): Promise<{ s
 }
 
 export function validateConfig(config: string): Promise<ValidationResponse> {
-  return post<ValidationResponse>('/api/user/config/validate', { config });
+  return request<ValidationResponse>({
+    method: 'POST',
+    url: '/api/user/config/validate',
+    data: { config },
+    timeout: VALIDATION_TIMEOUT_MS,
+  });
 }
 
 export function fetchCategories(): Promise<CategoriesResponse> {
   return get<CategoriesResponse>('/api/user/config/categories');
 }
 
-export function fetchUrlMetadata(urls: string[]): Promise<UrlMetadataResponse> {
-  return post<UrlMetadataResponse>('/api/user/config/url-metadata', { urls });
+export async function fetchUrlMetadata(urls: readonly string[]): Promise<UrlMetadataResponse> {
+  const batches: string[][] = [];
+  for (let start = 0; start < urls.length; start += URL_METADATA_BATCH_SIZE) {
+    batches.push(urls.slice(start, start + URL_METADATA_BATCH_SIZE));
+  }
+  const answers = await Promise.all(
+    batches.map((batch) =>
+      post<UrlMetadataResponse>('/api/user/config/url-metadata', { urls: batch }),
+    ),
+  );
+  return Object.assign({}, ...answers) as UrlMetadataResponse;
 }
 
 export function fetchLibrary(): Promise<LibraryResponse> {
@@ -110,3 +142,11 @@ export const categoriesQuery = () =>
 
 export const libraryQuery = () =>
   queryOptions({ queryKey: configKeys.library(), queryFn: fetchLibrary });
+
+export const urlMetadataQuery = (urls: readonly string[]) =>
+  queryOptions({
+    queryKey: configKeys.urlMetadata(urls),
+    queryFn: () => fetchUrlMetadata(urls),
+    enabled: urls.length > 0,
+    placeholderData: keepPreviousData,
+  });

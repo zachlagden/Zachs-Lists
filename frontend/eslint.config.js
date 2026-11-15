@@ -9,18 +9,11 @@ const pagesAwaitingRebuild = [
   'src/pages/AdminJobDetailPage.tsx',
   'src/pages/AdminUserDetailPage.tsx',
   'src/pages/BrowsePage.tsx',
-  'src/pages/ConfigPage.tsx',
   'src/pages/HomePage.tsx',
   'src/pages/JobsPage.tsx',
   'src/pages/ListsPage.tsx',
-  'src/components/config/**',
   'src/components/home/**',
   'src/components/jobs/**',
-];
-
-const editorsMountedOnce = [
-  'src/components/config/AdvancedConfigEditor.tsx',
-  'src/components/config/WhitelistEditor.tsx',
 ];
 
 export default tseslint.config(
@@ -55,10 +48,6 @@ export default tseslint.config(
       'react-hooks/immutability': 'off',
       'react-hooks/purity': 'off',
     },
-  },
-  {
-    files: editorsMountedOnce,
-    rules: { 'react-hooks/exhaustive-deps': 'off' },
   },
   {
     files: ['*.config.{js,ts}'],
