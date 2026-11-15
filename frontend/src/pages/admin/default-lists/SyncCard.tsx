@@ -139,8 +139,12 @@ export function SyncCard({ config, status, now }: SyncCardProps) {
           </Alert>
         ) : null}
         <div className="flex flex-wrap gap-2">
+          <RebuildDefaultLists />
           {status.sync_enabled ? (
             <>
+              <Button disabled={sync.isPending} onClick={() => setConfirmingForce(true)}>
+                Force sync
+              </Button>
               <Button
                 variant="primary"
                 icon="loop"
@@ -150,12 +154,8 @@ export function SyncCard({ config, status, now }: SyncCardProps) {
               >
                 Sync now
               </Button>
-              <Button disabled={sync.isPending} onClick={() => setConfirmingForce(true)}>
-                Force sync
-              </Button>
             </>
           ) : null}
-          <RebuildDefaultLists />
         </div>
       </CardBody>
       <ConfirmDialog

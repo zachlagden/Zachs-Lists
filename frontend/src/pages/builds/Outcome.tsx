@@ -74,17 +74,17 @@ export function FailureCard({ job, failure, viewer, limitRequest }: FailureCardP
         ) : null}
         {steps.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {steps.includes('edit-sources') ? (
-              <Button to="/config" icon="sliders" variant="primary">
-                Edit sources
-              </Button>
-            ) : null}
             {canRequest && limitRequest.available && !limitRequest.pending ? (
               <Button onClick={limitRequest.onRequest}>Request a higher limit</Button>
             ) : null}
             {steps.includes('build-again') ? (
               <Button to="/dashboard" icon="bolt">
                 Build again from the dashboard
+              </Button>
+            ) : null}
+            {steps.includes('edit-sources') ? (
+              <Button to="/config" icon="sliders" variant="primary">
+                Edit sources
               </Button>
             ) : null}
           </div>

@@ -142,18 +142,18 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
             <>
               <Button
                 size="sm"
+                variant="ghost"
+                onClick={() => setEdits((current) => acceptingSaved(saved, current))}
+              >
+                Keep my edit
+              </Button>
+              <Button
+                size="sm"
                 onClick={() =>
                   setEdits((current) => changedUnderneath.reduce(withoutEdit, current))
                 }
               >
                 Load the saved text
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setEdits((current) => acceptingSaved(saved, current))}
-              >
-                Keep my edit
               </Button>
             </>
           }
@@ -167,11 +167,11 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
         </Alert>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
-          Save the configuration
-        </Button>
         <Button onClick={onDone} disabled={save.isPending}>
           Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
+          Save the configuration
         </Button>
       </div>
       <LeaveDialog blocker={blocker}>

@@ -140,18 +140,18 @@ export function LimitsCard({
                   <>
                     <Button
                       size="sm"
+                      variant="ghost"
+                      onClick={() => setEdits((current) => acceptingSaved(saved, current))}
+                    >
+                      Keep my edit
+                    </Button>
+                    <Button
+                      size="sm"
                       onClick={() =>
                         setEdits((current) => changedUnderneath.reduce(withoutEdit, current))
                       }
                     >
                       Use the new value
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEdits((current) => acceptingSaved(saved, current))}
-                    >
-                      Keep my edit
                     </Button>
                   </>
                 }
@@ -163,9 +163,6 @@ export function LimitsCard({
             {failure?.form ? <Alert tone="fail">{failure.form}</Alert> : null}
             {permission.allowed ? (
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
-                  Save limits
-                </Button>
                 {dirty ? (
                   <Button
                     variant="ghost"
@@ -178,6 +175,9 @@ export function LimitsCard({
                     Discard changes
                   </Button>
                 ) : null}
+                <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
+                  Save limits
+                </Button>
                 <p className="text-[13px] text-text-tertiary">
                   A value equal to the default is stored as no override, so it follows later changes
                   to the default.
