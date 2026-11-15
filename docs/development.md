@@ -171,12 +171,15 @@ The "Sign in with GitHub" route does not work unless `GITHUB_CLIENT_ID` and `GIT
 uv run --no-project python backend/scripts/dev_replay_build.py --create
 ```
 
-| Option           | Default     | Meaning                                                                              |
-| ---------------- | ----------- | ------------------------------------------------------------------------------------ |
-| `--username`     | `alex`      | The account whose build is replayed.                                                 |
-| `--create`       | off         | Queue a manual build when the account has no active one. It charges no weekly quota. |
-| `--step-seconds` | `1.0`       | The pause between writes. A full build takes about 25 steps.                         |
-| `--outcome`      | `completed` | `completed`, `failed` or `skipped`.                                                  |
+| Option            | Default     | Meaning                                                                                 |
+| ----------------- | ----------- | --------------------------------------------------------------------------------------- |
+| `--username`      | `alex`      | The account whose build is replayed.                                                    |
+| `--create`        | off         | Queue a manual build when the account has no active one. It charges no weekly quota.    |
+| `--step-seconds`  | `1.0`       | The pause between writes. A full build takes about 25 steps.                            |
+| `--outcome`       | `completed` | `completed`, `failed` or `skipped`.                                                     |
+| `--error-code`    | none        | With `--outcome failed`, the error code the build ends with. See the list below.        |
+| `--sources`       | `0`         | Pad the build with made-up sources up to this many, to exercise a long source table.    |
+| `--queue-seconds` | `0`         | Leave the build queued for this long before the replay claims it.                       |
 
 Which job it takes:
 
@@ -187,7 +190,11 @@ Which job it takes:
 What each outcome does:
 
 - `completed` serves the first source from the cache, marks the third as stale and fails the fourth. It writes a new generation directory under `DATA_DIR`, moves the account's published lists and stats to it, and completes the job with a full result.
-- `failed` fails every source, and the job ends with the error code `all_sources_failed`.
+- `failed` fails every source, and the job ends with the error code `all_sources_failed`. `--error-code` picks another ending:
+  - `invalid_config`, `no_sources` and `superseded` end the build before any source is downloaded.
+  - `internal` and `worker_abandoned` end it part of the way through the downloads.
+  - `no_domains` ends it after the downloads.
+  - `domain_limit_exceeded` ends it after the whitelist, whether or not `ENFORCE_DOMAIN_LIMIT` is set. When the build is within the account's limit, the result reports a limit of 80% of the measured domains.
 - `skipped` downloads every source from the cache, and the job ends skipped with the reason "Nothing changed since the last build".
 
 When the job ends, Flask refunds the weekly quota where the real rules say so and updates the account's limit review from the result. For `jo`, a completed replay drops the failed source's category, which brings the lists under the limit and resolves the open review.

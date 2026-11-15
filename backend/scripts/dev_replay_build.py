@@ -9,6 +9,15 @@ Usage:
     uv run --no-project python backend/scripts/dev_replay_build.py \
     --username sam --create --step-seconds 0.5 --outcome failed
 
+  FLASK_ENV=development PYTHONPATH=backend \
+    uv run --no-project python backend/scripts/dev_replay_build.py \
+    --create --outcome failed --error-code domain_limit_exceeded --sources 36
+
+--error-code ends a failed build with that code, at the point in the build where
+the worker or the server would raise it. --sources pads the build with made-up
+sources so that a long source table can be exercised. --queue-seconds leaves the
+build queued for that long before the replay claims it.
+
 Without --create the account must already have a queued build, for example one
 started with the Build button. A build left processing by the seed or by an
 interrupted replay is put back in the queue and replayed from the start.
@@ -20,6 +29,7 @@ import sys
 import time
 import uuid
 from collections.abc import Iterator, Mapping
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +81,37 @@ if TYPE_CHECKING:
     from flask import Flask
 
 OUTCOMES = (STATUS_COMPLETED, STATUS_FAILED, STATUS_SKIPPED)
+INTERNAL_ERROR_MESSAGE = (
+    "The build failed because of an internal error. Please try again."
+)
+REJECTED_BEFORE_DOWNLOAD = {
+    "invalid_config": (
+        "Blocklist configuration is invalid: line 3 is not a valid source line"
+    ),
+    "no_sources": "No valid sources in config",
+    "superseded": (
+        "Cancelled because another build for the same lists was already active"
+    ),
+}
+STOPPED_MID_DOWNLOAD = {
+    "internal": INTERNAL_ERROR_MESSAGE,
+    "worker_abandoned": (
+        "Abandoned after 3 attempts that each died before completing "
+        "(worker crashed or ran out of memory)"
+    ),
+}
+NO_DOMAINS_CODE = "no_domains"
+NO_DOMAINS_MESSAGE = "No domains extracted"
+ERROR_CODES = (
+    ALL_SOURCES_FAILED_CODE,
+    DOMAIN_LIMIT_EXCEEDED_CODE,
+    NO_DOMAINS_CODE,
+    *REJECTED_BEFORE_DOWNLOAD,
+    *STOPPED_MID_DOWNLOAD,
+)
+MID_DOWNLOAD_TICKS = 5
+PADDING_CATEGORIES = ("advertising", "tracking", "malicious", "suspicious")
+PRETEND_LIMIT_SHARE = 0.8
 ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_PROCESSING)
 DEFAULT_STEP_SECONDS = 1.0
 
@@ -97,8 +138,31 @@ def revision_bump(fields: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def source_outcomes(count: int, outcome: str) -> list[str]:
-    if outcome == STATUS_FAILED:
+def padding_sources(existing: int, wanted: int) -> list[SeedSource]:
+    padding = []
+    for number in range(existing + 1, wanted + 1):
+        if number % 11 == 5:
+            outcome = STALE
+        elif number % 7 == 3:
+            outcome = CACHED
+        else:
+            outcome = DOWNLOADED
+        padding.append(
+            SeedSource(
+                f"acme_extra_{number:02d}",
+                f"https://lists.example.org/extra/{number:02d}.txt",
+                PADDING_CATEGORIES[number % len(PADDING_CATEGORIES)],
+                20_000 + (number * 7_919) % 180_000,
+                outcome,
+                (number * 37) % 500 - 120 if outcome == DOWNLOADED else 0,
+            )
+        )
+    return padding
+
+
+def source_outcomes(count: int, outcome: str, error_code: str | None) -> list[str]:
+    all_fail = error_code in (None, ALL_SOURCES_FAILED_CODE)
+    if outcome == STATUS_FAILED and all_fail:
         return [FAILED] * count
     if outcome == STATUS_SKIPPED:
         return [CACHED] * count
@@ -124,6 +188,9 @@ class Replay:
         username: str,
         outcome: str,
         step_seconds: float,
+        error_code: str | None = None,
+        source_count: int = 0,
+        queue_seconds: float = 0.0,
     ) -> None:
         self.app = app
         self.database = database
@@ -131,6 +198,9 @@ class Replay:
         self.username = username
         self.outcome = outcome
         self.step_seconds = step_seconds
+        self.error_code = error_code if outcome == STATUS_FAILED else None
+        self.source_count = source_count
+        self.queue_seconds = queue_seconds
         self.worker_id = f"{DEV_WORKER_PREFIX}replay-{uuid.uuid4()}"
         account = database.users.find_one({"username": username}, {"_id": 1})
         if account is None:
@@ -146,6 +216,7 @@ class Replay:
         job = self.take_job(create)
         print(f"Replaying build {job['job_id']} for {self.username}")
         self.pause()
+        time.sleep(self.queue_seconds)
         claimed = self.claim(job)
         try:
             status = self.replay(claimed)
@@ -305,7 +376,7 @@ class Replay:
         from app.utils.validators import parse_config_lines
 
         lines = [line for line in parse_config_lines(blocklists) if line.error is None]
-        outcomes = source_outcomes(len(lines), self.outcome)
+        outcomes = source_outcomes(len(lines), self.outcome, self.error_code)
         sources = []
         for line, outcome in zip(lines, outcomes):
             digest = source_id(line.url)
@@ -322,6 +393,7 @@ class Replay:
             sources.append(
                 SeedSource(line.name, line.url, line.category, domains, outcome, change)
             )
+        sources.extend(padding_sources(len(sources), self.source_count))
         return sources
 
     def end(
@@ -348,9 +420,33 @@ class Replay:
         whitelist = str(snapshot.get("whitelist") or "")
         limit = (snapshot.get("limits") or {}).get("max_domains")
         max_domains: int | None = limit if isinstance(limit, int) else None
+        if self.error_code in REJECTED_BEFORE_DOWNLOAD:
+            return self.end(
+                job,
+                STATUS_FAILED,
+                failure_result(
+                    self.error_code, REJECTED_BEFORE_DOWNLOAD[self.error_code]
+                ),
+                initial_progress(),
+            )
         build = SimulatedBuild(self.sources(blocklists), whitelist, utc_now)
 
+        if self.error_code in STOPPED_MID_DOWNLOAD:
+            self.step(job, build, islice(download_ticks(build), MID_DOWNLOAD_TICKS))
+            return self.end(
+                job,
+                STATUS_FAILED,
+                failure_result(self.error_code, STOPPED_MID_DOWNLOAD[self.error_code]),
+                build.snapshot(),
+            )
         self.step(job, build, download_ticks(build))
+        if self.error_code == NO_DOMAINS_CODE:
+            return self.end(
+                job,
+                STATUS_FAILED,
+                failure_result(NO_DOMAINS_CODE, NO_DOMAINS_MESSAGE),
+                build.snapshot(),
+            )
         if not build.numbers.lists:
             return self.end(
                 job,
@@ -368,6 +464,10 @@ class Replay:
 
         self.step(job, build, whitelist_ticks(build))
         enforced = bool(self.app.config["ENFORCE_DOMAIN_LIMIT"])
+        if self.error_code == DOMAIN_LIMIT_EXCEEDED_CODE:
+            enforced = True
+            if not build.is_over(max_domains):
+                max_domains = int(build.numbers.measured * PRETEND_LIMIT_SHARE)
         if max_domains is not None and build.is_over(max_domains) and enforced:
             return self.end(
                 job,
@@ -429,6 +529,23 @@ def main() -> int:
     )
     parser.add_argument("--step-seconds", type=float, default=DEFAULT_STEP_SECONDS)
     parser.add_argument("--outcome", choices=OUTCOMES, default=STATUS_COMPLETED)
+    parser.add_argument(
+        "--error-code",
+        choices=ERROR_CODES,
+        help="with --outcome failed, the error code the build ends with",
+    )
+    parser.add_argument(
+        "--sources",
+        type=int,
+        default=0,
+        help="pad the build with made-up sources up to this many",
+    )
+    parser.add_argument(
+        "--queue-seconds",
+        type=float,
+        default=0.0,
+        help="leave the build queued for this long before claiming it",
+    )
     args = parser.parse_args()
     try:
         require_dev_environment()
@@ -437,7 +554,14 @@ def main() -> int:
             from app.extensions import mongo
 
             replay = Replay(
-                app, mongo.db, args.username, args.outcome, max(args.step_seconds, 0.0)
+                app,
+                mongo.db,
+                args.username,
+                args.outcome,
+                max(args.step_seconds, 0.0),
+                args.error_code,
+                args.sources,
+                max(args.queue_seconds, 0.0),
             )
             return replay.run(args.create)
     except Refusal as refusal:
