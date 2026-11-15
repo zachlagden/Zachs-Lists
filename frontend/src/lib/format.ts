@@ -109,6 +109,18 @@ export function formatDateTime(value: DateInput, options: DateFormatOptions = {}
   return `${formatDate(date, options)}, ${time}`;
 }
 
+export function formatClockTime(value: DateInput, options: DateFormatOptions = {}): string {
+  const date = parseApiDate(value);
+  if (!date) return '';
+  return new Intl.DateTimeFormat(options.locale ?? COPY_LOCALE, {
+    timeZone: options.timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
 export function formatFullDateTime(value: DateInput, options: DateFormatOptions = {}): string {
   const date = parseApiDate(value);
   if (!date) return '';

@@ -5,9 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 const pagesAwaitingRebuild = [
-  'src/pages/AdminJobDetailPage.tsx',
   'src/pages/ConfigPage.tsx',
-  'src/pages/JobsPage.tsx',
   'src/components/config/**',
   'src/components/jobs/**',
 ];

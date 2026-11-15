@@ -67,6 +67,9 @@ export function breadcrumbsFor(pathname: string): Breadcrumb[] {
       { label: section ?? ADMIN_DETAIL_TITLES[second] ?? 'Details' },
     ];
   }
+  if (first === 'jobs' && second) {
+    return [{ label: root, to: BUILDS_PATH }, { label: 'Build' }];
+  }
   if (first === 'dev' && second === 'components') {
     return [{ label: root }, { label: 'Components' }];
   }

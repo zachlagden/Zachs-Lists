@@ -4,6 +4,10 @@ export function isActive(job: Job): boolean {
   return job.status === 'queued' || job.status === 'processing';
 }
 
+export function belongsTo(job: Pick<Job, 'user_id'>, userId: string | undefined): boolean {
+  return userId !== undefined && job.user_id === userId;
+}
+
 export function isStale(incoming: Job, stored: Job | null | undefined): boolean {
   return !!stored && (incoming.rev ?? 0) < (stored.rev ?? 0);
 }

@@ -1,0 +1,94 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { limitRequestsQuery } from '../../api/account';
+import { configQuery } from '../../api/config';
+import { toApiError } from '../../api/errors';
+import { jobQuery, jobsKeys, type JobsResponse } from '../../api/jobs';
+import { userListsQuery } from '../../api/lists';
+import { parseConfig } from '../../components/config/types';
+import LimitRequestModal from '../../components/LimitRequestModal';
+import { BuildProblem } from './BuildProblem';
+import { BuildView, BuildViewSkeleton } from './BuildView';
+import { isUnreadFailure } from './historyFacts';
+import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
+
+function categoriesByUrl(config: string | undefined): ReadonlyMap<string, string> | null {
+  if (!config) return null;
+  const categories = new Map<string, string>();
+  for (const line of parseConfig(config)) {
+    if (!line.isComment && line.url && line.category) categories.set(line.url, line.category);
+  }
+  return categories;
+}
+
+export default function BuildPage() {
+  const { jobId = '' } = useParams<{ jobId: string }>();
+  const client = useQueryClient();
+  const paused = useUpdatesPaused();
+  const [requestingLimit, setRequestingLimit] = useState(false);
+
+  const build = useQuery({
+    ...jobQuery(jobId),
+    initialData: () =>
+      client
+        .getQueryData<JobsResponse>(jobsKeys.list())
+        ?.jobs.find((job) => job.job_id === jobId),
+    initialDataUpdatedAt: () => client.getQueryState(jobsKeys.list())?.dataUpdatedAt,
+  });
+  const job = build.data;
+  const overLimit = job?.result?.error_code === 'domain_limit_exceeded';
+  const config = useQuery(configQuery());
+  const limitRequests = useQuery({ ...limitRequestsQuery(), enabled: overLimit });
+  const lists = useQuery({ ...userListsQuery(), enabled: overLimit });
+  const categories = useMemo(() => categoriesByUrl(config.data?.config), [config.data?.config]);
+
+  useMarkFailuresRead(job !== undefined && isUnreadFailure(job), jobId);
+
+  if (!job) {
+    if (build.isError) {
+      return (
+        <BuildProblem
+          notFound={toApiError(build.error).status === 404}
+          error={build.error}
+          onRetry={() => void build.refetch()}
+          retrying={build.isFetching}
+          backTo="/jobs"
+          backLabel="All builds"
+        />
+      );
+    }
+    return <BuildViewSkeleton />;
+  }
+
+  const tiers = limitRequests.data?.available_tiers ?? [];
+  return (
+    <>
+      <BuildView
+        job={job}
+        viewer="owner"
+        paused={paused}
+        backTo="/jobs"
+        backLabel="All builds"
+        categories={categories}
+        limitRequest={
+          overLimit && limitRequests.data
+            ? {
+                pending: limitRequests.data.has_pending,
+                available: tiers.length > 0 && lists.data !== undefined,
+                onRequest: () => setRequestingLimit(true),
+              }
+            : null
+        }
+      />
+      {requestingLimit && lists.data && tiers.length > 0 ? (
+        <LimitRequestModal
+          isOpen
+          onClose={() => setRequestingLimit(false)}
+          currentLimit={lists.data.limits.max_domains}
+          availableTiers={tiers}
+        />
+      ) : null}
+    </>
+  );
+}
