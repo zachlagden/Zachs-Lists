@@ -49,6 +49,7 @@ jobs:
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend test
       - run: pnpm --dir frontend build
+      - run: docker build --target frontend-build .
   worker:
     runs-on: ubuntu-latest
     services:
