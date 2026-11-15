@@ -228,7 +228,9 @@ Want to run your own instance? Full deployment instructions (Docker + manual) ar
 
 **[Self-Hosting Guide →](https://lists.docs.zachlagden.uk/zachs-lists/self-hosting)**
 
-Generated list headers name this instance. The hostname comes from `FRONTEND_URL`, and falls back to `lists.zachlagden.uk` when that URL has no hostname, so the public instance's files stay the same. The container entrypoint passes the resolved host to the worker as `BLOCKLIST_GENERATOR_HOST`. Leave that variable unset unless you need to override it. See `.env.example`.
+Copy `.env.example` to `.env`. `ROOT_USERNAME` is the root admin's GitHub login. Production also requires `ROOT_GITHUB_ID`, that account's numeric GitHub user id. Find it at `https://api.github.com/users/<username>`. See `.env.example`.
+
+Generated list headers name this instance. The hostname comes from `FRONTEND_URL`, and falls back to `lists.zachlagden.uk` when that URL has no hostname, so the public instance's files stay the same. The container entrypoint passes the resolved host to the worker as `BLOCKLIST_GENERATOR_HOST`. Leave that variable unset unless you need to override it. The worker stores that hostname with the last config hash and skips a manual rebuild only when the hash, the hostname, and the cached sources are all unchanged, so changing the hostname regenerates list files. See `.env.example`.
 
 ---
 

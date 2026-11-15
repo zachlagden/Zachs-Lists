@@ -1,4 +1,5 @@
 mod allowlist_files;
+mod build_stamp;
 mod config;
 mod db;
 mod downloader;
