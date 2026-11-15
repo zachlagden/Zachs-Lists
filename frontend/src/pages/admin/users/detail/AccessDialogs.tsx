@@ -91,6 +91,7 @@ function BanDialog({ user, onClose }: DialogProps) {
       failureTitle="The account was not banned"
       fallback="Try again in a moment."
       fields={['duration', 'reason']}
+      closeOnBackdropClick={reason.trim() === ''}
     >
       {(errors) => (
         <>
@@ -217,6 +218,7 @@ function DeleteDialog({ user, onClose }: DialogProps) {
       failureTitle="The account was not deleted"
       fallback="Try again in a moment."
       confirmDisabled={typed.trim() !== user.username}
+      closeOnBackdropClick={typed === ''}
     >
       <p>This cannot be undone. It signs the person out and permanently removes:</p>
       <ul className="m-0 grid list-disc gap-1 pl-5">

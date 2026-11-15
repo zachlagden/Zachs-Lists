@@ -120,6 +120,7 @@ export function LibraryDialog({
     <Dialog
       open
       onClose={onClose}
+      closeOnBackdropClick={selectedIds.size === 0}
       title="Add from the library"
       description="Lists this site already knows, with what each one blocks."
       footer={

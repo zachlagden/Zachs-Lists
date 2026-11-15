@@ -17,6 +17,7 @@ export interface ActionDialogProps<Result, Field extends string = never> {
   fields?: ReadonlyArray<Field>;
   confirmDisabled?: boolean;
   destructive?: boolean;
+  closeOnBackdropClick?: boolean;
   children: ReactNode | ((fieldErrors: Partial<Record<Field, string>>) => ReactNode);
 }
 
@@ -31,6 +32,7 @@ export function ActionDialog<Result, Field extends string = never>({
   fields = NO_FIELDS,
   confirmDisabled = false,
   destructive = false,
+  closeOnBackdropClick = true,
   children,
 }: ActionDialogProps<Result, Field>) {
   const action = useMutation({
@@ -51,6 +53,7 @@ export function ActionDialog<Result, Field extends string = never>({
       busy={action.isPending}
       confirmDisabled={confirmDisabled}
       destructive={destructive}
+      closeOnBackdropClick={closeOnBackdropClick}
     >
       <div className="grid gap-3">
         {typeof children === 'function' ? children(failure?.fields ?? {}) : children}

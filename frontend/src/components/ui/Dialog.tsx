@@ -3,11 +3,13 @@ import {
   useId,
   useRef,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
   type SyntheticEvent,
 } from 'react';
 import { cn } from '../../lib/cn';
 import { Button } from './Button';
+import { closesOnBackdropPress } from './dialogDismissal';
 import { IconButton } from './IconButton';
 
 export interface DialogProps {
@@ -44,6 +46,7 @@ export function Dialog({
   children,
 }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const pressStartedOnBackdrop = useRef(false);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -66,8 +69,19 @@ export function Dialog({
     if (dismissible) onClose();
   };
 
+  const handlePointerDown = (event: PointerEvent<HTMLDialogElement>) => {
+    pressStartedOnBackdrop.current = event.target === event.currentTarget;
+  };
+
   const handleBackdropClick = (event: MouseEvent<HTMLDialogElement>) => {
-    if (dismissible && closeOnBackdropClick && event.target === event.currentTarget) onClose();
+    const press = {
+      dismissible,
+      closeOnBackdropClick,
+      pressStartedOnBackdrop: pressStartedOnBackdrop.current,
+      pressEndedOnBackdrop: event.target === event.currentTarget,
+    };
+    pressStartedOnBackdrop.current = false;
+    if (closesOnBackdropPress(press)) onClose();
   };
 
   if (!open) return null;
@@ -78,6 +92,7 @@ export function Dialog({
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
       onCancel={handleCancel}
+      onPointerDown={handlePointerDown}
       onClick={handleBackdropClick}
       className={cn(
         'm-auto max-h-[min(90vh,720px)] w-[calc(100vw-32px)] overflow-hidden rounded-card border border-border-strong bg-surface p-0 text-text shadow-overlay',
@@ -131,6 +146,7 @@ export interface ConfirmDialogProps {
   busy?: boolean;
   confirmDisabled?: boolean;
   destructive?: boolean;
+  closeOnBackdropClick?: boolean;
   children?: ReactNode;
 }
 
@@ -144,6 +160,7 @@ export function ConfirmDialog({
   busy = false,
   confirmDisabled = false,
   destructive = false,
+  closeOnBackdropClick = true,
   children,
 }: ConfirmDialogProps) {
   return (
@@ -153,6 +170,7 @@ export function ConfirmDialog({
       title={title}
       size="sm"
       dismissible={!busy}
+      closeOnBackdropClick={closeOnBackdropClick}
       footer={
         <>
           <Button
