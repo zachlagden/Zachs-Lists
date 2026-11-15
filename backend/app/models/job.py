@@ -173,14 +173,6 @@ class Job:
             "updated_at": utc_iso(self.updated_at),
         }
 
-    def get_progress_snapshot(self) -> Dict[str, Any]:
-        """Get a snapshot of job state for comparison in poller."""
-        return {
-            "status": self.status,
-            "progress": self.progress,
-            "result": self.result,
-        }
-
     # Class methods
     @classmethod
     def get_by_id(cls, job_id: str) -> Optional["Job"]:
@@ -215,16 +207,6 @@ class Job:
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
         cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
-        return [cls(data) for data in cursor]
-
-    @classmethod
-    def get_queued(cls) -> List["Job"]:
-        """Get queued jobs."""
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find({"status": cls.STATUS_QUEUED})
-            .sort("created_at", 1)
-        )
         return [cls(data) for data in cursor]
 
     @classmethod
@@ -353,53 +335,6 @@ class Job:
     def count_queued(cls) -> int:
         """Count jobs waiting in queue."""
         return mongo.db[cls.COLLECTION].count_documents({"status": cls.STATUS_QUEUED})
-
-    @classmethod
-    def get_queue_position(cls, job_id: str) -> int:
-        """
-        Get the position of a job in the queue (1-based).
-        Returns 0 if job is not queued.
-        """
-        job = cls.get_by_id(job_id)
-        if not job or job.status != cls.STATUS_QUEUED:
-            return 0
-
-        # Count jobs ahead in queue (higher priority or same priority but earlier)
-        count = mongo.db[cls.COLLECTION].count_documents(
-            {
-                "status": cls.STATUS_QUEUED,
-                "$or": [
-                    {
-                        "priority": {"$lt": job.priority}
-                    },  # Higher priority (lower number)
-                    {"priority": job.priority, "created_at": {"$lt": job.created_at}},
-                ],
-            }
-        )
-        return count + 1  # 1-based position
-
-    @classmethod
-    def get_active_worker_count(cls) -> int:
-        """Count the number of active workers (distinct worker_ids processing jobs)."""
-        pipeline = [
-            {"$match": {"status": cls.STATUS_PROCESSING, "worker_id": {"$ne": None}}},
-            {"$group": {"_id": "$worker_id"}},
-            {"$count": "count"},
-        ]
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-        return result[0]["count"] if result else 0
-
-    @classmethod
-    def get_queue_stats(cls) -> dict:
-        """
-        Get comprehensive queue statistics.
-        Returns dict with queue_length, active_workers, processing_count.
-        """
-        return {
-            "queue_length": cls.count_queued(),
-            "active_workers": cls.get_active_worker_count(),
-            "processing_count": cls.count_processing(),
-        }
 
     # Cooldown and scheduling methods
 

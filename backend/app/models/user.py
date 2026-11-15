@@ -327,11 +327,6 @@ class User:
         used = stats.get("manual_updates_this_week", 0)
         return used if isinstance(used, int) and used > 0 else 0
 
-    def can_do_manual_update(self, now: Optional[datetime] = None) -> bool:
-        if self.is_admin:
-            return True
-        return self.get_remaining_manual_updates(now) > 0
-
     def get_remaining_manual_updates(self, now: Optional[datetime] = None) -> int:
         limit = self.limits["manual_updates_per_week"]
         return max(0, limit - self.manual_updates_used(now))

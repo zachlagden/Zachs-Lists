@@ -331,7 +331,6 @@ def test_counter_from_an_earlier_week_resets_on_the_next_charge(site: Site) -> N
     stale = User.get_by_id(site.sam.id)
     assert stale is not None
     assert stale.get_remaining_manual_updates() == WEEKLY_LIMIT
-    assert stale.can_do_manual_update()
     assert stale.stats["manual_updates_this_week"] == 0
 
     admit_build(site.sam, Job.TYPE_MANUAL, site.sam)
@@ -377,7 +376,6 @@ def test_counter_in_the_current_week_keeps_counting(site: Site) -> None:
     current = User.get_by_id(site.sam.id)
     assert current is not None
     assert current.get_remaining_manual_updates() == 0
-    assert not current.can_do_manual_update()
 
     assert refusal(site.sam, Job.TYPE_MANUAL, site.sam).code == "weekly_limit"
 
@@ -688,7 +686,6 @@ def test_no_client_payload_carries_the_config_snapshot(
 
     assert stored.to_dict()["target_id"] == site.sam.id
     assert "config_snapshot" not in stored.to_dict()
-    assert "config_snapshot" not in stored.get_progress_snapshot()
     events = {event for event, _, _ in site.emitted}
     assert {"job:created", "job:progress", "job:completed"} <= events
     for _, payload, _ in site.emitted:

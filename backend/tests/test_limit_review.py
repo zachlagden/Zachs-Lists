@@ -1016,6 +1016,18 @@ def test_user_and_admin_payloads_carry_the_review(site: Site) -> None:
     assert own["detected_at"].endswith("Z") and own["notified_at"].endswith("Z")
 
 
+def test_admin_stats_count_the_queued_builds(site: Site) -> None:
+    admit_build(site.sam, Job.TYPE_SCHEDULED, None)
+    admit_build(site.alex, Job.TYPE_SCHEDULED, None)
+    site.db.jobs.update_one(
+        {"target_id": site.alex.id}, {"$set": {"status": Job.STATUS_PROCESSING}}
+    )
+
+    jobs = site.client(site.admin).get("/api/admin/stats").get_json()["jobs"]
+
+    assert (jobs["queued"], jobs["processing"]) == (1, 1)
+
+
 @pytest.mark.parametrize("enforcing", [False, True])
 def test_admin_stats_say_whether_the_limit_is_enforced(
     site: Site, enforcing: bool
