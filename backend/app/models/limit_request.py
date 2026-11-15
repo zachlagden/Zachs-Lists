@@ -157,7 +157,7 @@ class LimitRequest:
             limit_changed(user, admin_username)
             user.add_notification(
                 notification_type="limit_request_approved",
-                title="Limit Request Approved",
+                title="Limit request approved",
                 message=f"Your domain limit has been increased to {final_limit:,} domains.",
                 data={"new_limit": final_limit, "request_id": self.id},
             )
@@ -181,7 +181,7 @@ class LimitRequest:
 
             user.add_notification(
                 notification_type="limit_request_denied",
-                title="Limit Request Denied",
+                title="Limit request denied",
                 message=message,
                 data={"request_id": self.id},
             )
