@@ -359,21 +359,36 @@ pub mod error_code {
     pub const ALL_SOURCES_FAILED: &str = "all_sources_failed";
     pub const NO_DOMAINS: &str = "no_domains";
     pub const TARGET_MISSING: &str = "target_missing";
+    pub const DOMAIN_LIMIT_EXCEEDED: &str = "domain_limit_exceeded";
     pub const INTERNAL: &str = "internal";
 
     #[cfg(test)]
-    pub const ALL: [&str; 6] = [
+    pub const ALL: [&str; 7] = [
         INVALID_CONFIG,
         NO_SOURCES,
         ALL_SOURCES_FAILED,
         NO_DOMAINS,
         TARGET_MISSING,
+        DOMAIN_LIMIT_EXCEEDED,
         INTERNAL,
     ];
 }
 
 pub const INTERNAL_ERROR_MESSAGE: &str =
     "The build failed because of an internal error. Please try again.";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LimitMeasurement {
+    pub max_domains: Option<u64>,
+    pub actual_domains: u64,
+}
+
+impl LimitMeasurement {
+    pub fn is_over(&self) -> bool {
+        self.max_domains
+            .is_some_and(|max_domains| self.actual_domains > max_domains)
+    }
+}
 
 /// Job result on completion
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -399,6 +414,8 @@ pub struct JobResult {
     pub skip_reason: Option<String>,
     #[serde(default)]
     pub generation_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<LimitMeasurement>,
 }
 
 /// Output file info
@@ -424,6 +441,13 @@ impl JobResult {
             errors,
             error_code: Some(code.to_string()),
             ..Self::default()
+        }
+    }
+
+    pub fn over_domain_limit(error: String, limit: LimitMeasurement) -> Self {
+        Self {
+            limit: Some(limit),
+            ..Self::failure(error_code::DOMAIN_LIMIT_EXCEEDED, vec![error])
         }
     }
 }

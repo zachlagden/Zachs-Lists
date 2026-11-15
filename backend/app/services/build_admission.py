@@ -141,7 +141,7 @@ def _admit_user_build(
         "whitelist": user.get_config("whitelist.txt") or "",
         "revision": user.config_revision,
         "limits": {
-            "max_domains": limits["max_domains"],
+            "max_domains": None if user.is_admin else limits["max_domains"],
             "max_source_lists": limits["max_source_lists"],
         },
     }

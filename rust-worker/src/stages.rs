@@ -199,6 +199,7 @@ pub struct WhitelistOutcome {
     pub progress: WhitelistProgress,
     pub ignored_lines: usize,
     pub generation: GenerationPlan,
+    pub domains_in_all_categories: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +285,7 @@ pub fn apply_whitelist(
         ),
         ignored_lines: problems.len(),
         generation,
+        domains_in_all_categories: domains_after,
     })
 }
 

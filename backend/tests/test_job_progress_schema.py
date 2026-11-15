@@ -11,7 +11,12 @@ from bson import ObjectId
 
 from app.extensions import mongo
 from app.models.job import Job
-from app.utils.job_document import initial_progress
+from app.utils.job_document import (
+    empty_result,
+    failure_result,
+    initial_progress,
+    normalised_result,
+)
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures"
 UTC_MILLISECONDS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
@@ -72,6 +77,49 @@ def test_progress_and_result_pass_through_unchanged(name: str) -> None:
     assert payload["progress"] == document["progress"]
     assert payload["result"] == document["result"]
     assert json.loads(json.dumps(payload["progress"])) == document["progress"]
+
+
+def test_empty_result_has_exactly_the_keys_the_worker_writes() -> None:
+    written = shared_fixture("job-progress.json")["completed"]["result"]
+
+    assert set(empty_result()) == set(written)
+    assert set(failure_result("internal", "It failed")) == set(written)
+
+
+def test_result_stored_in_an_older_shape_is_served_with_every_key() -> None:
+    old_shape = {
+        "sources_processed": 3,
+        "sources_failed": 0,
+        "total_domains": 40,
+        "unique_domains": 30,
+        "whitelisted_removed": 2,
+        "output_files": [],
+        "errors": ["Abandoned"],
+        "error_code": "worker_abandoned",
+    }
+    stored = stored_job(status=Job.STATUS_FAILED, result=copy.deepcopy(old_shape))
+
+    served = Job(stored).to_dict()["result"]
+
+    assert served == {
+        **old_shape,
+        "sources_stale": 0,
+        "categories": {},
+        "warnings": [],
+        "skip_reason": None,
+        "generation_id": None,
+        "limit": None,
+    }
+    assert stored["result"] == old_shape
+
+
+def test_result_normaliser_keeps_stored_values_and_passes_a_missing_result() -> None:
+    assert normalised_result(None) is None
+    assert normalised_result({"limit": {"max_domains": None, "actual_domains": 4}})[
+        "limit"
+    ] == {"max_domains": None, "actual_domains": 4}
+    assert normalised_result({"copied_from": "alex"})["copied_from"] == "alex"
+    assert normalised_result({})["output_files"] is not empty_result()["output_files"]
 
 
 def test_worker_timestamps_in_the_fixture_are_utc_with_milliseconds() -> None:

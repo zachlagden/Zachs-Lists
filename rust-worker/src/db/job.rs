@@ -6,7 +6,9 @@ use mongodb::{
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use super::progress::{error_code, JobProgress, JobResult, INTERNAL_ERROR_MESSAGE};
+use super::progress::{
+    error_code, JobProgress, JobResult, LimitMeasurement, INTERNAL_ERROR_MESSAGE,
+};
 
 /// Job type enum
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -23,6 +25,16 @@ pub struct ConfigSnapshot {
     pub blocklists: String,
     #[serde(default)]
     pub whitelist: Option<String>,
+    #[serde(default)]
+    pub limits: Option<SnapshotLimits>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+pub struct SnapshotLimits {
+    #[serde(default)]
+    pub max_domains: Option<i64>,
+    #[serde(default)]
+    pub max_source_lists: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +54,21 @@ pub struct Job {
     pub config_snapshot: Option<ConfigSnapshot>,
     #[serde(default)]
     pub attempt: i64,
+}
+
+impl Job {
+    fn snapshot_limit(&self, chosen: fn(&SnapshotLimits) -> Option<i64>) -> Option<u64> {
+        let limits = self.config_snapshot.as_ref()?.limits.as_ref()?;
+        chosen(limits).and_then(|limit| u64::try_from(limit).ok())
+    }
+
+    pub fn max_domains(&self) -> Option<u64> {
+        self.snapshot_limit(|limits| limits.max_domains)
+    }
+
+    pub fn max_source_lists(&self) -> Option<u64> {
+        self.snapshot_limit(|limits| limits.max_source_lists)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -169,8 +196,10 @@ impl JobRepository {
                 error!("Claimed job {stored_id} cannot be read: {unreadable}");
                 self.write_failure(
                     &stored_id,
-                    error_code::INTERNAL,
-                    vec![INTERNAL_ERROR_MESSAGE.to_string()],
+                    &JobResult::failure(
+                        error_code::INTERNAL,
+                        vec![INTERNAL_ERROR_MESSAGE.to_string()],
+                    ),
                     None,
                 )
                 .await?;
@@ -213,14 +242,13 @@ impl JobRepository {
     async fn write_failure(
         &self,
         stored_id: &Bson,
-        code: &str,
-        errors: Vec<String>,
+        result: &JobResult,
         progress: Option<&JobProgress>,
     ) -> Result<(), JobWriteError> {
         let mut set = doc! {
             "status": "failed",
             "completed_at": bson::DateTime::now(),
-            "result": bson::to_document(&JobResult::failure(code, errors))?,
+            "result": bson::to_document(result)?,
         };
         if let Some(progress) = progress {
             set.insert("progress", bson::to_document(progress)?);
@@ -276,8 +304,27 @@ impl JobRepository {
         errors: Vec<String>,
         progress: Option<&JobProgress>,
     ) -> Result<(), JobWriteError> {
-        self.write_failure(&Bson::ObjectId(*job_id), code, errors, progress)
-            .await
+        self.write_failure(
+            &Bson::ObjectId(*job_id),
+            &JobResult::failure(code, errors),
+            progress,
+        )
+        .await
+    }
+
+    pub async fn fail_over_domain_limit(
+        &self,
+        job_id: &ObjectId,
+        error: String,
+        limit: LimitMeasurement,
+        progress: Option<&JobProgress>,
+    ) -> Result<(), JobWriteError> {
+        self.write_failure(
+            &Bson::ObjectId(*job_id),
+            &JobResult::over_domain_limit(error, limit),
+            progress,
+        )
+        .await
     }
 
     pub async fn skip(&self, job_id: &ObjectId, reason: &str) -> Result<(), JobWriteError> {

@@ -24,6 +24,7 @@ pub struct Config {
     /// How long to keep retrying the initial MongoDB connection, in seconds
     pub mongo_connect_timeout_secs: u64,
     pub progress_update_interval_ms: u64,
+    pub enforce_domain_limit: bool,
 }
 
 pub const DEFAULT_TARGET: &str = "__default__";
@@ -74,6 +75,9 @@ impl Config {
                 .unwrap_or(300),
             progress_update_interval_ms: progress_update_interval_ms(
                 env::var("PROGRESS_UPDATE_INTERVAL_MS").ok().as_deref(),
+            ),
+            enforce_domain_limit: crate::domain_limit::is_enforced(
+                env::var("ENFORCE_DOMAIN_LIMIT").ok().as_deref(),
             ),
         }
     }

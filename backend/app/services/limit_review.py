@@ -188,6 +188,8 @@ def record_job_result(job: Job) -> ReviewChange:
     measured = result.get("limit") if isinstance(result, Mapping) else None
     if job.user_id is None or not isinstance(measured, Mapping):
         return ReviewChange()
+    if measured.get("max_domains", 0) is None:
+        return ReviewChange()
     actual_domains = _count(measured.get("actual_domains"))
     max_domains = _count(measured.get("max_domains"))
     if actual_domains is None or max_domains is None:
