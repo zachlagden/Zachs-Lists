@@ -10,18 +10,17 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 import { queryClient } from './api/queryClient';
 import { router } from './router';
-import { takeReturnPath } from './routes/returnPath';
-import { startSession, watchForExpiredSession } from './session';
-
-const SIGN_IN_LANDING_PATH = '/dashboard';
+import { returnPathOnArrival } from './routes/returnPath';
+import { onSessionExpired, startSession, watchForExpiredSession } from './session';
 
 watchForExpiredSession();
+onSessionExpired((from) => {
+  void router.navigate('/login', { replace: true, state: { from } });
+});
 
 void startSession().then((user) => {
-  const returnPath = takeReturnPath();
-  if (user && returnPath && window.location.pathname === SIGN_IN_LANDING_PATH) {
-    void router.navigate(returnPath, { replace: true });
-  }
+  const returnPath = returnPathOnArrival(user !== null, window.location.pathname);
+  if (returnPath) void router.navigate(returnPath, { replace: true });
 });
 
 const root = document.getElementById('root');

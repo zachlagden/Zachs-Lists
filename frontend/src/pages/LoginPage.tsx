@@ -5,15 +5,13 @@ import { Alert } from '../components/ui/Alert';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody } from '../components/ui/Card';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
-import { rememberReturnPath, safeReturnPath } from '../routes/returnPath';
+import { SIGN_IN_LANDING_PATH, rememberReturnPath, safeReturnPath } from '../routes/returnPath';
 import { useAuthStore } from '../store';
 import { loginErrorMessage } from '../utils/loginErrors';
 
 interface LoginLocationState {
   from?: string;
 }
-
-const SIGNED_IN_LANDING_PATH = '/dashboard';
 
 export default function LoginPage() {
   useDocumentMeta('Sign in');
@@ -27,7 +25,7 @@ export default function LoginPage() {
 
   if (isLoading) return <PagePending />;
   if (isAuthenticated) {
-    return <Navigate to={safeReturnPath(attemptedPath) ?? SIGNED_IN_LANDING_PATH} replace />;
+    return <Navigate to={safeReturnPath(attemptedPath) ?? SIGN_IN_LANDING_PATH} replace />;
   }
 
   return (
