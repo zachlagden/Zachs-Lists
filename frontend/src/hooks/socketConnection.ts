@@ -3,7 +3,8 @@ import { fetchCurrentUser } from '../api/auth';
 import { toApiError } from '../api/errors';
 import { useAuthStore, useConnectionStore } from '../store';
 import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
-import { endSession, onSessionEnd } from '../session';
+import { expireSession, onSessionEnd } from '../session';
+import { isDeadSessionStatus } from '../sessionExpiry';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || '';
 let socket: Socket | null = null;
@@ -53,8 +54,7 @@ async function reconnectIfSignedIn(current: Socket, immediately: boolean): Promi
     else scheduleReconnect(current);
   } catch (error: unknown) {
     if (socket !== current) return;
-    const status = toApiError(error).status;
-    if (status === 401 || status === 403) endSession();
+    if (isDeadSessionStatus(toApiError(error).status)) expireSession();
     else scheduleReconnect(current);
   } finally {
     if (sessionCheckSocket === current) sessionCheckSocket = null;

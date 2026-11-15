@@ -101,6 +101,7 @@ export function RequestDecisionDialog({ request, decision, onClose }: RequestDec
       }
       description={`Asked for ${formatInteger(request.requested_tier)} domains. The limit was ${formatInteger(request.current_limit)} when they asked.`}
       dismissible={!decide.isPending}
+      closeOnBackdropClick={false}
       footer={
         alreadyHandled ? (
           <Button variant="primary" onClick={onClose}>

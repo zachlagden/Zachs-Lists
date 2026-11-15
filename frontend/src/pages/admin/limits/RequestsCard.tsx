@@ -106,18 +106,18 @@ export function RequestsCard({ now }: { now: Date }) {
                     <>
                       <Button
                         size="sm"
+                        onClick={() => setDeciding({ request, decision: 'deny' })}
+                        aria-label={`Deny the request from ${request.username}`}
+                      >
+                        Deny
+                      </Button>
+                      <Button
+                        size="sm"
                         variant="primary"
                         onClick={() => setDeciding({ request, decision: 'approve' })}
                         aria-label={`Approve the request from ${request.username}`}
                       >
                         Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => setDeciding({ request, decision: 'deny' })}
-                        aria-label={`Deny the request from ${request.username}`}
-                      >
-                        Deny
                       </Button>
                     </>
                   ) : null;

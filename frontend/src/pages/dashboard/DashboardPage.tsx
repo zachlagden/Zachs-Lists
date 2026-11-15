@@ -7,13 +7,15 @@ import { toApiError } from '../../api/errors';
 import { jobsKeys, jobsQuery, startBuild } from '../../api/jobs';
 import { listsKeys, userListsQuery, type UserListsResponse } from '../../api/lists';
 import { countSourcesInText } from '../../components/config/sourceLines';
+import { BuildNowLabel } from '../../components/builds/BuildWait';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { LoadingRegion, PageHeader, Stack } from '../../components/ui/Layout';
 import { ErrorState } from '../../components/ui/States';
-import { describeBuildRefusal } from '../../lib/builds';
+import { useBuildCooldown } from '../../hooks/useBuildCooldown';
+import { buildRefusalTitle, describeBuildRefusal } from '../../lib/builds';
 import { useNow } from '../../lib/useNow';
 import { useAuthStore } from '../../store';
 import { openLimitReview } from '../../utils/limitReview';
@@ -41,6 +43,7 @@ export default function DashboardPage() {
   const config = useQuery(configQuery());
   const analytics = useQuery(userAnalyticsQuery());
   const limitRequests = useQuery(limitRequestsQuery());
+  const cooldown = useBuildCooldown();
 
   const build = useMutation({
     mutationFn: startBuild,
@@ -51,6 +54,7 @@ export default function DashboardPage() {
       return client.invalidateQueries({ queryKey: jobsKeys.list() });
     },
     onError: (error) => {
+      cooldown.noteRefusal(toApiError(error));
       const remaining = toApiError(error).body.remaining_updates;
       if (typeof remaining !== 'number') return;
       client.setQueryData<UserListsResponse>(listsKeys.mine(), (current) =>
@@ -100,10 +104,10 @@ export default function DashboardPage() {
                 variant="primary"
                 icon="bolt"
                 loading={build.isPending}
-                disabled={!core || state === 'no-config' || outOfBuilds}
+                disabled={!core || state === 'no-config' || outOfBuilds || cooldown.endsAt !== null}
                 onClick={() => build.mutate()}
               >
-                Build now
+                <BuildNowLabel endsAt={cooldown.endsAt} />
               </Button>
             )}
           </>
@@ -111,7 +115,11 @@ export default function DashboardPage() {
       />
       <Stack>
         {build.isError ? (
-          <Alert tone="warn" title="The build was not started" onDismiss={() => build.reset()}>
+          <Alert
+            tone="warn"
+            title={buildRefusalTitle(toApiError(build.error), false)}
+            onDismiss={() => build.reset()}
+          >
             {describeBuildRefusal(toApiError(build.error), now)}
           </Alert>
         ) : null}

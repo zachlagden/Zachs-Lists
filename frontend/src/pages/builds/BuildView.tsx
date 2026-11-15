@@ -50,13 +50,18 @@ export function BuildView({
       <PageHeader
         title={summary.heading}
         eyebrow={
-          <div className="flex flex-wrap items-center gap-2">
-            <JobStatusPill status={job.status} />
-            {running && paused ? (
-              <StatusPill tone="warn" icon="offline">
-                Updates paused
-              </StatusPill>
-            ) : null}
+          <div className="grid justify-items-start gap-2">
+            <Button to={backTo} variant="ghost" size="sm" icon="arrow-left" className="-ml-2.5">
+              {backLabel}
+            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <JobStatusPill status={job.status} />
+              {running && paused ? (
+                <StatusPill tone="warn" icon="offline">
+                  Updates paused
+                </StatusPill>
+              ) : null}
+            </div>
           </div>
         }
         description={
@@ -70,11 +75,6 @@ export function BuildView({
               </span>
             ) : null}
           </>
-        }
-        actions={
-          <Button to={backTo} variant="ghost" size="sm" icon="arrow-left">
-            {backLabel}
-          </Button>
         }
       />
       <p role="status" className="sr-only">

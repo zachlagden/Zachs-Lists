@@ -87,6 +87,7 @@ function AddFeaturedDialog({ onClose }: { onClose: () => void }) {
       title="Feature a list"
       description="Featured lists are shown on the public browse page. A new one goes last, and you can move it afterwards."
       dismissible={!add.isPending}
+      closeOnBackdropClick={false}
       footer={
         <>
           <Button onClick={onClose} disabled={add.isPending}>

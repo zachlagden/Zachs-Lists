@@ -61,6 +61,7 @@ export function ResolveReviewDialog({ review, onClose, onResolved }: ResolveRevi
       title={`Resolve the limit review for ${review.username}`}
       description={`Measured at ${formatInteger(review.actual_domains)} domains against a limit of ${formatInteger(review.max_domains)}.`}
       dismissible={!resolve.isPending}
+      closeOnBackdropClick={false}
       footer={
         <>
           <Button onClick={onClose} disabled={resolve.isPending}>

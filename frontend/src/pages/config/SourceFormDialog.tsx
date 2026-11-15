@@ -101,6 +101,7 @@ export function SourceFormDialog({
     <Dialog
       open
       onClose={onClose}
+      closeOnBackdropClick={false}
       title={mode === 'add' ? 'Add a source by URL' : 'Edit source'}
       description={
         mode === 'add'

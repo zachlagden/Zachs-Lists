@@ -2,12 +2,20 @@ import { authKeys, fetchSession, signOut } from './api/auth';
 import { onUnauthorized } from './api/http';
 import { queryClient } from './api/queryClient';
 import { rememberReturnPath } from './routes/returnPath';
+import { createSessionExpiry, sessionAfterRefresh } from './sessionExpiry';
 import { useAuthStore } from './store';
 import type { User } from './types';
 
 type SessionCleanup = () => void;
+type LoginNavigator = (from: string) => void;
 
 const sessionCleanups = new Set<SessionCleanup>();
+
+let showLogin: LoginNavigator | null = null;
+
+export function onSessionExpired(navigate: LoginNavigator): void {
+  showLogin = navigate;
+}
 
 export function onSessionEnd(cleanup: SessionCleanup): void {
   sessionCleanups.add(cleanup);
@@ -44,21 +52,25 @@ export async function refreshSession(): Promise<void> {
       retry: false,
       staleTime: 0,
     });
-    if (user && useAuthStore.getState().isAuthenticated) useAuthStore.getState().setUser(user);
+    const outcome = sessionAfterRefresh(useAuthStore.getState().isAuthenticated, user !== null);
+    if (outcome === 'expired') expireSession();
+    else if (outcome === 'updated') useAuthStore.getState().setUser(user);
   } catch {
     return;
   }
 }
 
-function handleExpiredSession(): void {
-  if (!useAuthStore.getState().isAuthenticated) return;
-  rememberReturnPath(`${window.location.pathname}${window.location.search}`);
-  useAuthStore.getState().markSessionEnded();
-  endSession();
-}
+export const expireSession = createSessionExpiry({
+  isSignedIn: () => useAuthStore.getState().isAuthenticated,
+  currentPath: () => `${window.location.pathname}${window.location.search}`,
+  rememberReturnPath,
+  markSessionEnded: () => useAuthStore.getState().markSessionEnded(),
+  endSession,
+  showLogin: (from) => showLogin?.(from),
+});
 
 export function watchForExpiredSession(): void {
-  onUnauthorized(handleExpiredSession);
+  onUnauthorized(expireSession);
 }
 
 export async function signOutOfSession(): Promise<boolean> {

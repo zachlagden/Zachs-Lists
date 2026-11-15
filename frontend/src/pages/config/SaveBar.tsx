@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { BuildWait } from '../../components/builds/BuildWait';
 import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
 
@@ -9,6 +10,7 @@ export interface SaveBarProps {
   busy: 'save' | 'build' | null;
   blocked: boolean;
   canBuild: boolean;
+  cooldownEndsAt: number | null;
   onDiscard: () => void;
   onSave: () => void;
   onSaveAndBuild: () => void;
@@ -19,6 +21,7 @@ export function SaveBar({
   busy,
   blocked,
   canBuild,
+  cooldownEndsAt,
   onDiscard,
   onSave,
   onSaveAndBuild,
@@ -44,6 +47,12 @@ export function SaveBar({
       </StatusPill>
       <p className="min-w-0 flex-1 text-[13px] text-text-secondary narrow:basis-full narrow:text-center">
         {summary}
+        {cooldownEndsAt !== null ? (
+          <>
+            {' '}
+            <BuildWait endsAt={cooldownEndsAt} />
+          </>
+        ) : null}
       </p>
       <Button
         variant="ghost"
@@ -65,7 +74,7 @@ export function SaveBar({
         variant="primary"
         icon="bolt"
         loading={busy === 'build'}
-        disabled={working || blocked || !canBuild}
+        disabled={working || blocked || !canBuild || cooldownEndsAt !== null}
         onClick={onSaveAndBuild}
         className="narrow:flex-1 narrow:px-2"
       >

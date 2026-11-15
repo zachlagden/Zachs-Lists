@@ -41,11 +41,11 @@ export function RestoreAlert({
       title="You have unsaved changes from before"
       actions={
         <>
-          <Button size="sm" onClick={onRestore}>
-            Restore them
-          </Button>
           <Button size="sm" variant="ghost" onClick={onDiscard}>
             Discard them
+          </Button>
+          <Button size="sm" onClick={onRestore}>
+            Restore them
           </Button>
         </>
       }
