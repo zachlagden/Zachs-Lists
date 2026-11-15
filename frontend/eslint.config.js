@@ -7,14 +7,7 @@ import tseslint from 'typescript-eslint';
 const pagesAwaitingRebuild = [
   'src/pages/AdminPage.tsx',
   'src/pages/AdminUserDetailPage.tsx',
-  'src/pages/ConfigPage.tsx',
-  'src/components/config/**',
   'src/components/jobs/**',
-];
-
-const editorsMountedOnce = [
-  'src/components/config/AdvancedConfigEditor.tsx',
-  'src/components/config/WhitelistEditor.tsx',
 ];
 
 export default tseslint.config(
@@ -49,10 +42,6 @@ export default tseslint.config(
       'react-hooks/immutability': 'off',
       'react-hooks/purity': 'off',
     },
-  },
-  {
-    files: editorsMountedOnce,
-    rules: { 'react-hooks/exhaustive-deps': 'off' },
   },
   {
     files: ['*.config.{js,ts}'],
