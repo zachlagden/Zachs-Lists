@@ -387,6 +387,42 @@ JO = Account(
     whitelist=JO_WHITELIST,
 )
 ACCOUNTS = (ALEX, SAM, JO)
+MEMBER_NAMES = (
+    "avery",
+    "blake",
+    "casey",
+    "dana",
+    "eden",
+    "finley",
+    "gray",
+    "harper",
+    "indigo",
+    "jules",
+    "kai",
+    "logan",
+    "morgan",
+    "noel",
+    "oakley",
+    "parker",
+    "quinn",
+    "riley",
+    "sage",
+    "taylor",
+    "umber",
+    "val",
+    "wren",
+    "xen",
+    "yael",
+    "zion",
+    "ash",
+    "bryn",
+    "cleo",
+    "drew",
+)
+MEMBER_FIRST_GITHUB_ID = 1000100
+DISABLED_MEMBER = "casey"
+BANNED_MEMBER = "dana"
+SECOND_ADMIN = "robin"
 DEFAULT_SOURCES = (
     CATALOGUE["acme_everything"].source(DOWNLOADED, 2_310),
     CATALOGUE["acme_ads_basic"].source(CACHED),
@@ -1243,6 +1279,7 @@ class Seeder:
         self.seed_jo(users["jo"])
         self.seed_featured()
         self.seed_analytics(users["alex"])
+        self.seed_members()
         return [self.reloaded(user) for user in users.values()]
 
     def reloaded(self, user: "User") -> "User":
@@ -1284,6 +1321,33 @@ class Seeder:
             },
         )
         return self.reloaded(user)
+
+    def seed_members(self) -> None:
+        names = (*MEMBER_NAMES, SECOND_ADMIN)
+        for offset, username in enumerate(names):
+            self.create_user(
+                Account(
+                    username=username,
+                    name=f"{username.capitalize()} Example",
+                    github_id=MEMBER_FIRST_GITHUB_ID + offset,
+                    is_admin=username == SECOND_ADMIN,
+                    joined_days_ago=3 + offset * 4,
+                    sources=(),
+                    whitelist="",
+                )
+            )
+        self.database.users.update_one(
+            {"username": DISABLED_MEMBER}, {"$set": {"is_enabled": False}}
+        )
+        self.database.users.update_one(
+            {"username": BANNED_MEMBER},
+            {
+                "$set": {
+                    "banned_until": self.now + timedelta(days=6),
+                    "ban_reason": "Repeated automated sign-ups from one address.",
+                }
+            },
+        )
 
     def save_config(
         self, user: "User", sources: Sequence[SeedSource], whitelist: str

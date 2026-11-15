@@ -318,7 +318,7 @@ export interface AdminStats {
     total_bandwidth: number;
     period_days: number;
   };
-  limits?: {
+  limits: {
     enforce_domain_limit: boolean;
   };
 }
@@ -390,7 +390,7 @@ export interface AdminLimitReview {
   max_domains: number;
   actual_domains: number;
   percent_over: number;
-  method: string;
+  method: string | null;
   detected_at: string | null;
   notified: boolean;
   has_pending_request: boolean;

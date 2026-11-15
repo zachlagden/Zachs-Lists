@@ -1,5 +1,5 @@
-import { queryOptions } from '@tanstack/react-query';
-import type { LibraryEntry } from '../components/config/types';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { mergeFetchedList } from '../realtime/jobMerge';
 import type {
   AdminLimitReviewPage,
   AdminStats,
@@ -17,8 +17,9 @@ import type {
 import { del, get, post, put } from './http';
 
 export const ADMIN_USERS_PAGE_SIZE = 25;
-export const ADMIN_JOBS_LIMIT = 50;
-export const ADMIN_LIMIT_REVIEWS_PAGE_SIZE = 100;
+export const ADMIN_JOBS_LIMIT = 100;
+export const ADMIN_LIMIT_REVIEWS_PAGE_SIZE = 25;
+export const ADMIN_STATS_FRESH_MS = 30_000;
 export const ADMIN_ANNOUNCEMENTS_LIMIT = 50;
 export const ADMIN_CHART_DAYS = 30;
 
@@ -46,6 +47,7 @@ export interface AdminUserFilters {
   showRegular?: boolean;
   showEnabled?: boolean;
   showDisabled?: boolean;
+  bannedOnly?: boolean;
 }
 
 export interface AdminUsersPage {
@@ -88,8 +90,8 @@ export interface AdminJobsResponse {
 }
 
 export interface AdminSystemStats extends AdminStats {
-  limits: {
-    enforce_domain_limit: boolean;
+  workers: {
+    alive: number;
   };
 }
 
@@ -152,15 +154,37 @@ export interface LimitRequestReviewed {
   request: LimitRequest;
 }
 
+export type LibraryCategory =
+  | 'comprehensive'
+  | 'malicious'
+  | 'advertising'
+  | 'tracking'
+  | 'suspicious'
+  | 'nsfw';
+
+export interface LibraryEntry {
+  id: string;
+  url: string;
+  name: string;
+  category: LibraryCategory;
+  description: string;
+  recommended: boolean;
+  aggressiveness: number;
+  domain_count: number;
+  added_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface AdminLibraryResponse {
   library: LibraryEntry[];
-  categories: string[];
+  categories: LibraryCategory[];
 }
 
 export interface LibraryEntrySubmission {
   url: string;
   name: string;
-  category: string;
+  category: LibraryCategory;
   description?: string;
   recommended?: boolean;
   aggressiveness?: number;
@@ -237,6 +261,7 @@ export function fetchAdminUsers(filters: AdminUserFilters = {}): Promise<AdminUs
     show_regular: filters.showRegular ?? true,
     show_enabled: filters.showEnabled ?? true,
     show_disabled: filters.showDisabled ?? true,
+    banned_only: filters.bannedOnly ? true : undefined,
   });
 }
 
@@ -430,6 +455,7 @@ export const adminUsersQuery = (filters: AdminUserFilters = {}) =>
   queryOptions({
     queryKey: adminKeys.userList(filters),
     queryFn: () => fetchAdminUsers(filters),
+    placeholderData: keepPreviousData,
   });
 
 export const adminUserQuery = (userId: string) =>
@@ -438,14 +464,26 @@ export const adminUserQuery = (userId: string) =>
 export const adminUserIpsQuery = (userId: string) =>
   queryOptions({ queryKey: adminKeys.userIps(userId), queryFn: () => fetchAdminUserIps(userId) });
 
-export const adminJobsQuery = (limit: number = ADMIN_JOBS_LIMIT) =>
-  queryOptions({ queryKey: adminKeys.jobList(limit), queryFn: () => fetchAdminJobs(limit) });
+export const adminJobsQuery = () =>
+  queryOptions({
+    queryKey: adminKeys.jobList(ADMIN_JOBS_LIMIT),
+    queryFn: async ({ client }): Promise<AdminJobsResponse> => {
+      const fetched = await fetchAdminJobs(ADMIN_JOBS_LIMIT);
+      const stored = client.getQueryData<AdminJobsResponse>(adminKeys.jobList(ADMIN_JOBS_LIMIT));
+      if (!stored) return fetched;
+      return { jobs: mergeFetchedList(stored.jobs, fetched.jobs).slice(0, ADMIN_JOBS_LIMIT) };
+    },
+  });
 
 export const adminJobQuery = (jobId: string) =>
   queryOptions({ queryKey: adminKeys.job(jobId), queryFn: () => fetchAdminJob(jobId) });
 
 export const adminStatsQuery = () =>
-  queryOptions({ queryKey: adminKeys.stats(), queryFn: fetchAdminStats });
+  queryOptions({
+    queryKey: adminKeys.stats(),
+    queryFn: fetchAdminStats,
+    staleTime: ADMIN_STATS_FRESH_MS,
+  });
 
 export const jobsPerDayQuery = (days: number = ADMIN_CHART_DAYS) =>
   queryOptions({ queryKey: adminKeys.jobsPerDay(days), queryFn: () => fetchJobsPerDay(days) });
@@ -475,6 +513,7 @@ export const limitReviewsQuery = (
   queryOptions({
     queryKey: adminKeys.limitReviewPage(page, perPage),
     queryFn: () => fetchLimitReviews(page, perPage),
+    placeholderData: keepPreviousData,
   });
 
 export const libraryQuery = (category?: string) =>

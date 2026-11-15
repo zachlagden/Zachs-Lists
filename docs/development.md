@@ -88,6 +88,7 @@ What it creates:
 | `alex`         | A regular account with eight sources, a whitelist, six published lists and a limit raised to 10,000,000 by an approved request. Its jobs are two completed scheduled builds, one skipped build, one failed build over the domain limit and one build in mid download. |
 | `sam`          | An admin with three sources, four published lists and two completed builds.                                                                                                                                                                                           |
 | `jo`           | A regular account over the domain limit, with an open limit review, an unread notification and a pending limit request.                                                                                                                                               |
+| Other accounts | Thirty regular accounts with no configuration, among them `casey`, which is disabled, and `dana`, which is banned, and a second admin, `robin`. They fill the admin user list and print no cookie.                                                                    |
 | Default lists  | A default configuration, six published lists and one completed build.                                                                                                                                                                                                 |
 | Shared content | Three active announcements, one for each type, and one inactive. Ten library entries. One featured list. Thirty days of download analytics for alex's lists and the default lists. Cache metadata with a domain count for every library source.                       |
 
@@ -171,15 +172,15 @@ The "Sign in with GitHub" route does not work unless `GITHUB_CLIENT_ID` and `GIT
 uv run --no-project python backend/scripts/dev_replay_build.py --create
 ```
 
-| Option            | Default     | Meaning                                                                                 |
-| ----------------- | ----------- | --------------------------------------------------------------------------------------- |
-| `--username`      | `alex`      | The account whose build is replayed.                                                    |
-| `--create`        | off         | Queue a manual build when the account has no active one. It charges no weekly quota.    |
-| `--step-seconds`  | `1.0`       | The pause between writes. A full build takes about 25 steps.                            |
-| `--outcome`       | `completed` | `completed`, `failed` or `skipped`.                                                     |
-| `--error-code`    | none        | With `--outcome failed`, the error code the build ends with. See the list below.        |
-| `--sources`       | `0`         | Pad the build with made-up sources up to this many, to exercise a long source table.    |
-| `--queue-seconds` | `0`         | Leave the build queued for this long before the replay claims it.                       |
+| Option            | Default     | Meaning                                                                              |
+| ----------------- | ----------- | ------------------------------------------------------------------------------------ |
+| `--username`      | `alex`      | The account whose build is replayed.                                                 |
+| `--create`        | off         | Queue a manual build when the account has no active one. It charges no weekly quota. |
+| `--step-seconds`  | `1.0`       | The pause between writes. A full build takes about 25 steps.                         |
+| `--outcome`       | `completed` | `completed`, `failed` or `skipped`.                                                  |
+| `--error-code`    | none        | With `--outcome failed`, the error code the build ends with. See the list below.     |
+| `--sources`       | `0`         | Pad the build with made-up sources up to this many, to exercise a long source table. |
+| `--queue-seconds` | `0`         | Leave the build queued for this long before the replay claims it.                    |
 
 Which job it takes:
 
