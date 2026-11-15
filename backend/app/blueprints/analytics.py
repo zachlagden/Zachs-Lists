@@ -3,7 +3,7 @@ from flask import Blueprint, Response, jsonify, request
 from app.blueprints.auth import admin_required, login_required
 from app.models.analytics import Analytics
 from app.models.user import User
-from app.services.site_stats import public_stats
+from app.services.site_stats import public_report, public_stats
 
 analytics_bp = Blueprint("analytics", __name__)
 
@@ -14,7 +14,7 @@ def requested_days() -> int:
 
 @analytics_bp.route("/default", methods=["GET"])
 def get_default_analytics() -> Response:
-    return jsonify(Analytics.public_report(requested_days()))
+    return jsonify(public_report(requested_days()))
 
 
 @analytics_bp.route("/user", methods=["GET"])
