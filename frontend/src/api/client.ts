@@ -79,8 +79,11 @@ export const userApi = {
     return response.data;
   },
 
-  updateWhitelist: async (whitelist: string) => {
-    const response = await api.put('/api/user/whitelist', { whitelist });
+  updateWhitelist: async (whitelist: string, publishAllowlist: boolean) => {
+    const response = await api.put('/api/user/whitelist', {
+      whitelist,
+      publish_allowlist: publishAllowlist,
+    });
     return response.data;
   },
 
@@ -283,10 +286,11 @@ export const adminApi = {
     return response.data;
   },
 
-  updateDefaultConfig: async (config?: string, whitelist?: string) => {
+  updateDefaultConfig: async (config?: string, whitelist?: string, publishAllowlist?: boolean) => {
     const response = await api.put('/api/admin/default/config', {
       config,
       whitelist,
+      publish_allowlist: publishAllowlist,
     });
     return response.data;
   },

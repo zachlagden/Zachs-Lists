@@ -17,6 +17,8 @@ class Analytics:
     # List types
     TYPE_DEFAULT = "default"
     TYPE_USER = "user"
+    # Allowlist downloads are not blocklist stats.
+    TYPE_ALLOWLIST = "allowlist"
 
     def __init__(self, data: Dict[str, Any]):
         self._data = data

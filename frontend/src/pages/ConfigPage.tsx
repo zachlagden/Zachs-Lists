@@ -31,6 +31,8 @@ export default function ConfigPage() {
   });
   const [localConfig, setLocalConfig] = useState(config);
   const [localWhitelist, setLocalWhitelist] = useState(whitelist);
+  const [publishAllowlist, setPublishAllowlist] = useState(false);
+  const [localPublishAllowlist, setLocalPublishAllowlist] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -66,10 +68,13 @@ export default function ConfigPage() {
           userApi.getConfig(),
           userApi.getWhitelist(),
         ]);
+        const published = Boolean(whitelistData.publish_allowlist);
         setConfig(configData.config || '');
         setWhitelist(whitelistData.whitelist || '');
+        setPublishAllowlist(published);
         setLocalConfig(configData.config || '');
         setLocalWhitelist(whitelistData.whitelist || '');
+        setLocalPublishAllowlist(published);
       } catch (error) {
         console.error('Failed to fetch config:', error);
         setMessage({ type: 'error', text: 'Failed to load configuration' });
@@ -83,9 +88,18 @@ export default function ConfigPage() {
   useEffect(() => {
     const isChanged =
       (activeTab === 'blocklists' && localConfig !== config) ||
-      (activeTab === 'whitelist' && localWhitelist !== whitelist);
+      (activeTab === 'whitelist' &&
+        (localWhitelist !== whitelist || localPublishAllowlist !== publishAllowlist));
     setHasChanges(isChanged);
-  }, [localConfig, localWhitelist, config, whitelist, activeTab]);
+  }, [
+    localConfig,
+    localWhitelist,
+    localPublishAllowlist,
+    config,
+    whitelist,
+    publishAllowlist,
+    activeTab,
+  ]);
 
   // Clear validation token when config changes (user edited after validation)
   useEffect(() => {
@@ -142,8 +156,9 @@ export default function ConfigPage() {
         await userApi.updateConfig(localConfig, validationToken!);
         setConfig(localConfig);
       } else {
-        await userApi.updateWhitelist(localWhitelist);
+        await userApi.updateWhitelist(localWhitelist, localPublishAllowlist);
         setWhitelist(localWhitelist);
+        setPublishAllowlist(localPublishAllowlist);
       }
       setMessage({ type: 'success', text: 'Configuration saved successfully' });
       setHasChanges(false);
@@ -178,10 +193,13 @@ export default function ConfigPage() {
         userApi.getConfig(),
         userApi.getWhitelist(),
       ]);
+      const published = Boolean(whitelistData.publish_allowlist);
       setConfig(configData.config || '');
       setWhitelist(whitelistData.whitelist || '');
+      setPublishAllowlist(published);
       setLocalConfig(configData.config || '');
       setLocalWhitelist(whitelistData.whitelist || '');
+      setLocalPublishAllowlist(published);
       setMessage({ type: 'success', text: 'Default template copied successfully' });
     } catch (error) {
       console.error('Failed to copy template:', error);
@@ -196,6 +214,7 @@ export default function ConfigPage() {
       setLocalConfig(config);
     } else {
       setLocalWhitelist(whitelist);
+      setLocalPublishAllowlist(publishAllowlist);
     }
     setHasChanges(false);
     setValidationResult(null);
@@ -351,15 +370,30 @@ export default function ConfigPage() {
               <div>
                 <h2 className="font-semibold text-pihole-text">Whitelist</h2>
                 <p className="text-sm text-pihole-text-muted mt-1">
-                  Domains to exclude from blocking. Supports exact, wildcard (*), and regex
+                  Domains to exclude from blocking. Supports exact, @@apex, wildcard (*), and regex
                   patterns.
                 </p>
               </div>
             </div>
+            <label className="flex items-start gap-3 text-sm text-pihole-text cursor-pointer">
+              <input
+                type="checkbox"
+                checked={localPublishAllowlist}
+                onChange={(event) => setLocalPublishAllowlist(event.target.checked)}
+                className="mt-1 rounded border-pihole-border bg-pihole-dark text-pihole-accent focus:ring-pihole-accent"
+              />
+              <span>
+                <span className="font-medium">Publish as a Pi-hole v6 allowlist</span>
+                <span className="block text-yellow-500 mt-1">
+                  Published lists are world-readable. On a public instance anyone with the URL can
+                  download your whitelist.
+                </span>
+              </span>
+            </label>
             <WhitelistEditor
               value={localWhitelist}
               onChange={setLocalWhitelist}
-              placeholder="# Exact domain match&#10;example.com&#10;&#10;# Wildcard (matches subdomains)&#10;*.example.com&#10;&#10;# Regex pattern&#10;/^ads?\d*\./"
+              placeholder="# Exact domain match&#10;example.com&#10;&#10;# Apex and subdomains&#10;@@example.com&#10;&#10;# Subdomains only&#10;*.example.com&#10;&#10;# Regex pattern&#10;/^ads?\d*\./"
             />
           </div>
         )}
@@ -435,6 +469,9 @@ export default function ConfigPage() {
             <ul className="space-y-1 text-pihole-text-muted">
               <li>
                 <code className="text-pihole-accent">example.com</code> - Exact match
+              </li>
+              <li>
+                <code className="text-pihole-accent">@@example.com</code> - Apex and subdomains
               </li>
               <li>
                 <code className="text-pihole-accent">*.example.com</code> - Wildcard (subdomains)

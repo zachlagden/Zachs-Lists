@@ -4,7 +4,7 @@ import { api, listsApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import PublicNav from '../components/PublicNav';
 import { Footer } from '../components/home';
-import { getDefaultListUrl, getUserListUrl } from '../config/site';
+import { ALLOWLIST_NAME, getDefaultListUrl, getUserListUrl } from '../config/site';
 
 interface FeaturedList {
   id: string;
@@ -40,8 +40,12 @@ export default function BrowsePage() {
             .then((r) => r.data)
             .catch(() => []),
         ]);
-        setDefaultLists(defaultData);
-        setFeaturedLists(featuredData);
+        setDefaultLists(
+          (defaultData || []).filter((list: DefaultList) => list.name !== ALLOWLIST_NAME),
+        );
+        setFeaturedLists(
+          (featuredData || []).filter((list: FeaturedList) => list.list_name !== ALLOWLIST_NAME),
+        );
       } catch (error) {
         console.error('Failed to fetch lists:', error);
       } finally {

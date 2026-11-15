@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminApi } from '../api/client';
+import { getDefaultAllowlistUrl } from '../config/site';
 import { useAuthStore } from '../store';
 import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -129,8 +130,10 @@ export default function AdminPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
-  const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
-  const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
+  const emptyDefaultConfig = { config: '', whitelist: '', publish_allowlist: false };
+  const [savedDefaultConfig, setSavedDefaultConfig] = useState(emptyDefaultConfig);
+  const [localConfig, setLocalConfig] = useState(emptyDefaultConfig);
+  const [copiedAllowlist, setCopiedAllowlist] = useState(false);
   const [analytics, setAnalytics] = useState<{
     requests_over_time: { date: string; count: number }[];
     geo_distribution: Record<string, number>;
@@ -296,7 +299,11 @@ export default function AdminPage() {
           adminApi.getStats().catch(() => null),
           adminApi.getAllJobs().catch(() => ({ jobs: [] })),
           adminApi.getFeaturedLists().catch(() => ({ featured: [] })),
-          adminApi.getDefaultConfig().catch(() => ({ config: '', whitelist: '' })),
+          adminApi.getDefaultConfig().catch(() => ({
+            config: '',
+            whitelist: '',
+            publish_allowlist: false,
+          })),
           adminApi.getAdminAnalytics(30).catch(() => null),
           adminApi.getJobsPerDay(30).catch(() => ({ jobs_per_day: [] })),
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
@@ -305,11 +312,16 @@ export default function AdminPage() {
           adminApi.getAnnouncements().catch(() => ({ announcements: [] })),
         ]);
 
+        const normalizedConfig = {
+          config: configData.config || '',
+          whitelist: configData.whitelist || '',
+          publish_allowlist: Boolean(configData.publish_allowlist),
+        };
         setStats(statsData);
         setJobs(jobsData.jobs || []);
         setFeatured(featuredData?.featured || []);
-        setDefaultConfig(configData);
-        setLocalConfig(configData);
+        setSavedDefaultConfig(normalizedConfig);
+        setLocalConfig(normalizedConfig);
         setAnalytics(analyticsData);
         setJobsPerDay(jobsPerDayData?.jobs_per_day || []);
         setUserGrowth(userGrowthData?.user_growth || []);
@@ -390,8 +402,12 @@ export default function AdminPage() {
   const handleSaveDefaultConfig = async () => {
     setSaving(true);
     try {
-      await adminApi.updateDefaultConfig(localConfig.config, localConfig.whitelist);
-      setDefaultConfig(localConfig);
+      await adminApi.updateDefaultConfig(
+        localConfig.config,
+        localConfig.whitelist,
+        localConfig.publish_allowlist,
+      );
+      setSavedDefaultConfig(localConfig);
       setMessage({ type: 'success', text: 'Default config saved' });
     } catch (error) {
       console.error('Failed to save config:', error);
@@ -1301,6 +1317,46 @@ export default function AdminPage() {
                 className="w-full h-80 bg-pihole-darkest border border-pihole-border rounded-lg p-4 font-mono text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
                 placeholder="# Enter whitelist patterns..."
               />
+              <label className="mt-4 flex items-start gap-3 text-sm text-pihole-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localConfig.publish_allowlist}
+                  onChange={(e) =>
+                    setLocalConfig({ ...localConfig, publish_allowlist: e.target.checked })
+                  }
+                  className="mt-1 rounded border-pihole-border bg-pihole-dark text-pihole-accent focus:ring-pihole-accent"
+                />
+                <span>
+                  <span className="font-medium">Publish as a Pi-hole v6 allowlist</span>
+                  <span className="block text-yellow-500 mt-1">
+                    Published lists are world-readable. On a public instance anyone with the URL can
+                    download this whitelist.
+                  </span>
+                </span>
+              </label>
+              {localConfig.publish_allowlist &&
+                (savedDefaultConfig.publish_allowlist ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <code className="flex-1 bg-pihole-darkest border border-pihole-border rounded px-3 py-2 text-sm text-pihole-text-muted overflow-x-auto">
+                      {getDefaultAllowlistUrl()}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getDefaultAllowlistUrl());
+                        setCopiedAllowlist(true);
+                        setTimeout(() => setCopiedAllowlist(false), 2000);
+                      }}
+                      className="btn btn-ghost text-sm shrink-0"
+                    >
+                      {copiedAllowlist ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-pihole-text-muted">
+                    Save to publish /lists/allowlist.txt.
+                  </p>
+                ))}
             </div>
           </div>
 

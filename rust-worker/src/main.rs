@@ -1,3 +1,4 @@
+mod allowlist_files;
 mod config;
 mod db;
 mod downloader;
