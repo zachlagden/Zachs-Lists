@@ -1,8 +1,13 @@
-import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 import { get, post, put, request } from './http';
+import {
+  knownMetadata,
+  loadUrlMetadata,
+  type UrlMetadataCache,
+  type UrlMetadataResponse,
+} from './urlMetadataCache';
 
 export const VALIDATION_TIMEOUT_MS = 120_000;
-export const URL_METADATA_BATCH_SIZE = 100;
 
 export interface LibraryEntry {
   id: string;
@@ -57,7 +62,7 @@ export interface ValidationResponse {
   revision: number;
 }
 
-export type UrlMetadataResponse = Record<string, { domain_count: number | null; cached: boolean }>;
+export type { UrlMetadataResponse };
 
 export interface TemplateCopied {
   success: boolean;
@@ -98,17 +103,14 @@ export function fetchCategories(): Promise<CategoriesResponse> {
   return get<CategoriesResponse>('/api/user/config/categories');
 }
 
-export async function fetchUrlMetadata(urls: readonly string[]): Promise<UrlMetadataResponse> {
-  const batches: string[][] = [];
-  for (let start = 0; start < urls.length; start += URL_METADATA_BATCH_SIZE) {
-    batches.push(urls.slice(start, start + URL_METADATA_BATCH_SIZE));
-  }
-  const answers = await Promise.all(
-    batches.map((batch) =>
-      post<UrlMetadataResponse>('/api/user/config/url-metadata', { urls: batch }),
-    ),
-  );
-  return Object.assign({}, ...answers) as UrlMetadataResponse;
+const urlMetadataCache: UrlMetadataCache = new Map();
+
+function fetchUrlMetadataBatch(urls: string[]): Promise<UrlMetadataResponse> {
+  return post<UrlMetadataResponse>('/api/user/config/url-metadata', { urls });
+}
+
+export function fetchUrlMetadata(urls: readonly string[]): Promise<UrlMetadataResponse> {
+  return loadUrlMetadata(urls, urlMetadataCache, fetchUrlMetadataBatch, Date.now);
 }
 
 export function fetchLibrary(): Promise<LibraryResponse> {
@@ -148,5 +150,6 @@ export const urlMetadataQuery = (urls: readonly string[]) =>
     queryKey: configKeys.urlMetadata(urls),
     queryFn: () => fetchUrlMetadata(urls),
     enabled: urls.length > 0,
-    placeholderData: keepPreviousData,
+    placeholderData: () => knownMetadata(urls, urlMetadataCache),
+    retry: false,
   });
