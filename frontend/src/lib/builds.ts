@@ -58,6 +58,40 @@ export function sourceProblemCause(report: string | null | undefined): string {
   return sentence(bracketed ? bracketed[1] : text.split(';')[0]);
 }
 
+const MS_PER_SECOND = 1000;
+
+export function cooldownEndsAt(error: ApiError, refusedAt: number): number | null {
+  const refusal = buildRefusal(error);
+  if (refusal?.code !== 'cooldown') return null;
+  const seconds = refusal.cooldown_remaining;
+  return typeof seconds === 'number' && seconds > 0 ? refusedAt + seconds * MS_PER_SECOND : null;
+}
+
+export function cooldownSecondsLeft(endsAt: number | null, now: number): number {
+  if (endsAt === null) return 0;
+  return Math.max(0, Math.ceil((endsAt - now) / MS_PER_SECOND));
+}
+
+export function describeBuildWait(secondsLeft: number): string | null {
+  return secondsLeft > 0
+    ? `A build finished recently. You can start another in ${formatDuration(secondsLeft)}.`
+    : null;
+}
+
+export function buildNowLabel(secondsLeft: number): string {
+  return secondsLeft > 0 ? `Build in ${formatDuration(secondsLeft)}` : 'Build now';
+}
+
+export function buildRefusalTitle(error: ApiError, saved: boolean): string {
+  const waiting = buildRefusal(error)?.code === 'cooldown';
+  if (saved) {
+    return waiting
+      ? 'Your changes were saved, but the build could not start yet'
+      : 'Saved, but the build was not started';
+  }
+  return waiting ? 'The build could not start yet' : 'The build was not started';
+}
+
 export function describeBuildRefusal(error: ApiError, now: Date = new Date()): string {
   const refusal = buildRefusal(error);
   if (!refusal) {
@@ -67,9 +101,11 @@ export function describeBuildRefusal(error: ApiError, now: Date = new Date()): s
   }
   switch (refusal.code) {
     case 'cooldown':
-      return typeof refusal.cooldown_remaining === 'number'
-        ? `A build finished recently. You can start another in ${formatDuration(refusal.cooldown_remaining)}.`
-        : sentence(refusal.error);
+      return (
+        describeBuildWait(
+          typeof refusal.cooldown_remaining === 'number' ? refusal.cooldown_remaining : 0,
+        ) ?? sentence(refusal.error)
+      );
     case 'weekly_limit': {
       const resets = parseApiDate(refusal.resets_at);
       return resets

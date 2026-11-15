@@ -17,7 +17,8 @@ import { listsKeys, type UserListsResponse } from '../../api/lists';
 import type { AlertTone } from '../../components/ui/Alert';
 import { showToast } from '../../components/ui/toasts';
 import { useValidationSocket } from '../../hooks/useSocket';
-import { describeBuildRefusal, runningBuildId } from '../../lib/builds';
+import { useBuildCooldown } from '../../hooks/useBuildCooldown';
+import { buildRefusalTitle, describeBuildRefusal, runningBuildId } from '../../lib/builds';
 import { pluralise } from '../../lib/format';
 import { sourceCheckFrom, type LineIssue, type SourceCheck } from './configFacts';
 import type { EditorTab, ServerConfig } from './editorState';
@@ -45,6 +46,7 @@ export interface ConfigActions {
   notice: EditorNotice | null;
   busy: 'save' | 'build' | null;
   startedBuildId: string | null;
+  cooldownEndsAt: number | null;
   replacing: boolean;
   dismissNotice: () => void;
   runCheck: () => void;
@@ -116,6 +118,7 @@ export function useConfigActions(
   const [whitelistRejection, setWhitelistRejection] = useState<WhitelistRejection | null>(null);
   const [notice, setNotice] = useState<EditorNotice | null>(null);
   const [startedBuildId, setStartedBuildId] = useState<string | null>(null);
+  const cooldown = useBuildCooldown();
 
   useValidationSocket({
     userId,
@@ -158,9 +161,10 @@ export function useConfigActions(
   };
 
   const refuseBuild = (error: ApiError, saved: boolean) => {
+    cooldown.noteRefusal(error);
     setNotice({
       tone: 'warn',
-      title: saved ? 'Saved, but the build was not started' : 'The build was not started',
+      title: buildRefusalTitle(error, saved),
       message: describeBuildRefusal(error),
       buildJobId: runningBuildId(error),
     });
@@ -275,6 +279,7 @@ export function useConfigActions(
         ? 'build'
         : null,
     startedBuildId,
+    cooldownEndsAt: cooldown.endsAt,
     replacing: templateMutation.isPending,
     dismissNotice: () => setNotice(null),
     runCheck: () => checkMutation.mutate(),

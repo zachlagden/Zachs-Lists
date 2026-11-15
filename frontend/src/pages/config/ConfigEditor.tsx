@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { LimitRequestsResponse } from '../../api/account';
 import { urlMetadataQuery } from '../../api/config';
+import { BuildNowLabel } from '../../components/builds/BuildWait';
 import type { UserListsResponse } from '../../api/lists';
 import { removeLine } from '../../components/config/lineDraft';
 import { analyseSources, countSources, groupSources } from '../../components/config/sourceLines';
@@ -218,10 +219,10 @@ export function ConfigEditor({
               <Button
                 icon="bolt"
                 loading={actions.busy === 'build'}
-                disabled={sourceCount === 0}
+                disabled={sourceCount === 0 || actions.cooldownEndsAt !== null}
                 onClick={actions.build}
               >
-                Build now
+                <BuildNowLabel endsAt={actions.cooldownEndsAt} />
               </Button>
             )}
             <SegmentedControl
@@ -264,6 +265,7 @@ export function ConfigEditor({
           busy={actions.busy}
           blocked={state.conflict !== null}
           canBuild={sourceCount > 0}
+          cooldownEndsAt={actions.cooldownEndsAt}
           onDiscard={discard}
           onSave={() => actions.save(false)}
           onSaveAndBuild={() => actions.save(true)}

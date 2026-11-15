@@ -9,7 +9,15 @@ import {
 } from '../../components/config/sourceLines';
 import { applyChange, minimalChange } from '../../components/config/minimalChange';
 import { AWKWARD_TEXTS, generatedTexts } from '../../components/config/testTexts';
-import { describeBuildRefusal, runningBuildId } from '../../lib/builds';
+import {
+  buildNowLabel,
+  buildRefusalTitle,
+  cooldownEndsAt,
+  cooldownSecondsLeft,
+  describeBuildRefusal,
+  describeBuildWait,
+  runningBuildId,
+} from '../../lib/builds';
 import type { Job, SourceProgress } from '../../types';
 import {
   describeChanges,
@@ -221,6 +229,57 @@ describe('limits and refusals', () => {
     });
     expect(describeBuildRefusal(error)).toContain('2 min 5 s');
     expect(runningBuildId(error)).toBeNull();
+  });
+
+  it('says the changes were saved when a cooldown stops the build after a save', () => {
+    const cooldown = new ApiError({
+      kind: 'http',
+      status: 429,
+      message: 'Please wait',
+      body: { error: 'Please wait', code: 'cooldown', cooldown_remaining: 125 },
+    });
+    const active = new ApiError({
+      kind: 'http',
+      status: 409,
+      message: 'A build is already in progress',
+      body: { error: 'A build is already in progress', code: 'build_active' },
+    });
+    expect(buildRefusalTitle(cooldown, true)).toBe(
+      'Your changes were saved, but the build could not start yet',
+    );
+    expect(buildRefusalTitle(cooldown, false)).toBe('The build could not start yet');
+    expect(buildRefusalTitle(active, true)).toBe('Saved, but the build was not started');
+    expect(buildRefusalTitle(active, false)).toBe('The build was not started');
+  });
+
+  it('knows when a cooldown ends and counts down to it', () => {
+    const refusedAt = Date.parse('2026-11-15T12:00:00Z');
+    const cooldown = new ApiError({
+      kind: 'http',
+      status: 429,
+      message: 'Please wait',
+      body: { error: 'Please wait', code: 'cooldown', cooldown_remaining: 125 },
+    });
+    const weeklyLimit = new ApiError({
+      kind: 'http',
+      status: 429,
+      message: 'Weekly manual update limit reached',
+      body: { error: 'Weekly manual update limit reached', code: 'weekly_limit' },
+    });
+    const endsAt = cooldownEndsAt(cooldown, refusedAt);
+    expect(endsAt).toBe(refusedAt + 125_000);
+    expect(cooldownEndsAt(weeklyLimit, refusedAt)).toBeNull();
+
+    expect(cooldownSecondsLeft(endsAt, refusedAt + 60_500)).toBe(65);
+    expect(cooldownSecondsLeft(endsAt, refusedAt + 200_000)).toBe(0);
+    expect(cooldownSecondsLeft(null, refusedAt)).toBe(0);
+
+    expect(describeBuildWait(65)).toBe(
+      'A build finished recently. You can start another in 1 min 5 s.',
+    );
+    expect(describeBuildWait(0)).toBeNull();
+    expect(buildNowLabel(65)).toBe('Build in 1 min 5 s');
+    expect(buildNowLabel(0)).toBe('Build now');
   });
 });
 
