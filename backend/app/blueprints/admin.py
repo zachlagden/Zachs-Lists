@@ -397,9 +397,7 @@ def get_stats(admin: User):
             },
             "analytics": analytics,
             "limits": {
-                "enforce_domain_limit": bool(
-                    current_app.config.get("ENFORCE_DOMAIN_LIMIT", False)
-                ),
+                "enforce_domain_limit": limit_review.enforcing_domain_limit(),
             },
         }
     )

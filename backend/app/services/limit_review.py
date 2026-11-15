@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
+from flask import current_app
 from pymongo.collection import Collection
 from pymongo.database import Database
 
@@ -32,6 +33,13 @@ REASON_WITHIN_LIMIT = "The latest build is within the limit"
 REASON_AUDIT_WITHIN_LIMIT = "The audit measured the lists within the limit"
 REASON_LIMIT_RAISED = "The limit now covers the measured count"
 MAX_RESOLVE_REASON_LENGTH = 200
+CONSEQUENCE_BEFORE_ENFORCING = (
+    "Builds over the limit will start to fail once the limit is enforced. "
+    "Your current lists stay published."
+)
+CONSEQUENCE_WHEN_ENFORCING = (
+    "Builds over the limit fail, and your current lists stay published."
+)
 
 
 @dataclass(frozen=True)
@@ -129,28 +137,33 @@ def effective_max_domains(
     return override if override is not None else default_max_domains
 
 
-def notification_message(actual_domains: int, max_domains: int, method: str) -> str:
+def enforcing_domain_limit() -> bool:
+    return bool(current_app.config.get("ENFORCE_DOMAIN_LIMIT", False))
+
+
+def notification_message(
+    actual_domains: int, max_domains: int, method: str, enforcing: bool
+) -> str:
     measured = f"{actual_domains:,}"
     if method == METHOD_STORED:
         measured = f"about {measured}"
     return (
         f"Your lists contain {measured} domains across all categories. "
         f"Your limit is {max_domains:,}. "
-        "Builds over the limit will start to fail once the limit is enforced. "
-        "Your current lists stay published. "
+        f"{CONSEQUENCE_WHEN_ENFORCING if enforcing else CONSEQUENCE_BEFORE_ENFORCING} "
         "To get back within the limit, remove some sources, "
         "or request a higher limit from your dashboard."
     )
 
 
 def _notification(
-    actual_domains: int, max_domains: int, method: str, now: datetime
+    actual_domains: int, max_domains: int, method: str, now: datetime, enforcing: bool
 ) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "type": NOTIFICATION_TYPE,
         "title": NOTIFICATION_TITLE,
-        "message": notification_message(actual_domains, max_domains, method),
+        "message": notification_message(actual_domains, max_domains, method, enforcing),
         "data": {"actual_domains": actual_domains, "max_domains": max_domains},
         "read": False,
         "created_at": now,
@@ -164,6 +177,7 @@ def flag_over_limit(
     max_domains: int,
     method: str,
     now: datetime,
+    enforcing: bool,
 ) -> ReviewChange:
     opened = User.open_limit_review(
         user_id, actual_domains, max_domains, method, now, users
@@ -178,7 +192,10 @@ def flag_over_limit(
         users,
     )
     notified = User.notify_limit_review_once(
-        user_id, _notification(actual_domains, max_domains, method, now), now, users
+        user_id,
+        _notification(actual_domains, max_domains, method, now, enforcing),
+        now,
+        users,
     )
     return ReviewChange(opened=opened, refreshed=refreshed, notified=notified)
 
@@ -213,7 +230,13 @@ def record_job_result(job: Job) -> ReviewChange:
     now = datetime.utcnow()
     if actual_domains > max_domains:
         change = flag_over_limit(
-            users, job.user_id, actual_domains, max_domains, METHOD_BUILD, now
+            users,
+            job.user_id,
+            actual_domains,
+            max_domains,
+            METHOD_BUILD,
+            now,
+            enforcing_domain_limit(),
         )
         if change.opened:
             logger.info(

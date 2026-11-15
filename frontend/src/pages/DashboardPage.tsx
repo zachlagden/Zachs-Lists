@@ -20,7 +20,7 @@ import { Line } from 'react-chartjs-2';
 import LoadingSpinner from '../components/LoadingSpinner';
 import NotificationBanner from '../components/NotificationBanner';
 import LimitRequestModal from '../components/LimitRequestModal';
-import { limitReviewSummary, openLimitReview } from '../utils/limitReview';
+import { limitConsequence, limitReviewSummary, openLimitReview } from '../utils/limitReview';
 
 ChartJS.register(
   CategoryScale,
@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [showLimitRequestModal, setShowLimitRequestModal] = useState(false);
   const [availableTiers, setAvailableTiers] = useState<number[]>([]);
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
+  const [limitEnforced, setLimitEnforced] = useState(false);
   const overLimit = user?.is_admin ? null : openLimitReview(user?.limit_review);
 
   const refreshJobs = useCallback(async () => {
@@ -111,6 +112,7 @@ export default function DashboardPage() {
         setStats(listsData.stats || null);
         setLimits(listsData.limits || null);
         setRemainingUpdates(listsData.remaining_updates ?? 3);
+        setLimitEnforced(listsData.enforce_domain_limit === true);
         mergeFetchedJobs(jobsData.jobs || []);
 
         // Check for unread failures
@@ -321,8 +323,7 @@ export default function DashboardPage() {
               <p className="font-semibold text-red-400">Your lists are over the domain limit</p>
               <p className="mt-1">{limitReviewSummary(overLimit)}</p>
               <p className="mt-1 text-pihole-text-muted">
-                Builds over the limit will start to fail once the limit is enforced. Your current
-                lists stay published. Remove some sources, or request a higher limit.
+                {limitConsequence(limitEnforced)} Remove some sources, or request a higher limit.
               </p>
               {hasPendingRequest ? (
                 <p className="mt-2 text-yellow-400">Your limit request is waiting for review.</p>

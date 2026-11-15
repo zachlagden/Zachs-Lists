@@ -106,7 +106,9 @@ class Site:
             }
         )
 
-    def flag(self, user: User, actual: int, limit: int = LIMIT) -> None:
+    def flag(
+        self, user: User, actual: int, limit: int = LIMIT, enforcing: bool = False
+    ) -> None:
         limit_review.flag_over_limit(
             self.db.users,
             ObjectId(user.id),
@@ -114,6 +116,7 @@ class Site:
             limit,
             limit_review.METHOD_EXACT,
             datetime.utcnow(),
+            enforcing,
         )
 
     def audit(self, apply: bool, users_dir: Path | None = None) -> dict[str, Any]:
@@ -490,6 +493,59 @@ def test_notification_is_sent_once_for_each_open_review(site: Site) -> None:
     site.flag(site.sam, LIMIT + 8)
 
     assert len(site.notices(site.sam)) == 2
+
+
+def test_notification_says_builds_fail_when_the_limit_is_enforced(site: Site) -> None:
+    site.flag(site.sam, LIMIT + 5, enforcing=True)
+
+    assert site.notices(site.sam)[0]["message"] == (
+        f"Your lists contain {LIMIT + 5:,} domains across all categories. "
+        f"Your limit is {LIMIT:,}. "
+        "Builds over the limit fail, and your current lists stay published. "
+        "To get back within the limit, remove some sources, "
+        "or request a higher limit from your dashboard."
+    )
+
+
+@pytest.mark.parametrize(
+    ("enforcing", "consequence"),
+    [
+        (False, "will start to fail once the limit is enforced"),
+        (True, "Builds over the limit fail, and"),
+    ],
+)
+def test_build_result_notification_follows_the_enforcement_setting(
+    site: Site, enforcing: bool, consequence: str
+) -> None:
+    site.app.config["ENFORCE_DOMAIN_LIMIT"] = enforcing
+    result = {"limit": {"max_domains": LIMIT, "actual_domains": LIMIT + 5}}
+
+    limit_review.record_job_result(finished(site, site.sam, Job.STATUS_FAILED, result))
+
+    assert consequence in site.notices(site.sam)[0]["message"]
+
+
+@pytest.mark.parametrize("enforcing", [False, True])
+def test_audit_notification_follows_the_enforcement_setting(
+    site: Site, enforcing: bool
+) -> None:
+    site.publish(site.sam, LIMIT + 5)
+
+    audit.run(site.db, True, LIMIT, ROOT_GITHUB_ID, enforcing=enforcing)
+
+    message = site.notices(site.sam)[0]["message"]
+    assert ("Builds over the limit fail, and" in message) is enforcing
+
+
+@pytest.mark.parametrize("enforcing", [False, True])
+def test_dashboard_payload_says_whether_the_limit_is_enforced(
+    site: Site, enforcing: bool
+) -> None:
+    site.app.config["ENFORCE_DOMAIN_LIMIT"] = enforcing
+
+    lists = site.client(site.sam).get("/api/user/lists").get_json()
+
+    assert lists["enforce_domain_limit"] is enforcing
 
 
 def test_an_open_review_that_missed_its_notification_is_notified_on_refresh(
