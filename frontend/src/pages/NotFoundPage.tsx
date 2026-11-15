@@ -2,9 +2,11 @@ import { useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/States';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { useAuthStore } from '../store';
 
 export default function NotFoundPage() {
+  useDocumentMeta('Page not found');
   const { pathname } = useLocation();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   return (
