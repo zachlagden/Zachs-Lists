@@ -25,7 +25,7 @@ The stored source config keeps the other repository's `main` URLs for its own `c
 | `DEFAULT_SYNC_COMMIT_PREFIX` | `Weekly blocklist update`                 | The start of a published build's commit message.                                          |
 | `GITHUB_TOKEN`               | unset                                     | Optional. Sent to `api.github.com` only, to raise the API rate limit. It needs no scopes. |
 
-Without a token the GitHub API allows 60 requests an hour for each IP address. A check makes one API request, and a 304 answer does not count against the limit.
+Without a token the GitHub API allows 60 requests an hour for each IP address. A check makes one API request, so the hourly check uses one of the 60. A 304 answer counts against the limit unless the request carries a token.
 
 ## Schedule
 
