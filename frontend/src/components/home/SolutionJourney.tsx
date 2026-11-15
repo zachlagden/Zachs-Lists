@@ -225,8 +225,8 @@ export default function SolutionJourney() {
                           </div>
                           <div className="flex-1">
                             <p className="text-sm text-chrome">
-                              <span className="text-matrix font-medium">Every Sunday</span> at
-                              midnight, your lists are automatically refreshed with the latest
+                              <span className="text-matrix font-medium">Every Sunday</span> morning
+                              (UTC), your lists are automatically rebuilt with the latest
                               blocklists.
                             </p>
                           </div>
