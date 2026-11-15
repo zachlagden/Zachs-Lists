@@ -77,6 +77,7 @@ Each run drops the database named in `MONGO_URI`, rebuilds the `users` and `defa
 alex	session=<value>
 sam	session=<value>
 jo	session=<value>
+robin	session=<value>
 ```
 
 The script refuses to clear a `DATA_DIR` that holds files it did not create.
@@ -88,7 +89,8 @@ What it creates:
 | `alex`         | A regular account with eight sources, a whitelist, six published lists and a limit raised to 10,000,000 by an approved request. Its jobs are two completed scheduled builds, one skipped build, one failed build over the domain limit and one build in mid download. |
 | `sam`          | An admin with three sources, four published lists and two completed builds.                                                                                                                                                                                           |
 | `jo`           | A regular account over the domain limit, with an open limit review, an unread notification and a pending limit request.                                                                                                                                               |
-| Other accounts | Thirty regular accounts with no configuration, among them `casey`, which is disabled, and `dana`, which is banned, and a second admin, `robin`. They fill the admin user list and print no cookie.                                                                    |
+| `robin`        | A second admin with no configuration, for seeing what an admin who is not the root user can do.                                                                                                                                                                       |
+| Other accounts | Thirty regular accounts with no configuration, among them `casey`, which is disabled, and `dana`, which is banned. They fill the admin user list and print no cookie.                                                                                                 |
 | Default lists  | A default configuration, six published lists and one completed build.                                                                                                                                                                                                 |
 | Shared content | Three active announcements, one for each type, and one inactive. Ten library entries. One featured list. Thirty days of download analytics for alex's lists and the default lists. Cache metadata with a domain count for every library source.                       |
 

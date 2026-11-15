@@ -1913,13 +1913,16 @@ def session_cookie(app: "Flask", user: "User") -> tuple[str, str]:
     return str(app.config["SESSION_COOKIE_NAME"]), str(value)
 
 
+def cookie_usernames() -> list[str]:
+    return [*(account.username for account in ACCOUNTS), SECOND_ADMIN]
+
+
 def seeded_users() -> list["User"]:
     from app.models.user import User
 
-    users = [User.get_by_username(account.username) for account in ACCOUNTS]
-    missing = [
-        account.username for account, user in zip(ACCOUNTS, users) if user is None
-    ]
+    usernames = cookie_usernames()
+    users = [User.get_by_username(username) for username in usernames]
+    missing = [username for username, user in zip(usernames, users) if user is None]
     if missing:
         raise Refusal(
             f"No seeded account for {', '.join(missing)}. Run the seed without "
@@ -1946,10 +1949,9 @@ def main() -> int:
         with app.app_context():
             from app.extensions import mongo
 
-            if args.cookies_only:
-                users = seeded_users()
-            else:
-                users = Seeder(app, mongo.db).run()
+            if not args.cookies_only:
+                Seeder(app, mongo.db).run()
+            users = seeded_users()
             cookies = [(user.username, *session_cookie(app, user)) for user in users]
     except Refusal as refusal:
         print(refusal, file=sys.stderr)
