@@ -4,13 +4,7 @@ import { errorDetails, formFailure } from './fieldErrors';
 import { canChangeAdminRole, canManageAccount } from './permissions';
 import { ADMIN_SECTIONS, activeSection, legacyTabPath } from './sections';
 import { createSpacedRunner } from './spacedRunner';
-import {
-  choiceFromSearch,
-  clampPage,
-  pageFromSearch,
-  pageRange,
-  withSearchChanges,
-} from './urlState';
+import { choiceFromSearch, pageFromSearch, pageRange, withSearchChanges } from './urlState';
 
 function refusal(body: Record<string, unknown>, status = 400): ApiError {
   return new ApiError({
@@ -76,8 +70,6 @@ describe('url state', () => {
   it('describes the rows on a page', () => {
     expect(pageRange(2, 25, 33)).toEqual({ first: 26, last: 33 });
     expect(pageRange(1, 25, 0)).toEqual({ first: 0, last: 0 });
-    expect(clampPage(9, 2)).toBe(2);
-    expect(clampPage(0, 0)).toBe(1);
   });
 });
 

@@ -24,10 +24,6 @@ export function withSearchChanges(current: URLSearchParams, changes: SearchChang
   return next.toString();
 }
 
-export function clampPage(page: number, pages: number): number {
-  return Math.min(Math.max(page, 1), Math.max(pages, 1));
-}
-
 export function pageRange(
   page: number,
   perPage: number,

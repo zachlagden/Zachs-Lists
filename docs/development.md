@@ -221,7 +221,13 @@ cargo build --release --manifest-path rust-worker/Cargo.toml
 export WORKER_BIN="$PWD/rust-worker/target/release/blocklist-worker"
 ```
 
-A real worker fails every build of the seeded configurations, because the seeded sources do not exist.
+To run real builds, start the worker beside Flask with the same `MONGO_URI` and `DATA_DIR`, and with `DATABASE_NAME` set to the database named in `MONGO_URI`, because the worker does not read the name from the address:
+
+```sh
+DATABASE_NAME=zachs_lists_dev "$WORKER_BIN"
+```
+
+A real worker fails every build of the seeded configurations, because the seeded sources do not exist. Give an account public source addresses to see a build complete; the worker refuses private addresses.
 
 Validating a configuration in the editor sends real HTTP requests to each source address. For the seeded sources the result is one warning per source, "Could not reach source during validation", and the configuration can still be saved.
 
@@ -254,7 +260,7 @@ pnpm --dir frontend build
 | `frontend/src/styles/index.css`  | The Tailwind theme built from the tokens, and the base styles           |
 | `frontend/src/components/ui/`    | The shared components                                                   |
 | `frontend/src/components/shell/` | The signed-in shell, the public shell and the navigation                |
-| `frontend/src/router.tsx`        | Every route, loaded lazily                                              |
+| `frontend/src/router.tsx`        | Every route. Pages other than home load on demand                       |
 | `frontend/src/api/`              | One module per resource: query keys, fetch functions and response types |
 | `frontend/src/realtime/`         | Live job events and the bridge that writes them into the query cache    |
 | `frontend/src/lib/format.ts`     | Number, size, duration and date formatting                              |
