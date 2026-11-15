@@ -80,6 +80,7 @@ impl ProgressTracker {
                     Downloader::hash_url(&source.url),
                     source.name.clone(),
                     source.url.clone(),
+                    source.category.clone(),
                 )
             })
             .collect();

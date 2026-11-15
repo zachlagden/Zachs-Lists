@@ -96,6 +96,7 @@ function source(id: string, overrides: Partial<SourceProgress> = {}): SourceProg
     id,
     name: id,
     url: `https://lists.example.org/${id}.txt`,
+    category: null,
     status: 'pending',
     cache_hit: null,
     stale: false,

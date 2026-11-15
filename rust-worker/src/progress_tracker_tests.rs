@@ -37,6 +37,27 @@ fn downloaded(source: &Source, error: Option<&str>, stale: bool) -> DownloadResu
     }
 }
 
+#[test]
+fn each_source_starts_with_the_category_from_its_config_line() {
+    let parsed = Downloader::parse_config(
+        "https://lists.example.com/ads.txt|ads_list|advertising\n\
+         https://lists.example.com/plain.txt|plain_list\n\
+         https://lists.example.org/bare.txt\n",
+    )
+    .unwrap();
+
+    let progress = ProgressTracker::downloading(&parsed).snapshot();
+
+    let categories: Vec<Option<&str>> = progress
+        .sources
+        .iter()
+        .map(|source| source.category.as_deref())
+        .collect();
+    assert_eq!(categories, [Some("advertising"), None, None]);
+    let written = bson::to_document(&progress.sources[1]).unwrap();
+    assert_eq!(written.get("category"), Some(&Bson::Null));
+}
+
 fn field_names(fields: &Document) -> Vec<&str> {
     fields.keys().map(String::as_str).collect()
 }
@@ -113,7 +134,7 @@ fn source_updates_write_only_the_changed_sources_and_scalars() {
     assert_eq!(source.get_i64("bytes_downloaded").unwrap(), 1024);
     assert_eq!(source.get_i64("bytes_total").unwrap(), 2048);
     assert_eq!(source.get_f64("download_percent").unwrap(), 50.0);
-    assert_eq!(source.len(), 18);
+    assert_eq!(source.len(), 19);
 
     tracker.source_downloaded(2, &downloaded(&all[2], None, false));
     tracker.source_downloaded(0, &downloaded(&all[0], Some("HTTP 503"), false));

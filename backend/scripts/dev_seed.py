@@ -638,6 +638,7 @@ def pending_source(source: SeedSource) -> dict[str, Any]:
         "id": source_id(source.url),
         "name": source.name,
         "url": source.url,
+        "category": source.category or None,
         "status": "pending",
         "cache_hit": None,
         "stale": False,

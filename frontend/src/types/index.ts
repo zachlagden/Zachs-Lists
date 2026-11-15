@@ -90,6 +90,7 @@ export interface SourceProgress {
   id: string;
   name: string;
   url: string;
+  category: string | null;
   status: SourceStatus;
   cache_hit: boolean | null;
   stale: boolean;
