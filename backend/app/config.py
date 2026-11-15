@@ -45,7 +45,7 @@ class Config:
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
     # User limits
-    DEFAULT_MAX_SOURCE_LISTS = 40
+    DEFAULT_MAX_SOURCE_LISTS = 50
     DEFAULT_MAX_DOMAINS = 4_000_000  # 4 million domains
     MAX_DOMAINS_LIMIT = 20_000_000  # Maximum requestable: 20 million
     DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers

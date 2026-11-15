@@ -175,7 +175,7 @@ def test_limits_are_stored_as_overrides_of_the_defaults(
 ) -> None:
     defaults = User.default_limits()
     assert defaults == {
-        "max_source_lists": 40,
+        "max_source_lists": 50,
         "max_domains": 4_000_000,
         "max_config_size_mb": 10,
         "manual_updates_per_week": 3,
