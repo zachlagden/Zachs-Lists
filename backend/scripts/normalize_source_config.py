@@ -8,7 +8,7 @@ from typing import Any
 from pymongo import MongoClient
 from pymongo.database import Database
 
-from app.utils.validators import validate_config_syntax
+from app.utils.validators import ABP_FLAG, validate_config_syntax
 
 MIGRATION = "source-config-three-fields-v1"
 
@@ -18,8 +18,13 @@ def normalize(content: str) -> str:
     for raw in content.splitlines(keepends=True):
         line = raw.rstrip("\r\n")
         ending = raw[len(line) :]
-        if not line.strip().startswith("#") and len(line.split("|")) == 4:
-            line = "|".join(line.split("|")[:3])
+        fields = line.split("|")
+        if (
+            not line.strip().startswith("#")
+            and len(fields) == 4
+            and fields[3].strip() != ABP_FLAG
+        ):
+            line = "|".join(fields[:3])
         lines.append(line + ending)
     return "".join(lines)
 
