@@ -3,20 +3,21 @@ use bson::{doc, Bson, Document};
 use std::time::Duration;
 
 use crate::db::job::Claim;
+use crate::db::progress::JobStage;
 use crate::source_cache_test_server::{Reply, TestServer};
 use crate::test_support::{insert_job, queued_job, stored_job, test_config, test_database};
 
 const WORKER_ID: &str = "worker-a";
 
-struct Harness {
-    db: Database,
-    _data_dir: tempfile::TempDir,
-    jobs: JobRepository,
-    cancellation: Cancellation,
-    processor: JobProcessor,
+pub(super) struct Harness {
+    pub(super) db: Database,
+    pub(super) _data_dir: tempfile::TempDir,
+    pub(super) jobs: JobRepository,
+    pub(super) cancellation: Cancellation,
+    pub(super) processor: JobProcessor,
 }
 
-async fn harness(server: &TestServer) -> Harness {
+pub(super) async fn harness(server: &TestServer) -> Harness {
     let db = test_database("processor_test").await;
     let data_dir = tempfile::tempdir().unwrap();
     let mut config = test_config(&db, data_dir.path(), WORKER_ID);
@@ -42,7 +43,7 @@ async fn harness(server: &TestServer) -> Harness {
 }
 
 impl Harness {
-    async fn claim(&self, job: Document) -> Job {
+    pub(super) async fn claim(&self, job: Document) -> Job {
         insert_job(&self.db, &job).await;
         match self.jobs.claim_next().await.unwrap() {
             Claim::Claimed(job) => *job,
@@ -50,7 +51,30 @@ impl Harness {
         }
     }
 
-    async fn store_live_config(&self, username: &str, blocklists: &str, whitelist: &str) {
+    pub(super) async fn add_user(&self, username: &str) {
+        self.store_live_config(username, "", "").await;
+    }
+
+    pub(super) async fn stored_target(&self, username: &str) -> Document {
+        let (collection, filter) = if username == crate::config::DEFAULT_TARGET {
+            ("system_config", doc! { "_id": "default_build" })
+        } else {
+            ("users", doc! { "username": username })
+        };
+        self.db
+            .collection::<Document>(collection)
+            .find_one(filter)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    pub(super) async fn store_live_config(
+        &self,
+        username: &str,
+        blocklists: &str,
+        whitelist: &str,
+    ) {
         self.db
             .collection::<Document>("users")
             .insert_one(doc! {
@@ -61,27 +85,13 @@ impl Harness {
             .await
             .unwrap();
     }
-
-    async fn stored_config_hash(&self, username: &str) -> String {
-        self.db
-            .collection::<Document>("users")
-            .find_one(doc! { "username": username })
-            .await
-            .unwrap()
-            .unwrap()
-            .get_document("stats")
-            .unwrap()
-            .get_str("config_hash")
-            .unwrap()
-            .to_string()
-    }
 }
 
-fn source_line(server: &TestServer, path: &str, name: &str) -> String {
+pub(super) fn source_line(server: &TestServer, path: &str, name: &str) -> String {
     format!("{}|{}|tracking", server.url(path), name)
 }
 
-fn snapshot(blocklists: &str, whitelist: &str) -> Option<Document> {
+pub(super) fn snapshot(blocklists: &str, whitelist: &str) -> Option<Document> {
     Some(doc! {
         "blocklists": blocklists,
         "whitelist": whitelist,
@@ -118,7 +128,7 @@ fn stored_source(job: &Document, index: usize) -> Document {
         .clone()
 }
 
-fn hosts_body(domains: usize) -> Vec<u8> {
+pub(super) fn hosts_body(domains: usize) -> Vec<u8> {
     (0..domains)
         .map(|n| format!("0.0.0.0 d{n:07}.blocked.example\n"))
         .collect::<String>()
@@ -202,10 +212,15 @@ async fn build_uses_the_snapshot_when_the_live_config_differs() {
     assert_eq!(result.get_i64("whitelisted_removed").unwrap(), 1);
     assert_eq!(result.get_i64("unique_domains").unwrap(), 1);
     assert_eq!(result.get("error_code"), Some(&Bson::Null));
+    let sam = harness.stored_target("sam").await;
     assert_eq!(
-        harness.stored_config_hash("sam").await,
-        JobProcessor::compute_config_hash(&snapshot_blocklists, "blocked.example")
+        sam.get_str("published_generation").unwrap(),
+        result.get_str("generation_id").unwrap()
     );
+    assert!(!sam
+        .get_document("stats")
+        .unwrap()
+        .contains_key("config_hash"));
     harness.db.drop().await.unwrap();
 }
 
@@ -370,6 +385,7 @@ async fn dripped_source_moves_through_downloading_and_processing_with_growing_by
     ])
     .await;
     let mut harness = harness(&server).await;
+    harness.add_user("sam").await;
     harness.processor.config.progress_update_interval_ms = 10;
     let blocklists = format!(
         "{}\n{}",
@@ -469,6 +485,7 @@ async fn completed_build_writes_the_whole_schema_and_nothing_after_the_terminal_
     ])
     .await;
     let harness = harness(&server).await;
+    harness.add_user("sam").await;
     let blocklists = format!(
         "{}|first_list|tracking\n{}|second_list|advertising\n{}|down_list|malicious",
         server.url("/first"),
@@ -556,6 +573,7 @@ async fn completed_build_writes_the_whole_schema_and_nothing_after_the_terminal_
         serde_json::json!({ "tracking": 2, "advertising": 2 })
     );
     assert_eq!(result["output_files"].as_array().unwrap().len(), 9);
+    assert_eq!(result["generation_id"].as_str().unwrap().len(), 36);
     let warnings: Vec<&str> = result["warnings"]
         .as_array()
         .unwrap()
@@ -578,6 +596,7 @@ async fn domain_change_compares_with_the_count_stored_by_the_previous_build() {
     ])
     .await;
     let harness = harness(&server).await;
+    harness.add_user("sam").await;
     let blocklists = source_line(&server, "/list", "counted_list");
 
     let first = harness

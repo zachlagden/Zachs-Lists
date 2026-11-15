@@ -278,16 +278,6 @@ impl JobProgress {
         }
     }
 
-    pub fn completed_copy(total_sources: u64) -> Self {
-        Self {
-            current_step: "completed".to_string(),
-            stage: JobStage::Completed,
-            total_sources,
-            processed_sources: total_sources,
-            ..Self::default()
-        }
-    }
-
     fn snapshot(&mut self, stage: &str, completed_at: &str, data: serde_json::Value) {
         self.stage_snapshots.insert(
             stage.to_string(),
@@ -368,14 +358,16 @@ pub mod error_code {
     pub const NO_SOURCES: &str = "no_sources";
     pub const ALL_SOURCES_FAILED: &str = "all_sources_failed";
     pub const NO_DOMAINS: &str = "no_domains";
+    pub const TARGET_MISSING: &str = "target_missing";
     pub const INTERNAL: &str = "internal";
 
     #[cfg(test)]
-    pub const ALL: [&str; 5] = [
+    pub const ALL: [&str; 6] = [
         INVALID_CONFIG,
         NO_SOURCES,
         ALL_SOURCES_FAILED,
         NO_DOMAINS,
+        TARGET_MISSING,
         INTERNAL,
     ];
 }
@@ -405,9 +397,8 @@ pub struct JobResult {
     pub error_code: Option<String>,
     #[serde(default)]
     pub skip_reason: Option<String>,
-    /// Username whose output was copied (for fingerprint-matched builds)
     #[serde(default)]
-    pub copied_from: Option<String>,
+    pub generation_id: Option<String>,
 }
 
 /// Output file info
@@ -433,31 +424,6 @@ impl JobResult {
             errors,
             error_code: Some(code.to_string()),
             ..Self::default()
-        }
-    }
-
-    /// Create a result for a job that copied output from another user
-    ///
-    /// Copies all build stats from the source user's last job, except build time.
-    pub fn copied_from_user(
-        source_username: String,
-        source_result: Option<&JobResult>,
-        total_domains_without_source_result: u64,
-        unique_domains: u64,
-        output_files: Vec<OutputFile>,
-    ) -> Self {
-        let copied = source_result.cloned().unwrap_or_else(|| Self {
-            total_domains: total_domains_without_source_result,
-            ..Self::default()
-        });
-        Self {
-            unique_domains,
-            output_files,
-            errors: Vec::new(),
-            error_code: None,
-            skip_reason: None,
-            copied_from: Some(source_username),
-            ..copied
         }
     }
 }

@@ -1,6 +1,6 @@
 use bson::{doc, oid::ObjectId, Bson, Document};
 use mongodb::{
-    options::{FindOneAndUpdateOptions, FindOneOptions, ReturnDocument},
+    options::{FindOneAndUpdateOptions, ReturnDocument},
     Collection, Database,
 };
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,9 @@ pub struct Job {
     pub id: ObjectId,
     pub job_id: String,
     pub username: String,
+    #[serde(default)]
+    pub user_id: Option<ObjectId>,
+    pub created_at: bson::DateTime,
     #[serde(rename = "type", default)]
     pub job_type: JobType,
     #[serde(default)]
@@ -308,60 +311,6 @@ impl JobRepository {
             .await?;
 
         Ok(result.modified_count)
-    }
-
-    /// Get the result from a user's last completed job
-    ///
-    /// Used for copying build stats when fingerprint matches another user.
-    pub async fn get_last_completed_result(
-        &self,
-        username: &str,
-    ) -> anyhow::Result<Option<JobResult>> {
-        match self.last_completed_field(username, "result").await? {
-            Some(result) => Ok(Some(bson::from_document(result)?)),
-            None => Ok(None),
-        }
-    }
-
-    /// Get the progress from a user's last completed job
-    ///
-    /// Used for copying full progress (sources, whitelist breakdown, stage snapshots)
-    /// when fingerprint matches another user.
-    pub async fn get_last_completed_progress(
-        &self,
-        username: &str,
-    ) -> anyhow::Result<Option<JobProgress>> {
-        match self.last_completed_field(username, "progress").await? {
-            Some(progress) => Ok(Some(bson::from_document(progress)?)),
-            None => Ok(None),
-        }
-    }
-
-    async fn last_completed_field(
-        &self,
-        username: &str,
-        field: &str,
-    ) -> anyhow::Result<Option<Document>> {
-        let filter = doc! {
-            "username": username,
-            "status": "completed",
-            field: { "$type": "object" }
-        };
-
-        let options = FindOneOptions::builder()
-            .sort(doc! { "completed_at": -1 })
-            .projection(doc! { field: 1 })
-            .build();
-
-        let stored = self
-            .collection
-            .find_one(filter)
-            .with_options(options)
-            .await?;
-        match stored.and_then(|mut job| job.remove(field)) {
-            Some(Bson::Document(value)) => Ok(Some(value)),
-            _ => Ok(None),
-        }
     }
 }
 

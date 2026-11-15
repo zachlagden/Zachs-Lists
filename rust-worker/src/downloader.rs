@@ -4,7 +4,7 @@ use futures::stream::StreamExt;
 use mongodb::Database;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::config::Config;
 use crate::db::cache::{
@@ -439,28 +439,6 @@ impl Downloader {
         self.cache_repo
             .cleanup_stale(self.config.cache_ttl_days as i64)
             .await
-    }
-
-    pub async fn check_all_cached(&self, sources: &[Source]) -> bool {
-        for source in sources {
-            let url_hash = Self::hash_url(&source.url);
-            match self
-                .cache_repo
-                .has_valid_cache(&url_hash, &source.url, self.config.source_fresh_secs)
-                .await
-            {
-                Ok(true) => continue,
-                Ok(false) => {
-                    debug!("Source {} has no fresh cache entry", source.name);
-                    return false;
-                }
-                Err(error) => {
-                    warn!("Cache check error for {}: {}", source.name, error);
-                    return false;
-                }
-            }
-        }
-        true
     }
 }
 

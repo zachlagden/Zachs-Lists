@@ -1,31 +1,40 @@
 use anyhow::{anyhow, Result};
 use bson::DateTime as BsonDateTime;
-use chrono::Utc;
 use mongodb::Database;
-use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
 use crate::cancellation::{Cancellation, Cancelled};
 use crate::config::Config;
-use crate::db::job::{Job, JobRepository, JobType, JobWriteError};
-use crate::db::progress::{
-    error_code, GenerationProgress, JobProgress, JobResult, JobStage, OutputFile,
-};
-use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
+use crate::db::cache::content_hash;
+use crate::db::job::{Job, JobRepository, JobWriteError};
+use crate::db::progress::{error_code, GenerationProgress, JobProgress, JobResult};
+use crate::db::user::{ListMetadata, Publication, PublishOutcome, Target, UserRepository};
 use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
+use crate::generation::{
+    discard_generation, manifest_exists, prune_generations, remove_empty_directories,
+    remove_legacy_flat_files, BuildIdentity, Manifest,
+};
+use crate::generator::COMBINED_LIST_NAME;
+use crate::inputs_digest::{inputs_digest, PROCESSOR_VERSION};
 use crate::progress_tracker::{LiveProgress, ProgressTracker};
 use crate::stages::{
-    apply_whitelist, extract_source, generate_outputs, plan_whitelist, CategoryDomains, SourceBody,
-    StageThread,
+    apply_whitelist, extract_source, generate_outputs, plan_whitelist, CategoryDomains,
+    GeneratedOutput, SourceBody, StageThread,
 };
-use crate::whitelist::WhitelistManager;
+
+pub const UNCHANGED_SKIP_REASON: &str = "Nothing changed since the last build";
+pub const SUPERSEDED_SKIP_REASON: &str =
+    "A newer build has already published these lists, so this build was not published";
+const TARGET_MISSING_MESSAGE: &str = "The account was deleted before the build could be published";
+const EMPTY_DIRECTORY_LEVELS_ABOVE_GENERATIONS: usize = 3;
 
 const CANCELLATION_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 const DOWNLOAD_HANDOFF_CAPACITY: usize = 1;
@@ -135,130 +144,6 @@ impl JobProcessor {
         })
     }
 
-    /// Compute config hash (SHA256 of blocklists + whitelist)
-    fn compute_config_hash(blocklists: &str, whitelist: &str) -> String {
-        let combined = format!("{}\n---SEPARATOR---\n{}", blocklists, whitelist);
-        let mut hasher = Sha256::new();
-        hasher.update(combined.as_bytes());
-        format!("{:x}", hasher.finalize())
-    }
-
-    /// Compute normalized config fingerprint for cross-user matching
-    ///
-    /// Creates a fingerprint from sorted, normalized sources and whitelist patterns.
-    /// Two configs with same sources and whitelist (regardless of comments/order) → same fingerprint.
-    fn compute_config_fingerprint(blocklists: &str, whitelist: &str) -> Result<String> {
-        // Parse and sort sources by URL
-        let mut sources = Downloader::parse_config(blocklists)?;
-        sources.sort_by(|a, b| a.url.cmp(&b.url));
-
-        // Create normalized string representation of sources
-        let sources_str: Vec<String> = sources
-            .iter()
-            .map(|s| {
-                format!(
-                    "{}|{}|{}",
-                    s.url.to_lowercase().trim_end_matches('/'),
-                    s.name.to_lowercase(),
-                    s.category.as_deref().unwrap_or("").to_lowercase()
-                )
-            })
-            .collect();
-
-        // Parse and sort whitelist patterns
-        let patterns = WhitelistManager::parse(whitelist)
-            .whitelist
-            .patterns_as_strings();
-
-        // Hash combined normalized content
-        let combined = format!("{}\n---\n{}", sources_str.join("\n"), patterns.join("\n"));
-        let mut hasher = Sha256::new();
-        hasher.update(combined.as_bytes());
-        Ok(format!("{:x}", hasher.finalize()))
-    }
-
-    /// Copy output files from a matching user to the target user
-    async fn copy_output_files(
-        &self,
-        source: &MatchedUser,
-        target_username: &str,
-    ) -> Result<Vec<OutputFile>> {
-        let source_dir = self.config.output_dir(&source.username);
-        let target_dir = self.config.output_dir(target_username);
-
-        info!(
-            "Copying output files from {} to {}",
-            source_dir.display(),
-            target_dir.display()
-        );
-
-        // Ensure target directory exists
-        std::fs::create_dir_all(&target_dir)?;
-
-        // Clean up any existing files in target
-        if let Ok(entries) = std::fs::read_dir(&target_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "gz") {
-                    let _ = std::fs::remove_file(&path);
-                }
-            }
-        }
-
-        // Copy all .gz files from source to target
-        let mut output_files = Vec::new();
-        let entries = std::fs::read_dir(&source_dir)?;
-
-        for entry in entries.flatten() {
-            let filename = entry.file_name();
-            let filename_str = filename.to_string_lossy();
-
-            if filename_str.ends_with(".txt.gz") {
-                let source_path = entry.path();
-                let target_path = target_dir.join(&filename);
-
-                std::fs::copy(&source_path, &target_path)?;
-
-                // Extract format and domain count from filename
-                // Format: {name}_{format}.txt.gz (e.g., all_domains_hosts.txt.gz)
-                let base_name = filename_str.trim_end_matches(".txt.gz");
-                let parts: Vec<&str> = base_name.rsplitn(2, '_').collect();
-                let format = if parts.len() == 2 {
-                    parts[0].to_string()
-                } else {
-                    "unknown".to_string()
-                };
-
-                // Get domain count from source's list metadata if available
-                let domain_count = source
-                    .lists
-                    .iter()
-                    .find(|l| base_name.starts_with(&l.name))
-                    .map(|l| l.domain_count)
-                    .unwrap_or(0);
-
-                let size_bytes = std::fs::metadata(&target_path)?.len();
-
-                output_files.push(OutputFile {
-                    name: filename_str.to_string(),
-                    format,
-                    size_bytes,
-                    domain_count,
-                });
-
-                debug!("Copied {} ({} bytes)", filename_str, size_bytes);
-            }
-        }
-
-        info!(
-            "Copied {} output files ({} bytes total)",
-            output_files.len(),
-            output_files.iter().map(|f| f.size_bytes).sum::<u64>()
-        );
-
-        Ok(output_files)
-    }
-
     async fn build_config(&self, job: &Job) -> Result<BuildConfig> {
         if let Some(snapshot) = &job.config_snapshot {
             return Ok(BuildConfig {
@@ -297,10 +182,13 @@ impl JobProcessor {
 
     async fn build(&self, job: &Job, live: &mut Option<LiveProgress>) -> Result<(), BuildError> {
         let start_time = Instant::now();
-        info!("Processing job {} for user {}", job.job_id, job.username);
+        info!(
+            "Processing {:?} job {} for user {}",
+            job.job_type, job.job_id, job.username
+        );
 
         if job.force_rebuild {
-            info!("Force rebuild requested - bypassing all caching optimizations");
+            info!("Force rebuild requested: the build publishes even when nothing changed");
         }
 
         self.cancellation.check()?;
@@ -310,7 +198,6 @@ impl JobProcessor {
             whitelist: whitelist_content,
         } = self.build_config(job).await?;
 
-        // Parse sources
         let sources =
             Downloader::parse_config(&config_content).map_err(|invalid| BuildError::Rejected {
                 code: error_code::INVALID_CONFIG,
@@ -323,196 +210,8 @@ impl JobProcessor {
             ));
         }
 
-        // Compute current config hash
-        let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
-
-        // Compute normalized fingerprint for cross-user matching
-        let config_fingerprint =
-            Self::compute_config_fingerprint(&config_content, &whitelist_content)?;
-
         info!("Found {} sources to process", sources.len());
-
-        // Check for "no changes" optimization
-        // Skip if: config hash unchanged AND all sources would be cache hits
-        if job.job_type != JobType::Scheduled && !job.force_rebuild {
-            if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
-                if stored_hash == current_config_hash {
-                    // Config unchanged, check if all sources are cached
-                    let all_cached = self.downloader.check_all_cached(&sources).await;
-                    if all_cached {
-                        info!(
-                            "Skipping job {} - no changes detected (config hash matches, all sources cached)",
-                            job.job_id
-                        );
-                        self.job_repo
-                            .skip(
-                                &job.id,
-                                "No changes detected since last build. All sources are cached and configuration unchanged.",
-                            )
-                            .await?;
-                        return Ok(());
-                    }
-                }
-            }
-        }
-
         self.cancellation.check()?;
-
-        // Check for matching config fingerprint in other users (copy-on-match optimization)
-        if job.job_type != JobType::Scheduled && !job.force_rebuild {
-            if let Ok(Some(matched)) = self
-                .user_repo
-                .find_user_by_fingerprint(&config_fingerprint, &job.username)
-                .await
-            {
-                info!(
-                    "Config matches user '{}' - copying output files instead of rebuilding",
-                    matched.username
-                );
-
-                // Get source user's last job stats first (needed for domain counts and stats)
-                let source_stats = self
-                    .job_repo
-                    .get_last_completed_result(&matched.username)
-                    .await
-                    .ok()
-                    .flatten();
-
-                // Copy output files from matched user
-                match self.copy_output_files(&matched, &job.username).await {
-                    Ok(mut output_files) => {
-                        // Populate domain counts from source_stats.output_files if available
-                        // This handles the case where matched.lists is empty (e.g., __default__)
-                        if let Some(ref src) = source_stats {
-                            for file in &mut output_files {
-                                if let Some(src_file) =
-                                    src.output_files.iter().find(|f| f.name == file.name)
-                                {
-                                    file.domain_count = src_file.domain_count;
-                                }
-                            }
-                        }
-
-                        let total_output_size: u64 =
-                            output_files.iter().map(|f| f.size_bytes).sum();
-                        let unique_domains = output_files
-                            .iter()
-                            .find(|f| f.name.starts_with("all_domains"))
-                            .map(|f| f.domain_count)
-                            .unwrap_or_else(|| {
-                                // Fallback to source stats or matched.total_domains
-                                source_stats
-                                    .as_ref()
-                                    .map(|s| s.unique_domains)
-                                    .unwrap_or(matched.total_domains)
-                            });
-
-                        // Build result indicating this was a copy, with stats from source
-                        let result = JobResult::copied_from_user(
-                            matched.username.clone(),
-                            source_stats.as_ref(),
-                            matched.total_domains,
-                            unique_domains,
-                            output_files.clone(),
-                        );
-
-                        // Copy full progress from source job (includes whitelist breakdown, stage snapshots)
-                        let progress = if let Ok(Some(mut source_progress)) = self
-                            .job_repo
-                            .get_last_completed_progress(&matched.username)
-                            .await
-                        {
-                            // Ensure it shows as completed
-                            source_progress.current_step = "completed".to_string();
-                            source_progress.stage = JobStage::Completed;
-                            source_progress
-                        } else {
-                            // Fallback to minimal progress if source not found
-                            let sources_count = source_stats
-                                .as_ref()
-                                .map(|s| s.sources_processed + s.sources_failed)
-                                .unwrap_or(0);
-                            JobProgress::completed_copy(sources_count)
-                        };
-
-                        // Mark job as completed
-                        self.job_repo.complete(&job.id, &result, &progress).await?;
-
-                        // Build list metadata from output files
-                        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-                        let mut all_lists: Vec<ListMetadata> = Vec::new();
-
-                        // If we have lists from matched user, use those
-                        if !matched.lists.is_empty() {
-                            for list in &matched.lists {
-                                all_lists.push(ListMetadata {
-                                    name: list.name.clone(),
-                                    is_public: true,
-                                    formats: list.formats.clone(),
-                                    domain_count: list.domain_count,
-                                    last_updated: now,
-                                });
-                            }
-                        } else {
-                            // Build list metadata from output files
-                            let mut seen_names: HashSet<String> = HashSet::new();
-                            for file in &output_files {
-                                let base_name = file.name.trim_end_matches(".txt.gz");
-                                let name = base_name.rsplitn(2, '_').last().unwrap_or(base_name);
-                                if !seen_names.contains(name) {
-                                    seen_names.insert(name.to_string());
-                                    all_lists.push(ListMetadata {
-                                        name: name.to_string(),
-                                        is_public: true,
-                                        formats: vec![
-                                            "hosts".to_string(),
-                                            "plain".to_string(),
-                                            "adblock".to_string(),
-                                        ],
-                                        domain_count: file.domain_count,
-                                        last_updated: now,
-                                    });
-                                }
-                            }
-                        }
-
-                        // Update user document
-                        if let Err(e) = self
-                            .user_repo
-                            .update_after_build(
-                                &job.username,
-                                all_lists,
-                                unique_domains,
-                                total_output_size,
-                                current_config_hash.clone(),
-                                config_fingerprint.clone(),
-                            )
-                            .await
-                        {
-                            warn!("Failed to update user document for {}: {}", job.username, e);
-                        }
-
-                        let duration = start_time.elapsed();
-                        info!(
-                            "Job {} completed in {:.2}s (copied from {}) - {} domains",
-                            job.job_id,
-                            duration.as_secs_f64(),
-                            matched.username,
-                            unique_domains
-                        );
-
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        // Copy failed, fall through to normal build
-                        warn!(
-                            "Failed to copy files from {}: {} - proceeding with normal build",
-                            matched.username, e
-                        );
-                    }
-                }
-            }
-        }
 
         let tracker = Arc::new(ProgressTracker::downloading(&sources));
         let flusher = live.insert(LiveProgress::start(
@@ -524,8 +223,8 @@ impl JobProcessor {
         ));
         flusher.flush_now().await?;
 
-        let extracted = self
-            .download_and_extract_stage(sources, job.force_rebuild, &tracker)
+        let (extracted, content_hashes) = self
+            .download_and_extract_stage(&sources, job.force_rebuild, &tracker)
             .await?;
         let downloaded = tracker.source_summary();
 
@@ -552,16 +251,41 @@ impl JobProcessor {
         self.cancellation.check()?;
 
         let cancellation = self.cancellation.clone();
-        let plan = self
+        let (plan, digest) = self
             .stage_thread
             .run(move || {
-                Ok(plan_whitelist(
-                    &whitelist_content,
-                    extracted,
-                    &cancellation,
-                )?)
+                let plan = plan_whitelist(&whitelist_content, extracted, &cancellation)?;
+                let digest = inputs_digest(
+                    PROCESSOR_VERSION,
+                    &sources,
+                    &plan.parsed.whitelist.patterns_as_strings(),
+                    &content_hashes,
+                );
+                Ok((plan, digest))
             })
             .await?;
+
+        let target = Target {
+            username: &job.username,
+            user_id: job.user_id,
+        };
+        let output_dir = self.config.output_dir(&job.username);
+        if !job.force_rebuild
+            && self
+                .is_already_published(&target, &output_dir, &digest)
+                .await?
+        {
+            info!(
+                "Skipping job {}: its inputs match the published generation",
+                job.job_id
+            );
+            if let Some(flusher) = live.take() {
+                flusher.stop().await?;
+            }
+            self.job_repo.skip(&job.id, UNCHANGED_SKIP_REASON).await?;
+            return Ok(());
+        }
+
         tracker.begin_whitelist(
             plan.domains_before,
             plan.parsed.whitelist.pattern_count() as u64,
@@ -599,31 +323,40 @@ impl JobProcessor {
         ))?;
         flusher.flush_now().await?;
 
+        let identity = BuildIdentity {
+            job_id: job.job_id.clone(),
+            job_created_at: job.created_at.to_chrono(),
+            attempt: job.attempt,
+            inputs_digest: digest,
+        };
         let cancellation = self.cancellation.clone();
         let reporting = Arc::clone(&tracker);
-        let output_dir = self.config.output_dir(&job.username);
+        let generation_output_dir = output_dir.clone();
         let domains: CategoryDomains = filtered.domains;
         let generated = self
             .stage_thread
             .run(move || {
-                generate_outputs(output_dir, domains, &cancellation, &|event| {
-                    reporting.generation_event(event)
-                })
+                generate_outputs(
+                    generation_output_dir,
+                    identity,
+                    domains,
+                    &cancellation,
+                    &|event| reporting.generation_event(event),
+                )
             })
             .await?;
-        let output_files = generated.files;
-        tracker.complete()?;
+        let GeneratedOutput {
+            generation,
+            categories,
+        } = generated;
+        let manifest = generation.manifest;
 
-        // Get unique domains from the combined "all_domains" file
-        let unique_domains = output_files
+        let unique_domains = manifest
+            .files
             .iter()
-            .find(|f| f.name.starts_with("all_domains"))
-            .map(|f| f.domain_count)
+            .find(|file| file.list == COMBINED_LIST_NAME)
+            .map(|file| file.domain_count)
             .unwrap_or(0);
-
-        // Calculate total output size
-        let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
-
         let mut warnings = downloaded.warnings;
         if filtered.ignored_lines > 0 {
             warnings.push(format!(
@@ -638,110 +371,200 @@ impl JobProcessor {
             total_domains: downloaded.total_domains,
             unique_domains,
             whitelisted_removed: whitelist_removed,
-            output_files: output_files.clone(),
-            categories: generated.categories,
+            output_files: manifest
+                .files
+                .iter()
+                .map(|file| file.output_file())
+                .collect(),
+            categories,
             warnings,
+            generation_id: Some(manifest.generation_id.clone()),
             ..JobResult::default()
         };
 
-        self.cancellation.check()?;
-
-        let final_progress = match live.take() {
-            Some(flusher) => flusher.stop().await?,
-            None => return Err(BuildError::Internal(anyhow!("progress writer is missing"))),
-        };
-        self.job_repo
-            .complete(&job.id, &result, &final_progress)
-            .await?;
-
-        // Update user document with lists and stats
-        // Build list metadata for all categories + all_domains
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-        let mut all_lists: Vec<ListMetadata> = Vec::new();
-
-        // Group output files by category to build ListMetadata for each
-        // Files are named: {category}_{format}.txt.gz (e.g., advertising_hosts.txt.gz)
-        // or all_domains_{format}.txt.gz for the combined list
-        let mut category_domain_counts: HashMap<String, u64> = HashMap::new();
-        for file in &output_files {
-            // Skip all_domains files - handled separately below
-            if file.name.starts_with("all_domains") {
-                continue;
-            }
-
-            // Extract category name: e.g., "advertising_hosts.txt.gz" -> "advertising"
-            // or "uncategorized_hosts.txt.gz" -> "uncategorized"
-            if let Some(category) = file.name.split('_').next() {
-                // Only count hosts format files to get domain count (avoid triple-counting)
-                if file.format == "hosts" {
-                    category_domain_counts.insert(category.to_string(), file.domain_count);
-                }
-            }
-        }
-
-        // Build ListMetadata for each category
-        for (category, domain_count) in &category_domain_counts {
-            let list = ListMetadata {
-                name: category.clone(),
-                is_public: true, // All lists are always public
-                formats: vec![
-                    "hosts".to_string(),
-                    "plain".to_string(),
-                    "adblock".to_string(),
-                ],
-                domain_count: *domain_count,
-                last_updated: now,
-            };
-            all_lists.push(list);
-        }
-
-        // Add all_domains (combined list)
-        let all_domains_list = ListMetadata {
-            name: "all_domains".to_string(),
-            is_public: true, // All lists are always public
-            formats: vec![
-                "hosts".to_string(),
-                "plain".to_string(),
-                "adblock".to_string(),
-            ],
-            domain_count: unique_domains,
-            last_updated: now,
-        };
-        all_lists.push(all_domains_list);
-
-        info!(
-            "Saving {} lists for user {}: {:?}",
-            all_lists.len(),
-            job.username,
-            all_lists.iter().map(|l| &l.name).collect::<Vec<_>>()
-        );
-
-        // Update user document
-        if let Err(e) = self
-            .user_repo
-            .update_after_build(
-                &job.username,
-                all_lists,
-                unique_domains,
-                total_output_size,
-                current_config_hash,
-                config_fingerprint,
+        let mut pointer_may_have_moved = false;
+        let outcome = self
+            .publish_and_complete(
+                job,
+                &target,
+                &manifest,
+                &result,
+                &tracker,
+                live,
+                &mut pointer_may_have_moved,
             )
-            .await
-        {
-            warn!("Failed to update user document for {}: {}", job.username, e);
-            // Don't fail the job for this - it's not critical
+            .await;
+        if !pointer_may_have_moved {
+            self.discard_unpublished(&output_dir, &manifest.generation_id)
+                .await;
         }
+        if matches!(
+            outcome,
+            Err(BuildError::Rejected {
+                code: error_code::TARGET_MISSING,
+                ..
+            })
+        ) {
+            self.remove_directories_of_missing_target(&output_dir).await;
+        }
+        outcome?;
 
-        let duration = start_time.elapsed();
         info!(
-            "Job {} completed in {:.2}s - {} domains",
+            "Job {} finished in {:.2}s with {} domains",
             job.job_id,
-            duration.as_secs_f64(),
+            start_time.elapsed().as_secs_f64(),
             unique_domains
         );
 
         Ok(())
+    }
+
+    async fn is_already_published(
+        &self,
+        target: &Target<'_>,
+        output_dir: &Path,
+        digest: &str,
+    ) -> Result<bool, BuildError> {
+        let Some(published) = self.user_repo.published_state(target).await? else {
+            return Ok(false);
+        };
+        if published.inputs_digest.as_deref() != Some(digest) {
+            return Ok(false);
+        }
+        let output_dir = output_dir.to_path_buf();
+        Ok(self
+            .stage_thread
+            .run(move || Ok(manifest_exists(&output_dir, &published.generation_id)))
+            .await?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn publish_and_complete(
+        &self,
+        job: &Job,
+        target: &Target<'_>,
+        manifest: &Manifest,
+        result: &JobResult,
+        tracker: &ProgressTracker,
+        live: &mut Option<LiveProgress>,
+        pointer_may_have_moved: &mut bool,
+    ) -> Result<(), BuildError> {
+        self.cancellation.check()?;
+        tracker.complete()?;
+        let final_progress = match live.take() {
+            Some(flusher) => flusher.stop().await?,
+            None => return Err(BuildError::Internal(anyhow!("progress writer is missing"))),
+        };
+        self.cancellation.check()?;
+
+        let lists = list_metadata(manifest);
+        info!(
+            "Publishing generation {} with {} lists for {}",
+            manifest.generation_id,
+            lists.len(),
+            job.username
+        );
+        *pointer_may_have_moved = true;
+        let published = self
+            .user_repo
+            .publish(
+                target,
+                &Publication {
+                    generation_id: &manifest.generation_id,
+                    job_id: &job.job_id,
+                    job_created_at: job.created_at,
+                    attempt: job.attempt,
+                    inputs_digest: &manifest.inputs_digest,
+                    lists: &lists,
+                    total_domains: result.unique_domains,
+                    total_output_size_bytes: manifest.total_size_bytes(),
+                },
+            )
+            .await?;
+        let replaced = match published {
+            PublishOutcome::Published { replaced } => replaced,
+            PublishOutcome::Superseded => {
+                info!(
+                    "Job {} was not published because a newer build already was",
+                    job.job_id
+                );
+                *pointer_may_have_moved = false;
+                self.job_repo.skip(&job.id, SUPERSEDED_SKIP_REASON).await?;
+                return Ok(());
+            }
+            PublishOutcome::TargetMissing => {
+                *pointer_may_have_moved = false;
+                return Err(BuildError::rejected(
+                    error_code::TARGET_MISSING,
+                    TARGET_MISSING_MESSAGE,
+                ));
+            }
+        };
+
+        let completed = self
+            .job_repo
+            .complete(&job.id, result, &final_progress)
+            .await;
+        self.tidy_after_publish(job, manifest, replaced).await;
+        Ok(completed?)
+    }
+
+    async fn tidy_after_publish(&self, job: &Job, manifest: &Manifest, replaced: Option<String>) {
+        let output_dir = self.config.output_dir(&job.username);
+        let published = manifest.order();
+        let generation_id = manifest.generation_id.clone();
+        let tidied = self
+            .stage_thread
+            .run(move || {
+                let mut keep = vec![generation_id.as_str()];
+                keep.extend(replaced.as_deref());
+                let pruned = prune_generations(&output_dir, published, &keep, SystemTime::now())?;
+                Ok((pruned, remove_legacy_flat_files(&output_dir)?))
+            })
+            .await;
+        match tidied {
+            Ok((pruned, legacy_removed)) => {
+                if legacy_removed > 0 {
+                    info!(
+                        "Removed {} files of the old flat layout for {}",
+                        legacy_removed, job.username
+                    );
+                }
+                debug!("Kept generations {:?} for {}", pruned.kept, job.username);
+            }
+            Err(error) => warn!(
+                "Could not tidy old output for {} after publishing: {:#}",
+                job.username, error
+            ),
+        }
+    }
+
+    async fn discard_unpublished(&self, output_dir: &Path, generation_id: &str) {
+        let output_dir = output_dir.to_path_buf();
+        let generation_id = generation_id.to_string();
+        let discarded = self
+            .stage_thread
+            .run(move || discard_generation(&output_dir, &generation_id))
+            .await;
+        if let Err(error) = discarded {
+            warn!("Could not remove an unpublished generation: {:#}", error);
+        }
+    }
+
+    async fn remove_directories_of_missing_target(&self, output_dir: &Path) {
+        let generations = crate::generation::generations_dir(output_dir);
+        let removed = self
+            .stage_thread
+            .run(move || {
+                remove_empty_directories(&generations, EMPTY_DIRECTORY_LEVELS_ABOVE_GENERATIONS)
+            })
+            .await;
+        if let Err(error) = removed {
+            warn!(
+                "Could not remove the directories of a deleted account: {:#}",
+                error
+            );
+        }
     }
 
     fn start_downloads_in_config_order(
@@ -799,18 +622,20 @@ impl JobProcessor {
 
     async fn download_and_extract_stage(
         &self,
-        sources: Vec<Source>,
+        sources: &[Source],
         force: bool,
         tracker: &Arc<ProgressTracker>,
-    ) -> Result<CategoryDomains, BuildError> {
+    ) -> Result<(CategoryDomains, Vec<Option<String>>), BuildError> {
         let (handoff, mut downloads) = mpsc::channel::<Downloaded>(DOWNLOAD_HANDOFF_CAPACITY);
         let categories: Vec<Option<String>> = sources
             .iter()
             .map(|source| source.category.clone())
             .collect();
-        let mut dispatcher = self.start_downloads_in_config_order(sources, force, tracker, handoff);
+        let mut dispatcher =
+            self.start_downloads_in_config_order(sources.to_vec(), force, tracker, handoff);
 
         let mut extracted = CategoryDomains::default();
+        let mut content_hashes: Vec<Option<String>> = vec![None; sources.len()];
         loop {
             self.cancellation.check()?;
             let downloaded =
@@ -820,7 +645,13 @@ impl JobProcessor {
                     Ok(Some(downloaded)) => downloaded,
                 };
             extracted = self
-                .extract_downloaded(downloaded, &categories, extracted, tracker)
+                .extract_downloaded(
+                    downloaded,
+                    &categories,
+                    extracted,
+                    &mut content_hashes,
+                    tracker,
+                )
                 .await?;
         }
 
@@ -831,7 +662,7 @@ impl JobProcessor {
         }
         self.cancellation.check()?;
 
-        Ok(extracted)
+        Ok((extracted, content_hashes))
     }
 
     async fn extract_downloaded(
@@ -839,6 +670,7 @@ impl JobProcessor {
         downloaded: Downloaded,
         categories: &[Option<String>],
         extracted: CategoryDomains,
+        content_hashes: &mut [Option<String>],
         tracker: &Arc<ProgressTracker>,
     ) -> Result<CategoryDomains, BuildError> {
         let Downloaded {
@@ -853,6 +685,14 @@ impl JobProcessor {
             .content
             .take()
             .ok_or_else(|| anyhow!("Source {} has no body to extract", result.source.name))?;
+        if let Some(used) = content_hashes.get_mut(index) {
+            *used = Some(
+                result
+                    .content_hash
+                    .take()
+                    .unwrap_or_else(|| content_hash(&content)),
+            );
+        }
         let body = SourceBody {
             source_index: index,
             category: categories.get(index).cloned().flatten(),
@@ -904,6 +744,39 @@ impl JobProcessor {
     }
 }
 
+fn list_metadata(manifest: &Manifest) -> Vec<ListMetadata> {
+    let published_at = BsonDateTime::from_chrono(manifest.created_at);
+    let mut lists: BTreeMap<&str, ListMetadata> = BTreeMap::new();
+    for file in &manifest.files {
+        let list = lists
+            .entry(file.list.as_str())
+            .or_insert_with(|| ListMetadata {
+                name: file.list.clone(),
+                is_public: true,
+                formats: Vec::new(),
+                domain_count: file.domain_count,
+                last_updated: published_at,
+            });
+        list.formats.push(file.format.clone());
+    }
+    let format_order = |format: &String| {
+        crate::db::progress::OUTPUT_FORMAT_NAMES
+            .iter()
+            .position(|known| known == format)
+    };
+    lists
+        .into_values()
+        .map(|mut list| {
+            list.formats.sort_by_key(format_order);
+            list
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "processor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "publishing_tests.rs"]
+mod publishing_tests;

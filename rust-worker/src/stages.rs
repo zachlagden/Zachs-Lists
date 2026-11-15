@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
-use crate::db::progress::{OutputFile, WhitelistProgress};
+use crate::db::progress::WhitelistProgress;
 use crate::extractor::{DomainExtractor, FormatBreakdown};
+use crate::generation::{BuildIdentity, UnfinishedGeneration, WrittenGeneration};
 use crate::generator::{
-    GenerationControl, GenerationEvent, OutputFormat, OutputGenerator, UNCATEGORIZED_LIST_NAME,
+    category_list_names, GenerationControl, GenerationEvent, OutputFormat, OutputGenerator,
+    UNCATEGORIZED_LIST_NAME,
 };
 use crate::whitelist::{job_warnings, ParsedWhitelist, WhitelistManager};
 
@@ -298,22 +300,24 @@ fn sorted_until_cancelled(
 }
 
 pub struct GeneratedOutput {
-    pub files: Vec<OutputFile>,
+    pub generation: WrittenGeneration,
     pub categories: BTreeMap<String, u64>,
 }
 
 pub fn generate_outputs(
     output_dir: PathBuf,
+    identity: BuildIdentity,
     domains: CategoryDomains,
     cancellation: &Cancellation,
     report: &(dyn Fn(GenerationEvent) + Send + Sync),
 ) -> Result<GeneratedOutput> {
-    let generator = OutputGenerator::new(output_dir);
+    category_list_names(domains.by_category.keys())?;
+    let unfinished = UnfinishedGeneration::create(&output_dir)?;
+    let generator = OutputGenerator::new(unfinished.directory());
     let control = GenerationControl {
         cancellation,
         report,
     };
-    generator.cleanup_old_files()?;
 
     let adblock_rules = domains.adblock_rules;
     let mut sorted_by_category: HashMap<Option<String>, Vec<String>> = HashMap::new();
@@ -352,8 +356,12 @@ pub fn generate_outputs(
     }
     let combined_sorted = sorted_until_cancelled(combined, cancellation)?;
     files.extend(generator.generate_all(&combined_sorted, &adblock_rules, &control)?);
+    cancellation.check()?;
 
-    Ok(GeneratedOutput { files, categories })
+    Ok(GeneratedOutput {
+        generation: unfinished.finish(identity, files)?,
+        categories,
+    })
 }
 
 #[cfg(test)]

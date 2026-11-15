@@ -210,7 +210,7 @@ export interface JobResult {
   warnings: string[];
   error_code: string | null;
   skip_reason: string | null;
-  copied_from: string | null; // Username whose build was copied (fingerprint match)
+  generation_id: string | null;
 }
 
 export interface OutputFile {
