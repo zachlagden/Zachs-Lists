@@ -4,16 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
-const pagesAwaitingRebuild = [
-  'src/pages/ConfigPage.tsx',
-  'src/components/config/**',
-  'src/components/jobs/**',
-];
-
-const editorsMountedOnce = [
-  'src/components/config/AdvancedConfigEditor.tsx',
-  'src/components/config/WhitelistEditor.tsx',
-];
+const pagesAwaitingRebuild = ['src/components/jobs/**'];
 
 export default tseslint.config(
   { ignores: ['dist', 'coverage'] },
@@ -47,10 +38,6 @@ export default tseslint.config(
       'react-hooks/immutability': 'off',
       'react-hooks/purity': 'off',
     },
-  },
-  {
-    files: editorsMountedOnce,
-    rules: { 'react-hooks/exhaustive-deps': 'off' },
   },
   {
     files: ['*.config.{js,ts}'],

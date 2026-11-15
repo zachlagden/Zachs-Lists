@@ -49,7 +49,7 @@ export const routes: RouteObject[] = [
                     path: 'dashboard',
                     lazy: page(() => import('./pages/dashboard/DashboardPage')),
                   },
-                  { path: 'config', lazy: page(() => import('./pages/ConfigPage')) },
+                  { path: 'config', lazy: page(() => import('./pages/config/ConfigPage')) },
                   { path: 'lists', lazy: page(() => import('./pages/lists/ListsPage')) },
                   { path: 'jobs', lazy: page(() => import('./pages/builds/BuildHistoryPage')) },
                   { path: 'jobs/:jobId', lazy: page(() => import('./pages/builds/BuildPage')) },

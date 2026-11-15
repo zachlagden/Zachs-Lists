@@ -227,6 +227,7 @@ def validate_config(user: User):
     response_data = result.to_dict()
     response_data["validation_token"] = validation_id if not result.has_errors else None
     response_data["validation_id"] = validation_id
+    response_data["revision"] = token_doc["revision"]
 
     # Emit completion event (without token for socket listeners)
     emit_validation_complete(
