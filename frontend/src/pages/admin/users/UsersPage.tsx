@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { adminUsersQuery } from '../../../api/admin';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
@@ -8,27 +7,24 @@ import { LoadingRegion, PageHeader } from '../../../components/ui/Layout';
 import { EmptyState, ErrorState } from '../../../components/ui/States';
 import { useNow } from '../../../lib/useNow';
 import { Pagination } from '../shared/Pagination';
-import { useDebouncedValue, useUrlState } from '../shared/useUrlState';
+import { useDebouncedValue, useUrlState, useUrlText } from '../shared/useUrlState';
 import { SEARCH_DEBOUNCE_MS, apiFilters, isFiltered, userListState } from './userFacts';
 import { UsersTable, UsersTableSkeleton } from './UsersTable';
 import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
 import { adminTitle } from '../shared/sections';
 
 const CLEARED = { q: null, role: null, state: null, banned: null, page: null };
+const FIRST_PAGE = { page: null };
 
 export default function UsersPage() {
   useDocumentMeta(adminTitle('Users'));
   const now = useNow();
-  const { params, update } = useUrlState();
+  const url = useUrlState();
+  const { params, update } = url;
   const state = userListState(params);
-  const [typed, setTyped] = useState(state.search);
+  const [typed, setTyped] = useUrlText(url, 'q', FIRST_PAGE);
   const search = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
   const users = useQuery(adminUsersQuery(apiFilters(state, search)));
-
-  const changeSearch = (value: string) => {
-    setTyped(value);
-    update({ q: value, page: null });
-  };
 
   const clear = () => {
     setTyped('');
@@ -47,7 +43,7 @@ export default function UsersPage() {
             <Input
               type="search"
               value={typed}
-              onChange={(event) => changeSearch(event.target.value)}
+              onChange={(event) => setTyped(event.target.value)}
               placeholder="alex or alex@example.com"
               maxLength={100}
               autoComplete="off"
