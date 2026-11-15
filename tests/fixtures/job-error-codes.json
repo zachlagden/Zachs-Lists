@@ -5,6 +5,7 @@
     "all_sources_failed": { "refunds_quota": true },
     "no_domains": { "refunds_quota": false },
     "target_missing": { "refunds_quota": false },
+    "domain_limit_exceeded": { "refunds_quota": false },
     "internal": { "refunds_quota": true }
   },
   "backend": {

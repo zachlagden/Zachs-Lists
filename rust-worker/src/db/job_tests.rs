@@ -93,6 +93,69 @@ fn worker_error_codes_match_the_shared_fixture() {
     assert_eq!(BTreeSet::from(error_code::ALL), expected);
 }
 
+fn job_with_snapshot_limits(limits: Bson) -> Job {
+    let snapshot = doc! { "blocklists": "", "whitelist": "", "limits": limits };
+    bson::from_document(queued_job("sam", Some(snapshot))).unwrap()
+}
+
+#[test]
+fn snapshot_limits_are_read_as_whole_non_negative_numbers_or_as_no_limit() {
+    let stored = job_with_snapshot_limits(Bson::Document(doc! {
+        "max_domains": 4_000_000_i32,
+        "max_source_lists": 50_i64,
+    }));
+    assert_eq!(stored.max_domains(), Some(4_000_000));
+    assert_eq!(stored.max_source_lists(), Some(50));
+
+    let unlimited_domains = job_with_snapshot_limits(Bson::Document(doc! {
+        "max_domains": Bson::Null,
+        "max_source_lists": 50,
+    }));
+    assert_eq!(unlimited_domains.max_domains(), None);
+    assert_eq!(unlimited_domains.max_source_lists(), Some(50));
+
+    let negative = job_with_snapshot_limits(Bson::Document(doc! { "max_domains": -1 }));
+    assert_eq!(negative.max_domains(), None);
+    assert_eq!(negative.max_source_lists(), None);
+
+    let no_limits = job_with_snapshot_limits(Bson::Null);
+    assert_eq!(no_limits.max_domains(), None);
+    let older_snapshot: Job = bson::from_document(queued_job(
+        "sam",
+        Some(doc! { "blocklists": "", "whitelist": "" }),
+    ))
+    .unwrap();
+    assert_eq!(older_snapshot.max_domains(), None);
+    let no_snapshot: Job = bson::from_document(queued_job("sam", None)).unwrap();
+    assert_eq!(no_snapshot.max_domains(), None);
+    assert_eq!(no_snapshot.max_source_lists(), None);
+}
+
+#[test]
+fn result_of_a_build_over_its_limit_carries_the_code_the_sentence_and_the_measurement() {
+    let limit = LimitMeasurement {
+        max_domains: Some(10),
+        actual_domains: 12,
+    };
+    let failed =
+        bson::to_document(&JobResult::over_domain_limit("Too many".into(), limit)).unwrap();
+
+    assert_eq!(
+        failed.get_str("error_code").unwrap(),
+        "domain_limit_exceeded"
+    );
+    assert_eq!(
+        failed.get_array("errors").unwrap(),
+        &vec![Bson::from("Too many")]
+    );
+    assert_eq!(
+        as_json(&Bson::Document(
+            failed.get_document("limit").unwrap().clone()
+        )),
+        serde_json::json!({ "max_domains": 10, "actual_domains": 12 })
+    );
+}
+
 #[test]
 fn results_always_carry_an_error_code_key() {
     let failed = bson::to_document(&JobResult::failure(
@@ -106,6 +169,7 @@ fn results_always_carry_an_error_code_key() {
     assert_eq!(succeeded.get("error_code"), Some(&Bson::Null));
     assert_eq!(succeeded.get("skip_reason"), Some(&Bson::Null));
     assert_eq!(succeeded.get("generation_id"), Some(&Bson::Null));
+    assert_eq!(succeeded.get("limit"), Some(&Bson::Null));
     assert!(!succeeded.contains_key("copied_from"));
     assert_eq!(succeeded.get_document("categories").unwrap().len(), 0);
     assert_eq!(succeeded.get_array("warnings").unwrap().len(), 0);

@@ -727,7 +727,8 @@
       ],
       "error_code": null,
       "skip_reason": null,
-      "generation_id": "0b9d6f3e-5a51-4c0e-9d0a-3f2b8c7e1a44"
+      "generation_id": "0b9d6f3e-5a51-4c0e-9d0a-3f2b8c7e1a44",
+      "limit": { "max_domains": 4000000, "actual_domains": 3000 }
     }
   }
 }

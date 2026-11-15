@@ -1,6 +1,7 @@
 mod cancellation;
 mod config;
 mod db;
+mod domain_limit;
 mod downloader;
 mod extractor;
 mod generation;
@@ -90,6 +91,14 @@ async fn run_worker() -> Result<()> {
     let config = Config::from_env();
     info!("Worker ID: {}", config.worker_id);
     info!("Data directory: {:?}", config.data_dir);
+    info!(
+        "Builds over the domain limit {}",
+        if config.enforce_domain_limit {
+            "fail"
+        } else {
+            "complete with a warning"
+        }
+    );
 
     // Setup shutdown signal handling
     let shutdown = Arc::new(AtomicBool::new(false));

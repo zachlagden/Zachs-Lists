@@ -1,0 +1,16 @@
+{
+  "enforcement_setting": {
+    "on": ["1", "true", "TRUE", " Yes ", "on"],
+    "off": ["", "0", "false", "no", "off", "2", "enabled"]
+  },
+  "over_limit": {
+    "limit": { "max_domains": 4000000, "actual_domains": 5123456 },
+    "error": "These lists have 5,123,456 domains across all categories, which is over the limit of 4,000,000, so nothing was published and the previously published lists remain in place.",
+    "warning": "These lists have 5,123,456 domains across all categories, which is over the limit of 4,000,000, and builds over the limit will fail once the limit is enforced."
+  },
+  "too_many_sources": {
+    "sources": 12,
+    "max_source_lists": 10,
+    "error": "The configuration has 12 sources, which is more than the limit of 10."
+  }
+}

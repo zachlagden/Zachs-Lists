@@ -11,7 +11,7 @@ use crate::test_support::{queued_job, stored_job};
 const FIRST_BODY: &[u8] = b"first.example\nshared.example\n";
 const SECOND_BODY: &[u8] = b"first.example\nshared.example\nadded.example\n";
 
-fn generation_names(output_dir: &Path) -> Vec<String> {
+pub(super) fn generation_names(output_dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = match std::fs::read_dir(generations_dir(output_dir)) {
         Ok(entries) => entries
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -43,7 +43,7 @@ fn job_at(username: &str, blocklists: &str, whitelist: &str, created_at_ms: i64)
 }
 
 impl Harness {
-    fn output_dir(&self, username: &str) -> PathBuf {
+    pub(super) fn output_dir(&self, username: &str) -> PathBuf {
         self.processor.config.output_dir(username)
     }
 
@@ -55,7 +55,7 @@ impl Harness {
         stored_job(&self.db, &job.id).await
     }
 
-    async fn published_generation(&self, username: &str) -> String {
+    pub(super) async fn published_generation(&self, username: &str) -> String {
         self.stored_target(username)
             .await
             .get_str("published_generation")

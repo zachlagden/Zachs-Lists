@@ -217,6 +217,66 @@ fn whitelist_counts_each_removed_domain_once_across_categories() {
     assert_eq!(outcome.generation.domains_per_format, 1 + 2 + 2 + 3);
 }
 
+fn counted_one_by_one(domains: &CategoryDomains) -> u64 {
+    domains
+        .by_category
+        .values()
+        .flatten()
+        .collect::<HashSet<&String>>()
+        .len() as u64
+}
+
+#[test]
+fn measurement_counts_a_shared_domain_once_and_includes_the_category_left_out() {
+    let bodies = || {
+        vec![
+            body(
+                0,
+                Some("tracking"),
+                b"first.example\nshared.example\n".to_vec(),
+            ),
+            body(
+                1,
+                Some("advertising"),
+                b"shared.example\nsecond.example\nads.cdn.example\n".to_vec(),
+            ),
+            body(
+                2,
+                Some("nsfw"),
+                b"adult.example\nfirst.example\nadult.cdn.example\n".to_vec(),
+            ),
+        ]
+    };
+
+    let unfiltered = whitelisted(extracted(bodies()), "");
+    assert_eq!(unfiltered.domains_in_all_categories, 6);
+    assert_eq!(counted_one_by_one(&unfiltered.domains), 6);
+    assert_eq!(unfiltered.generation.domains_per_format, 2 + 3 + 3 + 4);
+
+    let filtered = whitelisted(extracted(bodies()), "*.cdn.example\nshared.example\n");
+    assert_eq!(filtered.domains_in_all_categories, 3);
+    assert_eq!(counted_one_by_one(&filtered.domains), 3);
+    assert_eq!(filtered.progress.domains_after, 3);
+
+    let only_left_out = whitelisted(
+        extracted(vec![body(0, Some("nsfw"), b"adult.example\n".to_vec())]),
+        "",
+    );
+    assert_eq!(only_left_out.domains_in_all_categories, 1);
+}
+
+#[test]
+fn cancellation_during_the_measurement_stops_before_the_whitelist_is_parsed() {
+    let domains = extracted(vec![
+        body(0, Some("tracking"), hosts_body(4 * WORK_GRAIN)),
+        body(1, Some("nsfw"), hosts_body(4 * WORK_GRAIN)),
+    ]);
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+
+    assert!(plan_whitelist("", domains, &cancellation).is_err());
+}
+
 #[test]
 fn cancellation_during_the_whitelist_pass_stops_within_the_bound() {
     let domains = extracted(vec![body(0, None, hosts_body(40 * WORK_GRAIN))]);

@@ -13,9 +13,12 @@ use crate::cancellation::{Cancellation, Cancelled};
 use crate::config::Config;
 use crate::db::cache::content_hash;
 use crate::db::job::{Job, JobRepository, JobWriteError};
-use crate::db::progress::{error_code, GenerationProgress, JobProgress, JobResult};
+use crate::db::progress::{
+    error_code, GenerationProgress, JobProgress, JobResult, LimitMeasurement,
+};
 use crate::db::user::{ListMetadata, Publication, PublishOutcome, Target, UserRepository};
 use crate::db::user_config::UserConfigRepository;
+use crate::domain_limit::{judge, too_many_sources, LimitVerdict};
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::generation::{
@@ -59,6 +62,11 @@ pub enum BuildError {
     LeaseLost,
     #[error("{message}")]
     Rejected { code: &'static str, message: String },
+    #[error("{message}")]
+    OverDomainLimit {
+        limit: LimitMeasurement,
+        message: String,
+    },
     #[error("{0:#}")]
     Internal(anyhow::Error),
 }
@@ -210,6 +218,13 @@ impl JobProcessor {
             ));
         }
 
+        if let Some(message) = too_many_sources(sources.len(), job.max_source_lists()) {
+            return Err(BuildError::Rejected {
+                code: error_code::INVALID_CONFIG,
+                message,
+            });
+        }
+
         info!("Found {} sources to process", sources.len());
         self.cancellation.check()?;
 
@@ -317,6 +332,24 @@ impl JobProcessor {
 
         self.cancellation.check()?;
 
+        let limit = LimitMeasurement {
+            max_domains: job.max_domains(),
+            actual_domains: filtered.domains_in_all_categories,
+        };
+        let over_limit_warning = match judge(&limit, self.config.enforce_domain_limit) {
+            LimitVerdict::Within => None,
+            LimitVerdict::OverButObserved { warning } => {
+                warn!("Job {} is over its domain limit: {}", job.job_id, warning);
+                Some(warning)
+            }
+            LimitVerdict::OverAndEnforced { error } => {
+                return Err(BuildError::OverDomainLimit {
+                    limit,
+                    message: error,
+                });
+            }
+        };
+
         tracker.begin_generation(GenerationProgress::pending(
             filtered.generation.files_total,
             filtered.generation.domains_per_format,
@@ -364,6 +397,7 @@ impl JobProcessor {
                 filtered.ignored_lines
             ));
         }
+        warnings.extend(over_limit_warning);
         let result = JobResult {
             sources_processed: downloaded.completed,
             sources_failed: downloaded.failed,
@@ -379,6 +413,7 @@ impl JobProcessor {
             categories,
             warnings,
             generation_id: Some(manifest.generation_id.clone()),
+            limit: Some(limit),
             ..JobResult::default()
         };
 
@@ -780,3 +815,7 @@ mod tests;
 #[cfg(test)]
 #[path = "publishing_tests.rs"]
 mod publishing_tests;
+
+#[cfg(test)]
+#[path = "domain_limit_build_tests.rs"]
+mod domain_limit_build_tests;
