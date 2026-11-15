@@ -4,6 +4,9 @@ import type {
   AdminLimitReviewPage,
   AdminStats,
   AnalyticsReport,
+  DefaultConfig,
+  DefaultSyncRun,
+  DefaultSyncStatus,
   ListAnalyticsReport,
   PublicAnalyticsReport,
   PublicStats,
@@ -287,8 +290,18 @@ export const adminApi = {
     return response.data;
   },
 
-  getDefaultConfig: async () => {
-    const response = await api.get('/api/admin/default/config');
+  getDefaultConfig: async (): Promise<DefaultConfig> => {
+    const response = await api.get<DefaultConfig>('/api/admin/default/config');
+    return response.data;
+  },
+
+  getDefaultSync: async (): Promise<DefaultSyncStatus> => {
+    const response = await api.get<DefaultSyncStatus>('/api/admin/default/sync');
+    return response.data;
+  },
+
+  runDefaultSync: async (force = false): Promise<DefaultSyncRun> => {
+    const response = await api.post<DefaultSyncRun>('/api/admin/default/sync', { force });
     return response.data;
   },
 

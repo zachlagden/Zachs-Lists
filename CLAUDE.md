@@ -14,6 +14,10 @@ A DNS blocklist aggregator at lists.zachlagden.uk. Open source, built to a profe
 
 This project predates the usual defaults and keeps its own stack: MongoDB, Flask, and a React SPA built with Vite.
 
+## Default lists
+
+The default lists are built from the source config and whitelist in the `system_config` document `default_config`. When `DEFAULT_SYNC_ENABLED` is true, both come from [zachlagden/Pi-hole-Optimized-Blocklists](https://github.com/zachlagden/Pi-hole-Optimized-Blocklists) at the commit of its latest published build, and the admin editor is read-only. Change the default sources and whitelist in that repository, not here. `docs/default-list-sync.md` describes the sync, its settings and its schedule.
+
 ## Checks
 
 Run all of these before merging. CI runs the same in `.github/workflows/checks.yml`.

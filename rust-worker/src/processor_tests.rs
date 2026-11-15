@@ -735,6 +735,7 @@ async fn heartbeat_keeps_writing_during_blocking_work_and_leaves_the_revision_al
                 SourceBody {
                     source_index: 0,
                     category: None,
+                    abp: false,
                     content: hosts_body(100_000),
                 },
                 &mut domains,

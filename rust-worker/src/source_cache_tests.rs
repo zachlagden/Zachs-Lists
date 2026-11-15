@@ -13,6 +13,7 @@ async fn fixture(server: &TestServer) -> (Database, Downloader, Source) {
         name: "fixture".into(),
         url: server.url("/List?Token=Case"),
         category: None,
+        abp: false,
     };
     (db, downloader, source)
 }
@@ -659,6 +660,7 @@ async fn entry_without_a_check_time_fails_only_its_own_source_when_upstream_is_d
         name: "healthy".into(),
         url: server.url("/healthy"),
         category: None,
+        abp: false,
     };
     let results = [
         downloader.download_source(&source, false).await,
@@ -689,11 +691,13 @@ async fn cleanup_removes_entries_without_a_check_time_and_survives_a_missing_bod
         name: "unchecked".into(),
         url: server.url("/unchecked"),
         category: None,
+        abp: false,
     };
     let bodiless = Source {
         name: "bodiless".into(),
         url: server.url("/bodiless"),
         category: None,
+        abp: false,
     };
     insert_entry_without_check_time(&db, &unchecked, b"unchecked.example\n").await;
     insert_entry_without_check_time(&db, &bodiless, b"bodiless.example\n").await;

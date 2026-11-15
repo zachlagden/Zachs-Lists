@@ -2,8 +2,9 @@
 Scheduled tasks for the application.
 
 Tasks:
-- Weekly rebuild of all user lists (Sunday 2 AM UTC)
-- Weekly rebuild of default lists (Sunday 1 AM UTC)
+- Hourly default list sync check (minute 15)
+- Weekly rebuild of default lists (Sunday 06:30 UTC)
+- Weekly rebuild of all user lists (Sunday 07:30 UTC)
 - Daily cache cleanup (3 AM UTC)
 """
 
@@ -11,6 +12,16 @@ import logging
 from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
+
+from app.services.default_refresh import (
+    DEFAULT_REBUILD_HOUR,
+    DEFAULT_REBUILD_MINUTE,
+    HOURLY_SYNC_MINUTE,
+    USER_REBUILD_HOUR,
+    USER_REBUILD_MINUTE,
+    hourly_check,
+    weekly_rebuild,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,40 +49,42 @@ def register_scheduled_tasks(app, scheduler):
     """
 
     @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=1, minute=0),
+        CronTrigger(minute=HOURLY_SYNC_MINUTE),
+        id="hourly_default_sync",
+        name="Hourly Default Lists Sync Check",
+    )
+    def hourly_default_sync():
+        with app.app_context():
+            try:
+                hourly_check(datetime.utcnow())
+
+            except Exception as e:
+                logger.exception(f"Failed default lists sync check: {e}")
+
+    @scheduler.scheduled_job(
+        CronTrigger(
+            day_of_week="sun", hour=DEFAULT_REBUILD_HOUR, minute=DEFAULT_REBUILD_MINUTE
+        ),
         id="weekly_default_rebuild",
         name="Weekly Default Lists Rebuild",
     )
     def weekly_default_rebuild():
-        """Rebuild default lists every Sunday at 1 AM UTC."""
         with app.app_context():
             try:
-                from app.models.job import Job
-                from app.services.build_admission import (
-                    DEFAULT_TARGET,
-                    AdmissionError,
-                    admit_build,
-                )
-
                 logger.info("Starting weekly default lists rebuild")
-                job = admit_build(DEFAULT_TARGET, Job.TYPE_SCHEDULED, None)
-                logger.info(f"Queued default rebuild job: {job.job_id}")
+                weekly_rebuild()
 
-            except AdmissionError as refusal:
-                logger.warning(
-                    f"Weekly default rebuild not queued ({refusal.code}): "
-                    f"{refusal.message}"
-                )
             except Exception as e:
                 logger.exception(f"Failed to queue default rebuild: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=2, minute=0),
+        CronTrigger(
+            day_of_week="sun", hour=USER_REBUILD_HOUR, minute=USER_REBUILD_MINUTE
+        ),
         id="weekly_user_rebuild",
         name="Weekly User Lists Rebuild",
     )
     def weekly_user_rebuild():
-        """Rebuild all user lists every Sunday at 2 AM UTC."""
         with app.app_context():
             try:
                 from app.services.build_admission import queue_scheduled_user_builds

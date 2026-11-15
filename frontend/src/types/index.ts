@@ -418,6 +418,47 @@ export interface AdminLimitReview {
   has_pending_request: boolean;
 }
 
+export interface DefaultSyncSource {
+  repo: string | null;
+  commit_sha: string | null;
+  commit_date: string | null;
+  blocklists_sha256: string | null;
+  whitelist_sha256: string | null;
+  synced_at: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+}
+
+export interface DefaultConfig {
+  config: string;
+  whitelist: string;
+  sync_enabled: boolean;
+  source: DefaultSyncSource | null;
+}
+
+export interface DefaultSyncStatus {
+  sync_enabled: boolean;
+  repo: string;
+  revision: number;
+  source: DefaultSyncSource | null;
+}
+
+export interface DefaultSyncOutcome {
+  status: 'updated' | 'unchanged' | 'failed';
+  changed: boolean;
+  commit_changed: boolean;
+  commit_sha: string | null;
+  source_count: number | null;
+  error: string | null;
+  can_force: boolean;
+}
+
+export interface DefaultSyncRun extends DefaultSyncStatus {
+  sync: DefaultSyncOutcome | null;
+  job_id: string | null;
+  build_refusal: string | null;
+}
+
 export interface AdminLimitReviewPage {
   reviews: AdminLimitReview[];
   page: number;

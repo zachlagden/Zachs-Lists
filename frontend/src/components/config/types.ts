@@ -18,6 +18,7 @@ export interface ConfigLine {
   url: string;
   name: string;
   category: string;
+  abp?: boolean;
   isComment?: boolean;
   raw?: string;
 }
@@ -53,6 +54,8 @@ export const CATEGORIES = [
 
 export type CategoryValue = (typeof CATEGORIES)[number]['value'];
 
+export const ABP_FLAG = 'abp';
+
 // Parse config string into lines
 export function parseConfig(config: string): ConfigLine[] {
   const lines: ConfigLine[] = [];
@@ -71,11 +74,12 @@ export function parseConfig(config: string): ConfigLine[] {
 
     // Parse url|name|category format
     const parts = line.split('|');
-    if (parts.length >= 3) {
+    if (parts.length >= 2) {
       lines.push({
         url: parts[0].trim(),
         name: parts[1].trim(),
-        category: parts[2].trim(),
+        category: (parts[2] ?? '').trim(),
+        abp: parts.length === 4 && parts[3].trim() === ABP_FLAG,
         raw: rawLine,
       });
     } else if (parts.length === 1 && line.startsWith('http')) {
@@ -87,16 +91,20 @@ export function parseConfig(config: string): ConfigLine[] {
   return lines;
 }
 
+export function serializeLine(line: ConfigLine): string {
+  if (line.raw !== undefined) {
+    return line.raw;
+  }
+  if (line.isComment) {
+    return `# ${line.name}`;
+  }
+  const fields = [line.url, line.name, line.category];
+  return line.abp ? [...fields, ABP_FLAG].join('|') : fields.join('|');
+}
+
 // Convert config lines back to string
 export function serializeConfig(lines: ConfigLine[]): string {
-  return lines
-    .map((line) => {
-      if (line.isComment) {
-        return line.raw || `# ${line.name}`;
-      }
-      return `${line.url}|${line.name}|${line.category}`;
-    })
-    .join('\n');
+  return lines.map(serializeLine).join('\n');
 }
 
 // Group config lines by category

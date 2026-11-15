@@ -19,6 +19,7 @@ MAX_CONFIG_SOURCES = 1000
 VALID_CATEGORIES = frozenset(
     {"comprehensive", "malicious", "advertising", "tracking", "suspicious", "nsfw"}
 )
+ABP_FLAG = "abp"
 WHITELIST_VALIDATOR_SUBCOMMAND = "validate-whitelist"
 WHITELIST_VALIDATOR_TIMEOUT_SECONDS = 5
 
@@ -93,6 +94,7 @@ class ParsedConfigLine:
     category: str
     raw: str
     error: str | None = None
+    abp: bool = False
 
 
 def normalize_domain(domain: str) -> str:
@@ -121,10 +123,16 @@ def parse_config_lines(config: str) -> list[ParsedConfigLine]:
             hostname = "source"
         name = parts[1] if len(parts) > 1 else re.sub(r"[^A-Za-z0-9_-]", "_", hostname)
         category = parts[2] if len(parts) > 2 else ""
+        abp = len(parts) == 4 and parts[3] == ABP_FLAG
         error = None
-        if len(parts) > 3 or any(not part for part in parts):
-            error = "Expected URL, URL|name, or URL|name|category with nonempty fields"
-        lines.append(ParsedConfigLine(number, url, name, category, raw, error))
+        if len(parts) > 4 or any(not part for part in parts):
+            error = (
+                "Expected URL, URL|name, URL|name|category or URL|name|category|abp "
+                "with nonempty fields"
+            )
+        elif len(parts) == 4 and not abp:
+            error = "The fourth field can only be abp"
+        lines.append(ParsedConfigLine(number, url, name, category, raw, error, abp))
     return lines
 
 

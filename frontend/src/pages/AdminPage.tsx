@@ -8,7 +8,14 @@ import { useJobSocket, useStatsSocket } from '../hooks/useSocket';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { JobList, JobDetailView } from '../components/jobs';
 import { mergeFetchedList, mergeJobs } from '../realtime/jobMerge';
-import type { Job, SourceProgress, WhitelistProgress, FormatProgress } from '../types';
+import type {
+  DefaultConfig,
+  DefaultSyncSource,
+  Job,
+  SourceProgress,
+  WhitelistProgress,
+  FormatProgress,
+} from '../types';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -112,6 +119,16 @@ const LIBRARY_CATEGORIES = [
   'nsfw',
 ];
 
+const EMPTY_DEFAULT_CONFIG: DefaultConfig = {
+  config: '',
+  whitelist: '',
+  sync_enabled: false,
+  source: null,
+};
+
+const syncTime = (value: string | null): string =>
+  value ? new Date(value).toLocaleString() : 'never';
+
 export default function AdminPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -134,6 +151,11 @@ export default function AdminPage() {
   const [featured, setFeatured] = useState<FeaturedList[]>([]);
   const [_defaultConfig, setDefaultConfig] = useState({ config: '', whitelist: '' });
   const [localConfig, setLocalConfig] = useState({ config: '', whitelist: '' });
+  const [defaultSync, setDefaultSync] = useState<{
+    enabled: boolean;
+    source: DefaultSyncSource | null;
+  }>({ enabled: false, source: null });
+  const [syncingDefault, setSyncingDefault] = useState(false);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [jobsPerDay, setJobsPerDay] = useState<
     { date: string; total: number; completed: number; failed: number }[]
@@ -302,7 +324,7 @@ export default function AdminPage() {
           adminApi.getStats().catch(() => null),
           adminApi.getAllJobs().catch(() => ({ jobs: [] })),
           adminApi.getFeaturedLists().catch(() => ({ featured: [] })),
-          adminApi.getDefaultConfig().catch(() => ({ config: '', whitelist: '' })),
+          adminApi.getDefaultConfig().catch(() => EMPTY_DEFAULT_CONFIG),
           adminApi.getAdminAnalytics(30).catch(() => null),
           adminApi.getJobsPerDay(30).catch(() => ({ jobs_per_day: [] })),
           adminApi.getUserGrowth(30).catch(() => ({ user_growth: [] })),
@@ -315,8 +337,7 @@ export default function AdminPage() {
         setStats(statsData);
         setJobs((prev) => mergeFetchedList(prev, jobsData.jobs || []));
         setFeatured(featuredData?.featured || []);
-        setDefaultConfig(configData);
-        setLocalConfig(configData);
+        applyDefaultConfig(configData);
         setAnalytics(analyticsData);
         setJobsPerDay(jobsPerDayData?.jobs_per_day || []);
         setUserGrowth(userGrowthData?.user_growth || []);
@@ -382,6 +403,13 @@ export default function AdminPage() {
     }
   };
 
+  const applyDefaultConfig = (loaded: DefaultConfig) => {
+    const text = { config: loaded.config, whitelist: loaded.whitelist };
+    setDefaultConfig(text);
+    setLocalConfig(text);
+    setDefaultSync({ enabled: loaded.sync_enabled, source: loaded.source });
+  };
+
   const handleRebuildDefault = async () => {
     setRebuildingDefault(true);
     try {
@@ -392,6 +420,37 @@ export default function AdminPage() {
       setMessage({ type: 'error', text: 'Failed to trigger rebuild' });
     } finally {
       setRebuildingDefault(false);
+    }
+  };
+
+  const handleSyncDefault = async (force = false) => {
+    setSyncingDefault(true);
+    try {
+      const run = await adminApi.runDefaultSync(force);
+      setDefaultSync({ enabled: run.sync_enabled, source: run.source });
+      if (run.sync?.status === 'failed') {
+        const error = run.sync.error || 'Sync failed';
+        if (run.sync.can_force && confirm(`${error}. Sync anyway?`)) {
+          await handleSyncDefault(true);
+          return;
+        }
+        setMessage({ type: 'error', text: error });
+        return;
+      }
+      applyDefaultConfig(await adminApi.getDefaultConfig());
+      const built = run.job_id ? ' A rebuild was queued.' : '';
+      setMessage({
+        type: 'success',
+        text:
+          run.sync?.status === 'updated'
+            ? `Default lists synced.${built}`
+            : `Default lists are already up to date.${built}`,
+      });
+    } catch (error) {
+      console.error('Failed to sync default lists:', error);
+      setMessage({ type: 'error', text: apiErrorMessage(error, 'Failed to sync default lists') });
+    } finally {
+      setSyncingDefault(false);
     }
   };
 
@@ -1312,11 +1371,53 @@ export default function AdminPage() {
             </button>
           </div>
 
+          {defaultSync.enabled && (
+            <div className="card space-y-2 text-sm text-pihole-text-muted">
+              <div className="flex items-center justify-between gap-4">
+                <p>
+                  The default sources and whitelist are synced from{' '}
+                  <span className="text-pihole-text">
+                    {defaultSync.source?.repo || 'the blocklist repository'}
+                  </span>
+                  . Change them there.
+                </p>
+                <button
+                  onClick={() => handleSyncDefault()}
+                  disabled={syncingDefault}
+                  className="btn btn-secondary whitespace-nowrap"
+                >
+                  {syncingDefault ? <LoadingSpinner size="sm" /> : 'Sync now'}
+                </button>
+              </div>
+              <p>
+                Commit:{' '}
+                {defaultSync.source?.repo && defaultSync.source.commit_sha ? (
+                  <a
+                    href={`https://github.com/${defaultSync.source.repo}/commit/${defaultSync.source.commit_sha}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-pihole-accent hover:underline"
+                  >
+                    {defaultSync.source.commit_sha.slice(0, 7)}
+                  </a>
+                ) : (
+                  'none yet'
+                )}
+                {' · '}Synced: {syncTime(defaultSync.source?.synced_at ?? null)}
+                {' · '}Last checked: {syncTime(defaultSync.source?.last_checked_at ?? null)}
+              </p>
+              {defaultSync.source?.last_error && (
+                <p className="text-red-400">Last error: {defaultSync.source.last_error}</p>
+              )}
+            </div>
+          )}
+
           <div className="grid md:grid-cols-2 gap-6">
             <div className="card">
               <h3 className="font-semibold text-pihole-text mb-4">Blocklist Sources</h3>
               <textarea
                 value={localConfig.config}
+                readOnly={defaultSync.enabled}
                 onChange={(e) => setLocalConfig({ ...localConfig, config: e.target.value })}
                 className="w-full h-80 bg-pihole-darkest border border-pihole-border rounded-lg p-4 font-mono text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
                 placeholder="# Enter blocklist URLs..."
@@ -1326,6 +1427,7 @@ export default function AdminPage() {
               <h3 className="font-semibold text-pihole-text mb-4">Whitelist</h3>
               <textarea
                 value={localConfig.whitelist}
+                readOnly={defaultSync.enabled}
                 onChange={(e) => setLocalConfig({ ...localConfig, whitelist: e.target.value })}
                 className="w-full h-80 bg-pihole-darkest border border-pihole-border rounded-lg p-4 font-mono text-sm text-pihole-text focus:outline-none focus:border-pihole-accent resize-none"
                 placeholder="# Enter whitelist patterns..."
@@ -1333,11 +1435,17 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <button onClick={handleSaveDefaultConfig} disabled={saving} className="btn btn-primary">
-              {saving ? <LoadingSpinner size="sm" /> : 'Save Configuration'}
-            </button>
-          </div>
+          {!defaultSync.enabled && (
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveDefaultConfig}
+                disabled={saving}
+                className="btn btn-primary"
+              >
+                {saving ? <LoadingSpinner size="sm" /> : 'Save Configuration'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

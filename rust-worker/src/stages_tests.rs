@@ -56,6 +56,7 @@ fn body(source_index: usize, category: Option<&str>, content: Vec<u8>) -> Source
     SourceBody {
         source_index,
         category: category.map(str::to_string),
+        abp: false,
         content,
     }
 }
@@ -309,6 +310,7 @@ fn generation_progress_counts_every_file_of_every_category() {
         name: "first_list".into(),
         url: "https://lists.example.com/first.txt".into(),
         category: None,
+        abp: false,
     }]);
     tracker
         .begin_whitelist(filtered.progress.domains_before, 0)
@@ -460,6 +462,82 @@ fn generation_writes_a_manifest_whose_hashes_sizes_and_counts_match_the_files() 
         };
         assert_eq!(file.domain_count, expected, "{}", file.name);
     }
+}
+
+fn list_lines(output_dir: &std::path::Path, generation_id: &str, file: &str) -> Vec<String> {
+    use std::io::Read;
+
+    let stored = std::fs::read(generations_dir(output_dir).join(generation_id).join(file)).unwrap();
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(stored.as_slice())
+        .read_to_string(&mut text)
+        .unwrap();
+    text.lines()
+        .filter(|line| !line.is_empty() && !line.starts_with(['#', '!']))
+        .map(str::to_string)
+        .collect()
+}
+
+fn generated_tracking_lists(abp: bool) -> [Vec<String>; 3] {
+    let output_dir = tempfile::tempdir().unwrap();
+    let mut source = body(
+        0,
+        Some("tracking"),
+        b"*.Wild.example.com\nplain.example.com\n||rule.example.com^$important\n".to_vec(),
+    );
+    source.abp = abp;
+    let filtered = whitelisted(extracted(vec![source]), "");
+    let generated = generate_outputs(
+        output_dir.path().to_path_buf(),
+        identity(),
+        filtered.domains,
+        &Cancellation::default(),
+        &|_| {},
+    )
+    .unwrap();
+    let generation_id = generated.generation.manifest.generation_id;
+    ["hosts", "plain", "adblock"]
+        .map(|format| format!("tracking_{format}.txt.gz"))
+        .map(|file| list_lines(output_dir.path(), &generation_id, &file))
+}
+
+#[test]
+fn wildcard_line_of_an_abp_source_reaches_all_three_output_formats() {
+    let [hosts, plain, adblock] = generated_tracking_lists(true);
+    assert_eq!(
+        hosts,
+        [
+            "0.0.0.0 plain.example.com",
+            "0.0.0.0 rule.example.com",
+            "0.0.0.0 wild.example.com"
+        ]
+    );
+    assert_eq!(
+        plain,
+        ["plain.example.com", "rule.example.com", "wild.example.com"]
+    );
+    assert_eq!(
+        adblock,
+        [
+            "||plain.example.com^",
+            "||rule.example.com^$important",
+            "||wild.example.com^"
+        ]
+    );
+}
+
+#[test]
+fn wildcard_line_of_a_source_without_the_abp_flag_is_still_dropped() {
+    let [hosts, plain, adblock] = generated_tracking_lists(false);
+    assert_eq!(
+        hosts,
+        ["0.0.0.0 plain.example.com", "0.0.0.0 rule.example.com"]
+    );
+    assert_eq!(plain, ["plain.example.com", "rule.example.com"]);
+    assert_eq!(
+        adblock,
+        ["||plain.example.com^", "||rule.example.com^$important"]
+    );
 }
 
 #[test]

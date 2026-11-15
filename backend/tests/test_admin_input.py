@@ -175,7 +175,7 @@ def test_limits_are_stored_as_overrides_of_the_defaults(
 ) -> None:
     defaults = User.default_limits()
     assert defaults == {
-        "max_source_lists": 40,
+        "max_source_lists": 50,
         "max_domains": 4_000_000,
         "max_config_size_mb": 10,
         "manual_updates_per_week": 3,
@@ -708,6 +708,8 @@ def test_valid_default_config_is_saved_in_one_document(
     assert admin_client.get("/api/admin/default/config").get_json() == {
         "config": VALID_SOURCES,
         "whitelist": "allowed.example.com",
+        "sync_enabled": False,
+        "source": None,
     }
     only_whitelist = admin_client.put(
         "/api/admin/default/config", json={"whitelist": ""}

@@ -32,6 +32,7 @@ pub fn inputs_digest(
             &mut hasher,
             source.category.as_deref().unwrap_or(NO_CATEGORY_MARKER),
         );
+        hasher.update([u8::from(source.abp)]);
         let content_hash = content_hashes.get(index).and_then(Option::as_deref);
         hasher.update([u8::from(content_hash.is_some())]);
         feed(&mut hasher, content_hash.unwrap_or(FAILED_SOURCE_MARKER));
@@ -53,6 +54,7 @@ mod tests {
             name: name.into(),
             url: url.into(),
             category: category.map(String::from),
+            abp: false,
         }
     }
 
@@ -148,6 +150,20 @@ mod tests {
                 inputs_digest(PROCESSOR_VERSION, &changed, &whitelist, &hashes())
             );
         }
+    }
+
+    #[test]
+    fn abp_flag_changes_the_digest() {
+        let mut flagged = sources();
+        flagged[1].abp = true;
+        let whitelist = patterns("allowed.example\n*.cdn.example\n");
+        let digest = inputs_digest(PROCESSOR_VERSION, &flagged, &whitelist, &hashes());
+        assert_ne!(baseline(), digest);
+        flagged[1].abp = false;
+        assert_eq!(
+            baseline(),
+            inputs_digest(PROCESSOR_VERSION, &flagged, &whitelist, &hashes())
+        );
     }
 
     #[test]

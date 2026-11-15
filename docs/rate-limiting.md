@@ -13,6 +13,8 @@ These routes are called repeatedly by one open browser session, so each has its 
 | `POST /api/user/config/url-metadata`                                                                                                | `RATELIMIT_URL_METADATA` | 60 per minute  |
 | `GET /api/admin/stats`                                                                                                              | `RATELIMIT_ADMIN_STATS`  | 60 per minute  |
 
+`POST /api/admin/default/sync` is limited to 6 per hour by `RATELIMIT_DEFAULT_SYNC`, because each run calls the GitHub API.
+
 A route's own limit replaces the default for that route. Routes that share a config key still count separately.
 
 ## Who a limit applies to

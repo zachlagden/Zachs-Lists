@@ -47,3 +47,11 @@ def test_preflight_failure_does_not_partially_apply() -> None:
         database.users.find_one({"_id": "example-one"})["config"]["blocklists"]
         == valid_legacy
     )
+
+
+def test_abp_flag_is_kept() -> None:
+    flagged = "https://example.com/one|First|tracking|abp\n"
+    assert migration.normalize(flagged) == flagged
+    assert migration.normalize("https://example.com/one|First|tracking|legacy\n") == (
+        "https://example.com/one|First|tracking\n"
+    )

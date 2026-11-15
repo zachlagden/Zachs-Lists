@@ -45,7 +45,7 @@ class Config:
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
     # User limits
-    DEFAULT_MAX_SOURCE_LISTS = 40
+    DEFAULT_MAX_SOURCE_LISTS = 50
     DEFAULT_MAX_DOMAINS = 4_000_000  # 4 million domains
     MAX_DOMAINS_LIMIT = 20_000_000  # Maximum requestable: 20 million
     DOMAIN_TIERS = [4_000_000, 10_000_000, 20_000_000]  # Available tiers
@@ -62,6 +62,20 @@ class Config:
         "yes",
         "on",
     )
+
+    # Default list sync
+    DEFAULT_SYNC_ENABLED = os.environ.get(
+        "DEFAULT_SYNC_ENABLED", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    DEFAULT_SYNC_REPO = (
+        os.environ.get("DEFAULT_SYNC_REPO", "").strip()
+        or "zachlagden/Pi-hole-Optimized-Blocklists"
+    )
+    DEFAULT_SYNC_COMMIT_PREFIX = (
+        os.environ.get("DEFAULT_SYNC_COMMIT_PREFIX", "").strip()
+        or "Weekly blocklist update"
+    )
+    GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or None
 
     # Processing
     MAX_CONCURRENT_JOBS = 5
@@ -86,6 +100,7 @@ class Config:
     RATELIMIT_JOBS = "120 per minute"
     RATELIMIT_URL_METADATA = "60 per minute"
     RATELIMIT_ADMIN_STATS = "60 per minute"
+    RATELIMIT_DEFAULT_SYNC = "6 per hour"
     TRUSTED_PROXY_HOSTS = tuple(
         host.strip()
         for host in os.environ.get("TRUSTED_PROXY_HOSTS", "").split(",")
