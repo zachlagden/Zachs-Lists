@@ -1,3 +1,4 @@
+import copy
 import gzip
 import importlib
 import importlib.util
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+import logging
 
 import mongomock
 import pytest
@@ -29,7 +32,7 @@ from app.models.user import User
 from app.services import job_feed, limit_review
 from app.services.build_admission import admit_build, refund_quota_if_due
 from app.services.job_poller import JobStatusPoller
-from app.utils.job_document import revision_bump
+from app.utils.job_document import failure_result, revision_bump
 
 realtime: Any = importlib.import_module("app.socketio")
 script_path = Path(__file__).resolve().parents[1] / "scripts/audit_domain_limits.py"
@@ -41,6 +44,11 @@ spec.loader.exec_module(audit)
 LIMIT = TestingConfig.DEFAULT_MAX_DOMAINS
 ROOT_GITHUB_ID = 2004
 VALID_CONFIG = "https://example.com/hosts.txt|example|tracking"
+FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures"
+
+
+def shared_fixture(name: str) -> Any:
+    return json.loads((FIXTURES / name).read_text())
 
 
 @dataclass
@@ -584,6 +592,115 @@ def test_poller_opens_refreshes_and_resolves_a_review_from_job_results(
     assert resolved["resolved_reason"] == limit_review.REASON_WITHIN_LIMIT
 
 
+def worker_result(actual: int, **changes: Any) -> dict[str, Any]:
+    result: dict[str, Any] = copy.deepcopy(
+        shared_fixture("job-progress.json")["completed"]["result"]
+    )
+    result["limit"] = {"max_domains": LIMIT, "actual_domains": actual}
+    result.update(changes)
+    return result
+
+
+def end_job_as_the_worker(
+    site: Site, job: Job, status: str, result: dict[str, Any]
+) -> None:
+    site.db.jobs.update_one(
+        {"job_id": job.job_id},
+        {
+            "$set": {
+                "status": status,
+                "result": result,
+                "completed_at": datetime.utcnow(),
+            },
+            **revision_bump(),
+        },
+    )
+
+
+def test_poller_follows_a_review_through_results_shaped_like_the_worker_writes(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = shared_fixture("domain-limit.json")["over_limit"]
+    monkeypatch.setattr(job_feed, "database_time", datetime.utcnow)
+    poller = JobStatusPoller()
+    poller.poll_once()
+
+    observed = admit_build(site.sam, Job.TYPE_SCHEDULED, None)
+    assert observed.to_dict()["result"] is None
+    poller.poll_once()
+    completed_over = worker_result(LIMIT + 5)
+    completed_over["warnings"].append(messages["warning"])
+    end_job_as_the_worker(site, observed, Job.STATUS_COMPLETED, completed_over)
+    poller.poll_once()
+
+    opened = site.review(site.sam)
+    assert opened is not None
+    assert (opened["status"], opened["method"]) == ("open", "build")
+    assert (opened["actual_domains"], opened["max_domains"]) == (LIMIT + 5, LIMIT)
+
+    enforced = admit_build(site.sam, Job.TYPE_SCHEDULED, None)
+    poller.poll_once()
+    failed_over = {
+        **failure_result(limit_review.LIMIT_EXCEEDED_CODE, messages["error"]),
+        "limit": {"max_domains": LIMIT, "actual_domains": LIMIT + 9},
+    }
+    end_job_as_the_worker(site, enforced, Job.STATUS_FAILED, failed_over)
+    poller.poll_once()
+
+    refreshed = site.review(site.sam)
+    assert refreshed is not None
+    assert (refreshed["status"], refreshed["actual_domains"]) == ("open", LIMIT + 9)
+    assert len(site.notices(site.sam)) == 1
+    stored = Job.get_by_id(enforced.job_id)
+    assert stored is not None and stored.to_dict()["result"] == failed_over
+
+    within = admit_build(site.sam, Job.TYPE_SCHEDULED, None)
+    poller.poll_once()
+    end_job_as_the_worker(site, within, Job.STATUS_COMPLETED, worker_result(LIMIT - 1))
+    poller.poll_once()
+
+    resolved = site.review(site.sam)
+    assert resolved is not None
+    assert (resolved["status"], resolved["resolved_by"]) == ("resolved", "build")
+
+
+@pytest.mark.parametrize("status", [Job.STATUS_COMPLETED, Job.STATUS_FAILED])
+def test_measurement_without_a_limit_changes_nothing_and_is_not_reported(
+    site: Site, caplog: pytest.LogCaptureFixture, status: str
+) -> None:
+    site.flag(site.sam, LIMIT + 5)
+    result = {"limit": {"max_domains": None, "actual_domains": LIMIT * 9}}
+
+    with caplog.at_level(logging.WARNING, logger=limit_review.logger.name):
+        change = limit_review.record_job_result(
+            finished(site, site.sam, status, result)
+        )
+
+    assert change == limit_review.ReviewChange()
+    assert site.status(site.sam) == "open"
+    assert caplog.records == []
+
+
+def test_admission_snapshots_no_domain_limit_for_admins_and_root(site: Site) -> None:
+    snapshots = {
+        user.username: site.db.jobs.find_one(
+            {"job_id": admit_build(user, Job.TYPE_SCHEDULED, None).job_id}
+        )["config_snapshot"]["limits"]
+        for user in (site.sam, site.admin, site.root)
+    }
+
+    assert snapshots["sam"]["max_domains"] == LIMIT
+    assert snapshots["robin"]["max_domains"] is None
+    assert snapshots["morgan"]["max_domains"] is None
+    assert snapshots["sam"]["max_source_lists"] == site.sam.limits["max_source_lists"]
+    assert (
+        snapshots["robin"]["max_source_lists"] == site.admin.limits["max_source_lists"]
+    )
+    assert (
+        snapshots["morgan"]["max_source_lists"] == site.root.limits["max_source_lists"]
+    )
+
+
 def finished(site: Site, user: User, status: str, result: Any) -> Job:
     return Job(
         {
@@ -837,7 +954,23 @@ def test_admin_stats_say_whether_the_limit_is_enforced(
 
 @pytest.mark.parametrize(
     ("value", "enforcing"),
-    [(None, False), ("", False), ("false", False), ("0", False), ("true", True)],
+    [
+        (None, False),
+        *[
+            (value, enforcing)
+            for enforcing, values in (
+                (
+                    True,
+                    shared_fixture("domain-limit.json")["enforcement_setting"]["on"],
+                ),
+                (
+                    False,
+                    shared_fixture("domain-limit.json")["enforcement_setting"]["off"],
+                ),
+            )
+            for value in values
+        ],
+    ],
 )
 def test_enforcement_is_off_unless_the_environment_turns_it_on(
     value: str | None, enforcing: bool
