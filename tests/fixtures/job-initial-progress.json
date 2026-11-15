@@ -1,0 +1,19 @@
+{
+  "current_step": "queued",
+  "stage": "queue",
+  "total_sources": 0,
+  "processed_sources": 0,
+  "current_source": null,
+  "sources": [],
+  "whitelist": null,
+  "generation": null,
+  "queue_position": null,
+  "queue_delay_remaining_ms": null,
+  "stage_started_at": null,
+  "stages": {
+    "downloading": null,
+    "whitelist": null,
+    "generation": null
+  },
+  "stage_snapshots": {}
+}

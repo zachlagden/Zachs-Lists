@@ -1,0 +1,525 @@
+[
+  {
+    "name": "exact_entry_is_lowercased_and_matches_only_itself",
+    "input": "Example.COM # inline comment",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["example.com"],
+    "nonmatches": ["sub.example.com", "example.org"]
+  },
+  {
+    "name": "subdomain_entry_matches_the_domain_and_every_subdomain",
+    "input": "@@Example.COM",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 1,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["example.com", "sub.example.com", "a.b.example.com"],
+    "nonmatches": ["notexample.com", "example.com.other", "example.org"]
+  },
+  {
+    "name": "wildcard_matches_subdomains_but_not_the_domain",
+    "input": "*.example.com",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 1,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["sub.example.com", "a.b.example.com"],
+    "nonmatches": ["example.com", "notexample.com", "example.org"]
+  },
+  {
+    "name": "uppercase_wildcard_matches_lowercase_domains",
+    "input": "*.Example.COM\nAD*.Example.NET",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 2,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["sub.example.com", "ads.example.net"],
+    "nonmatches": ["example.com", "bad.example.net"]
+  },
+  {
+    "name": "partial_label_and_repeated_stars",
+    "input": "ad*.exa*ple.com\na******.example.net",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 2,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": [
+      "ads.example.com",
+      "ad.exaple.com",
+      "ads.a.example.com",
+      "a.example.net",
+      "abc.example.net"
+    ],
+    "nonmatches": ["bad.example.com", "ad.example.org", "b.example.net"]
+  },
+  {
+    "name": "broad_wildcards",
+    "input": "*\n*.*",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 2,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["example.com", "a.b.example.net"],
+    "nonmatches": []
+  },
+  {
+    "name": "regex_uses_rust_syntax_unanchored_and_case_sensitive",
+    "input": "/google\\.(com|co\\.uk)$/\n/(?i)^EXAMPLE\\.net$/\n/^Upper\\.example$/",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 3
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["google.com", "sub.google.co.uk", "example.net"],
+    "nonmatches": ["google.de", "sub.example.net", "upper.example"]
+  },
+  {
+    "name": "comments_blank_lines_and_crlf",
+    "input": "# full line comment\r\n\r\n  example.com # inline comment\r\n @@example.net \r\n\t\r\n  #DISABLED: not a domain?\r\n",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 1,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["example.com", "sub.example.net"],
+    "nonmatches": ["sub.example.com"]
+  },
+  {
+    "name": "empty_whitelist",
+    "input": "\n # comment \n\t",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": [],
+    "nonmatches": ["example.com"]
+  },
+  {
+    "name": "punycode_and_single_character_labels",
+    "input": "xn--bcher-kva.example\na.b",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 2,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["xn--bcher-kva.example", "a.b"],
+    "nonmatches": ["bücher.example"]
+  },
+  {
+    "name": "duplicates_count_once",
+    "input": "example.com\nEXAMPLE.com\n@@example.net\n@@Example.net\n*.example.org\n*.EXAMPLE.org\n/^a$/\n/^a$/",
+    "expected": {
+      "valid": true,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 1,
+        "wildcard": 1,
+        "regex": 1
+      },
+      "errors": [],
+      "error_counts": {}
+    },
+    "matches": ["example.com", "x.example.net", "x.example.org"],
+    "nonmatches": []
+  },
+  {
+    "name": "lookahead_and_backreference_rejected_with_line_numbers",
+    "input": "# first line\n/(?=secret)secret/\n/^([a-z]+)\\1\\.com$/\n/(?<!a)b/\nexample.com",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [
+        {
+          "line": 2,
+          "content": "/(?=secret)secret/",
+          "code": "unsupported_regex",
+          "message": "Lookahead and lookbehind are not supported. Patterns use Rust regex syntax"
+        },
+        {
+          "line": 3,
+          "content": "/^([a-z]+)\\1\\.com$/",
+          "code": "unsupported_regex",
+          "message": "Backreferences are not supported. Patterns use Rust regex syntax"
+        },
+        {
+          "line": 4,
+          "content": "/(?<!a)b/",
+          "code": "unsupported_regex",
+          "message": "Lookahead and lookbehind are not supported. Patterns use Rust regex syntax"
+        }
+      ],
+      "error_counts": {
+        "unsupported_regex": 3
+      }
+    },
+    "matches": ["example.com"],
+    "nonmatches": ["secret"]
+  },
+  {
+    "name": "one_bad_line_among_good_ones",
+    "input": "good.example\n@@parent.example\nnot a domain\n*.wild.example\n/^re[0-9]\\.example$/",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 1,
+        "wildcard": 1,
+        "regex": 1
+      },
+      "errors": [
+        {
+          "line": 3,
+          "content": "not a domain",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        }
+      ],
+      "error_counts": {
+        "invalid_domain": 1
+      }
+    },
+    "matches": ["good.example", "a.parent.example", "a.wild.example", "re1.example"],
+    "nonmatches": ["not", "domain"]
+  },
+  {
+    "name": "malformed_regex_forms",
+    "input": "//\n/\n/unterminated\n/^a#b$/",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [
+        {
+          "line": 1,
+          "content": "//",
+          "code": "malformed_regex",
+          "message": "A regex must start and end with / and have a pattern between them. Write a literal # as \\x23, because # starts a comment"
+        },
+        {
+          "line": 2,
+          "content": "/",
+          "code": "malformed_regex",
+          "message": "A regex must start and end with / and have a pattern between them. Write a literal # as \\x23, because # starts a comment"
+        },
+        {
+          "line": 3,
+          "content": "/unterminated",
+          "code": "malformed_regex",
+          "message": "A regex must start and end with / and have a pattern between them. Write a literal # as \\x23, because # starts a comment"
+        },
+        {
+          "line": 4,
+          "content": "/^a",
+          "code": "malformed_regex",
+          "message": "A regex must start and end with / and have a pattern between them. Write a literal # as \\x23, because # starts a comment"
+        }
+      ],
+      "error_counts": {
+        "malformed_regex": 4
+      }
+    },
+    "matches": [],
+    "nonmatches": []
+  },
+  {
+    "name": "invalid_domain_forms",
+    "input": "@@\n@@@@example.com\n@@*.example.com\nlocalhost\n.example.com\nexample.com.\nexample..com\n-example.com\nexample-.com\nunder_score.com\nexample.com/path\nexample.com/\nhttps://example.com\nbücher.example\nexample.com other.com",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [
+        {
+          "line": 1,
+          "content": "@@",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 2,
+          "content": "@@@@example.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 3,
+          "content": "@@*.example.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 4,
+          "content": "localhost",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 5,
+          "content": ".example.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 6,
+          "content": "example.com.",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 7,
+          "content": "example..com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 8,
+          "content": "-example.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 9,
+          "content": "example-.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 10,
+          "content": "under_score.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 11,
+          "content": "example.com/path",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 12,
+          "content": "example.com/",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 13,
+          "content": "https://example.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 14,
+          "content": "bücher.example",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        },
+        {
+          "line": 15,
+          "content": "example.com other.com",
+          "code": "invalid_domain",
+          "message": "Not a valid domain. Use letters, digits, hyphens and dots, such as example.com, and write internationalised names in punycode"
+        }
+      ],
+      "error_counts": {
+        "invalid_domain": 15
+      }
+    },
+    "matches": [],
+    "nonmatches": ["example.com"]
+  },
+  {
+    "name": "invalid_wildcard_forms",
+    "input": "*.\n.*.example.com\n*..example.com\n*._example.com\n*-example-.com\n-*.example.com\nhttps://*.example.com\n*.example.com/path\n*.example?.com\n*.example.com other.com",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 0,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [
+        {
+          "line": 1,
+          "content": "*.",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 2,
+          "content": ".*.example.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 3,
+          "content": "*..example.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 4,
+          "content": "*._example.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 5,
+          "content": "*-example-.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 6,
+          "content": "-*.example.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 7,
+          "content": "https://*.example.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 8,
+          "content": "*.example.com/path",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 9,
+          "content": "*.example?.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        },
+        {
+          "line": 10,
+          "content": "*.example.com other.com",
+          "code": "invalid_wildcard",
+          "message": "Not a valid wildcard. Use * with letters, digits, hyphens and dots, such as *.example.com"
+        }
+      ],
+      "error_counts": {
+        "invalid_wildcard": 10
+      }
+    },
+    "matches": [],
+    "nonmatches": ["a.example.com"]
+  },
+  {
+    "name": "over_long_line",
+    "input": "good.example\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/",
+    "expected": {
+      "valid": false,
+      "patterns": {
+        "exact": 1,
+        "subdomain": 0,
+        "wildcard": 0,
+        "regex": 0
+      },
+      "errors": [
+        {
+          "line": 2,
+          "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...",
+          "code": "line_too_long",
+          "message": "Line is longer than 1024 bytes"
+        },
+        {
+          "line": 3,
+          "content": "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb...",
+          "code": "line_too_long",
+          "message": "Line is longer than 1024 bytes"
+        }
+      ],
+      "error_counts": {
+        "line_too_long": 2
+      }
+    },
+    "matches": ["good.example"],
+    "nonmatches": []
+  }
+]

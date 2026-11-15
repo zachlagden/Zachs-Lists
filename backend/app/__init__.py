@@ -81,7 +81,18 @@ def configure_logging(app: Flask) -> None:
 def init_extensions(app: Flask) -> None:
     """Initialize Flask extensions."""
     mongo.init_app(app)
+    from app.db_indexes import ensure_indexes
+
+    if mongo.db is None:
+        app.logger.error(
+            "MONGO_URI names no database; skipping index creation at startup"
+        )
+    else:
+        ensure_indexes(mongo.db)
     limiter.init_app(app)
+    from app.utils.rate_limits import register_rate_limit_responses
+
+    register_rate_limit_responses(app, limiter)
     cors.init_app(
         app,
         supports_credentials=True,

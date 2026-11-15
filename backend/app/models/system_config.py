@@ -6,7 +6,7 @@ instead of filesystem.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 from app.extensions import mongo
 
@@ -16,18 +16,47 @@ class SystemConfig:
 
     COLLECTION = "system_config"
     DOC_ID = "default_config"
+    BUILD_DOC_ID = "default_build"
 
     @classmethod
-    def get_default_blocklists(cls) -> Optional[str]:
-        """Get default blocklist configuration."""
-        doc = mongo.db[cls.COLLECTION].find_one({"_id": cls.DOC_ID})
-        return doc.get("blocklists") if doc else None
+    def get_default_build_total_domains(cls) -> int:
+        build = mongo.db[cls.COLLECTION].find_one(
+            {"_id": cls.BUILD_DOC_ID}, {"total_domains": 1}
+        )
+        total = build.get("total_domains") if build else None
+        if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+            return 0
+        return total
 
     @classmethod
-    def get_default_whitelist(cls) -> Optional[str]:
-        """Get default whitelist configuration."""
-        doc = mongo.db[cls.COLLECTION].find_one({"_id": cls.DOC_ID})
-        return doc.get("whitelist") if doc else None
+    def get_default_publication(cls) -> dict[str, Any]:
+        build = (
+            mongo.db[cls.COLLECTION].find_one(
+                {"_id": cls.BUILD_DOC_ID},
+                {
+                    "published_generation": 1,
+                    "published.published_at": 1,
+                    "total_domains": 1,
+                },
+            )
+            or {}
+        )
+        published = build.get("published")
+        published_at = (
+            published.get("published_at") if isinstance(published, dict) else None
+        )
+        total = build.get("total_domains")
+        return {
+            "generation_id": build.get("published_generation"),
+            "published_at": (
+                published_at if isinstance(published_at, datetime) else None
+            ),
+            "total_domains": (
+                total
+                if isinstance(total, int) and not isinstance(total, bool) and total >= 0
+                else None
+            ),
+        }
 
     @classmethod
     def get_default_config(cls) -> dict:
@@ -46,6 +75,28 @@ class SystemConfig:
             "updated_at": None,
             "updated_by": None,
         }
+
+    @classmethod
+    def update_default_config(
+        cls, blocklists: str | None, whitelist: str | None, updated_by: str
+    ) -> None:
+        provided = {"blocklists": blocklists, "whitelist": whitelist}
+        changed = {
+            name: content for name, content in provided.items() if content is not None
+        }
+        if not changed:
+            return
+        untouched = {name: "" for name in provided if name not in changed}
+        update: dict[str, dict[str, Any]] = {
+            "$set": {
+                **changed,
+                "updated_at": datetime.utcnow(),
+                "updated_by": updated_by,
+            }
+        }
+        if untouched:
+            update["$setOnInsert"] = untouched
+        mongo.db[cls.COLLECTION].update_one({"_id": cls.DOC_ID}, update, upsert=True)
 
     @classmethod
     def update_default_blocklists(cls, content: str, updated_by: str) -> None:
@@ -76,27 +127,5 @@ class SystemConfig:
                 },
                 "$setOnInsert": {"blocklists": ""},
             },
-            upsert=True,
-        )
-
-    @classmethod
-    def update_default_config(
-        cls, blocklists: Optional[str], whitelist: Optional[str], updated_by: str
-    ) -> None:
-        """Update both blocklists and whitelist configs."""
-        update = {
-            "$set": {
-                "updated_at": datetime.utcnow(),
-                "updated_by": updated_by,
-            }
-        }
-        if blocklists is not None:
-            update["$set"]["blocklists"] = blocklists
-        if whitelist is not None:
-            update["$set"]["whitelist"] = whitelist
-
-        mongo.db[cls.COLLECTION].update_one(
-            {"_id": cls.DOC_ID},
-            update,
             upsert=True,
         )

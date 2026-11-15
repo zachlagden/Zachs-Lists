@@ -12,6 +12,7 @@ export interface User {
   stats: UserStats;
   lists: UserList[];
   notifications: Notification[];
+  limit_review?: LimitReview | null;
   remaining_updates: number;
   created_at: string;
 }
@@ -47,6 +48,7 @@ export type SourceStatus = 'pending' | 'downloading' | 'processing' | 'completed
 export interface QueueInfo {
   position: number;
   total_queued: number;
+  workers_alive?: number;
   active_workers: number;
   jobs_processing: number;
 }
@@ -62,9 +64,14 @@ export interface Job {
   queue_info?: QueueInfo; // Present for queued jobs
   result?: JobResult;
   started_at?: string;
+  attempt_started_at?: string | null;
   completed_at?: string;
   created_at: string;
   read?: boolean;
+  force_rebuild?: boolean;
+  attempts?: number;
+  rev?: number;
+  updated_at?: string | null;
 }
 
 // Legacy progress interface for backward compatibility
@@ -89,16 +96,17 @@ export interface SourceProgress {
   url: string;
   status: SourceStatus;
   cache_hit: boolean | null;
+  stale: boolean;
   bytes_downloaded: number;
   bytes_total: number | null;
   download_percent: number | null;
   download_time_ms: number | null;
   domain_count: number | null;
   domain_change: number | null;
-  format_breakdown?: FormatBreakdown;
-  detected_formats?: string[]; // e.g., ["hosts", "adblock"]
+  format_breakdown: FormatBreakdown | null;
+  detected_formats: string[];
   error: string | null;
-  warnings?: string[];
+  warnings: string[];
   started_at: string | null;
   completed_at: string | null;
 }
@@ -115,15 +123,18 @@ export interface WhitelistPatternProgress {
 export interface WhitelistProgress {
   domains_before: number;
   domains_after: number;
+  domains_checked: number;
   total_removed: number;
-  patterns: WhitelistPatternProgress[];
   processing: boolean;
+  patterns_total: number;
+  patterns: WhitelistPatternProgress[];
+  warnings: string[];
 }
 
 // Output format generation progress
 export interface FormatProgress {
   format: 'hosts' | 'plain' | 'adblock';
-  status: 'pending' | 'generating' | 'compressing' | 'completed';
+  status: 'pending' | 'generating' | 'completed';
   domains_written: number;
   total_domains: number;
   percent: number;
@@ -133,14 +144,27 @@ export interface FormatProgress {
 
 // Generation stage progress
 export interface GenerationProgress {
-  formats: FormatProgress[];
+  files_total: number;
+  files_completed: number;
   current_format: string | null;
+  formats: FormatProgress[];
 }
 
 // Snapshot of a stage's final state
 export interface StageSnapshot {
   completed_at: string;
   data: unknown; // Stage-specific data
+}
+
+export interface StageTiming {
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface StageTimings {
+  downloading: StageTiming | null;
+  whitelist: StageTiming | null;
+  generation: StageTiming | null;
 }
 
 // Enhanced job progress with all stages
@@ -164,9 +188,10 @@ export interface EnhancedJobProgress {
 
   // Timing
   stage_started_at: string | null;
+  stages: StageTimings;
 
   // Stage snapshots for viewing historical state
-  stage_snapshots?: Record<string, StageSnapshot>;
+  stage_snapshots: Record<string, StageSnapshot>;
 
   // Legacy compatibility
   current_step: string;
@@ -176,14 +201,23 @@ export interface EnhancedJobProgress {
 export interface JobResult {
   sources_processed: number;
   sources_failed: number;
+  sources_stale: number;
   total_domains: number;
   unique_domains: number;
   whitelisted_removed: number;
   output_files: OutputFile[];
-  categories?: Record<string, number>;
+  categories: Record<string, number>;
   errors: string[];
-  skip_reason?: string;
-  copied_from?: string; // Username whose build was copied (fingerprint match)
+  warnings: string[];
+  error_code: string | null;
+  skip_reason: string | null;
+  generation_id: string | null;
+  limit: JobLimitMeasurement | null;
+}
+
+export interface JobLimitMeasurement {
+  max_domains: number | null;
+  actual_domains: number;
 }
 
 export interface OutputFile {
@@ -194,26 +228,61 @@ export interface OutputFile {
 }
 
 // Analytics types
-export interface AnalyticsStats {
-  total_requests: number;
-  total_unique_ips: number;
-  total_bandwidth: number;
-  formats: {
-    hosts: number;
-    plain: number;
-    adblock: number;
-  };
-}
-
-export interface DailyStats {
-  date: string;
+export interface AnalyticsTotals {
   requests: number;
-  unique_ips: number;
-  bandwidth: number;
+  unique_visitors: number;
+  bandwidth_bytes: number;
 }
 
-export interface GeoStats {
-  countries: Record<string, number>;
+export interface AnalyticsDay extends AnalyticsTotals {
+  date: string;
+}
+
+export interface AnalyticsFormats {
+  hosts: number;
+  plain: number;
+  adblock: number;
+}
+
+export interface AnalyticsCountry {
+  code: string;
+  requests: number;
+}
+
+export interface AnalyticsCity {
+  country: string;
+  city: string;
+  requests: number;
+}
+
+export interface AnalyticsReferrer {
+  host: string;
+  requests: number;
+}
+
+export interface PublicAnalyticsReport {
+  period_days: number;
+  totals: AnalyticsTotals;
+  daily: AnalyticsDay[];
+  formats: AnalyticsFormats;
+}
+
+export interface AnalyticsReport extends PublicAnalyticsReport {
+  hourly: number[];
+  top_countries: AnalyticsCountry[];
+  top_cities: AnalyticsCity[];
+  top_referrers: AnalyticsReferrer[];
+}
+
+export interface ListAnalyticsReport extends AnalyticsReport {
+  list_name: string;
+}
+
+export interface AdminAnalytics {
+  period_days: number;
+  overall: AnalyticsReport;
+  default_lists: AnalyticsReport;
+  user_lists: AnalyticsReport;
 }
 
 export interface PublicStats {
@@ -221,6 +290,7 @@ export interface PublicStats {
   total_requests: number;
   total_bandwidth_bytes: number;
   user_count: number;
+  period_days: number;
 }
 
 // Default list types
@@ -264,6 +334,10 @@ export interface AdminStats {
   analytics: {
     total_requests: number;
     total_bandwidth: number;
+    period_days: number;
+  };
+  limits?: {
+    enforce_domain_limit: boolean;
   };
 }
 
@@ -302,7 +376,7 @@ export interface LimitRequest {
   reason: string;
   intended_use: 'personal' | 'family' | 'organization' | 'other';
   current_usage: number;
-  status: 'pending' | 'approved' | 'denied';
+  status: 'pending' | 'approved' | 'denied' | 'superseded';
   approved_limit?: number;
   admin_response?: string;
   reviewed_by?: string;
@@ -318,3 +392,77 @@ export const INTENDED_USE_LABELS: Record<IntendedUse, string> = {
   organization: 'Organization/Business',
   other: 'Other',
 };
+
+// Domain limit review types
+export interface LimitReview {
+  actual_domains: number;
+  max_domains: number;
+  method: string;
+  detected_at: string | null;
+  notified_at: string | null;
+  status: 'open' | 'resolved';
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolved_reason: string | null;
+}
+
+export interface AdminLimitReview {
+  user_id: string;
+  username: string;
+  max_domains: number;
+  actual_domains: number;
+  percent_over: number;
+  method: string;
+  detected_at: string | null;
+  notified: boolean;
+  has_pending_request: boolean;
+}
+
+export interface DefaultSyncSource {
+  repo: string | null;
+  commit_sha: string | null;
+  commit_date: string | null;
+  blocklists_sha256: string | null;
+  whitelist_sha256: string | null;
+  synced_at: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+}
+
+export interface DefaultConfig {
+  config: string;
+  whitelist: string;
+  sync_enabled: boolean;
+  source: DefaultSyncSource | null;
+}
+
+export interface DefaultSyncStatus {
+  sync_enabled: boolean;
+  repo: string;
+  revision: number;
+  source: DefaultSyncSource | null;
+}
+
+export interface DefaultSyncOutcome {
+  status: 'updated' | 'unchanged' | 'failed';
+  changed: boolean;
+  commit_changed: boolean;
+  commit_sha: string | null;
+  source_count: number | null;
+  error: string | null;
+  can_force: boolean;
+}
+
+export interface DefaultSyncRun extends DefaultSyncStatus {
+  sync: DefaultSyncOutcome | null;
+  job_id: string | null;
+  build_refusal: string | null;
+}
+
+export interface AdminLimitReviewPage {
+  reviews: AdminLimitReview[];
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
+}

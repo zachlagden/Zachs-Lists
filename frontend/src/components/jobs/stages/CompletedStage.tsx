@@ -1,4 +1,5 @@
 import type { Job, OutputFile, SourceProgress, WhitelistProgress } from '../../../types';
+import { domainLimitNotice } from '../../../utils/domainLimit';
 
 interface CompletedStageProps {
   job: Job;
@@ -38,6 +39,10 @@ export default function CompletedStage({ job, sources, whitelist }: CompletedSta
 
   // Count source stats
   const failedSources = sources.filter((s) => s.status === 'failed').length;
+  const limitNotice = domainLimitNotice(job);
+  const otherErrors = (result?.errors ?? []).filter(
+    (error) => limitNotice?.kind !== 'failed' || error !== limitNotice.message,
+  );
   const cachedSources = sources.filter((s) => s.cache_hit === true).length;
 
   // Skipped message
@@ -147,35 +152,22 @@ export default function CompletedStage({ job, sources, whitelist }: CompletedSta
         </div>
       </div>
 
-      {/* Copied build info banner */}
-      {result?.copied_from && (
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <svg
-              className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <div>
-              <h4 className="font-medium text-blue-400">Build Copied</h4>
-              <p className="text-sm text-pihole-text-muted mt-1">
-                Your config matches{' '}
-                {result.copied_from === '__default__'
-                  ? 'the default blocklist'
-                  : `@${result.copied_from}`}
-                's build. Output files were copied instead of rebuilding. Timing data and stage
-                history are from the original build.
-              </p>
-            </div>
-          </div>
+      {limitNotice && (
+        <div
+          className={`rounded-lg p-4 ${
+            limitNotice.kind === 'failed'
+              ? 'bg-red-500/10 border border-red-500/30'
+              : 'bg-yellow-500/10 border border-yellow-500/30'
+          }`}
+        >
+          <h4
+            className={`font-semibold mb-2 ${
+              limitNotice.kind === 'failed' ? 'text-red-400' : 'text-yellow-400'
+            }`}
+          >
+            Over the domain limit
+          </h4>
+          <p className="text-sm text-pihole-text-muted">{limitNotice.message}</p>
         </div>
       )}
 
@@ -295,11 +287,11 @@ export default function CompletedStage({ job, sources, whitelist }: CompletedSta
       )}
 
       {/* Errors */}
-      {result?.errors && result.errors.length > 0 && (
+      {otherErrors.length > 0 && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
           <h4 className="font-semibold text-red-400 mb-3">Errors</h4>
           <div className="space-y-2">
-            {result.errors.map((error: string, idx: number) => (
+            {otherErrors.map((error: string, idx: number) => (
               <div key={idx} className="text-sm text-red-400">
                 {error}
               </div>

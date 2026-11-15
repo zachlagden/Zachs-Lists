@@ -1,4 +1,16 @@
 import axios from 'axios';
+import type {
+  AdminAnalytics,
+  AdminLimitReviewPage,
+  AdminStats,
+  AnalyticsReport,
+  DefaultConfig,
+  DefaultSyncRun,
+  DefaultSyncStatus,
+  ListAnalyticsReport,
+  PublicAnalyticsReport,
+  PublicStats,
+} from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -161,27 +173,27 @@ export const userApi = {
 
 // Analytics API
 export const analyticsApi = {
-  getDefaultStats: async (days = 30) => {
-    const response = await api.get('/api/analytics/default', {
+  getDefaultStats: async (days = 30): Promise<PublicAnalyticsReport> => {
+    const response = await api.get<PublicAnalyticsReport>('/api/analytics/default', {
       params: { days },
     });
     return response.data;
   },
 
-  getUserStats: async (days = 30) => {
-    const response = await api.get('/api/analytics/user', { params: { days } });
+  getUserStats: async (days = 30): Promise<AnalyticsReport> => {
+    const response = await api.get<AnalyticsReport>('/api/analytics/user', { params: { days } });
     return response.data;
   },
 
-  getUserListStats: async (listName: string, days = 30) => {
-    const response = await api.get(`/api/analytics/user/${listName}`, {
+  getUserListStats: async (listName: string, days = 30): Promise<ListAnalyticsReport> => {
+    const response = await api.get<ListAnalyticsReport>(`/api/analytics/user/${listName}`, {
       params: { days },
     });
     return response.data;
   },
 
-  getPublicStats: async () => {
-    const response = await api.get('/api/analytics/public/stats');
+  getPublicStats: async (): Promise<PublicStats> => {
+    const response = await api.get<PublicStats>('/api/analytics/public/stats');
     return response.data;
   },
 };
@@ -259,8 +271,8 @@ export const adminApi = {
     return response.data;
   },
 
-  getStats: async () => {
-    const response = await api.get('/api/admin/stats');
+  getStats: async (): Promise<AdminStats> => {
+    const response = await api.get<AdminStats>('/api/admin/stats');
     return response.data;
   },
 
@@ -278,8 +290,18 @@ export const adminApi = {
     return response.data;
   },
 
-  getDefaultConfig: async () => {
-    const response = await api.get('/api/admin/default/config');
+  getDefaultConfig: async (): Promise<DefaultConfig> => {
+    const response = await api.get<DefaultConfig>('/api/admin/default/config');
+    return response.data;
+  },
+
+  getDefaultSync: async (): Promise<DefaultSyncStatus> => {
+    const response = await api.get<DefaultSyncStatus>('/api/admin/default/sync');
+    return response.data;
+  },
+
+  runDefaultSync: async (force = false): Promise<DefaultSyncRun> => {
+    const response = await api.post<DefaultSyncRun>('/api/admin/default/sync', { force });
     return response.data;
   },
 
@@ -310,8 +332,8 @@ export const adminApi = {
     return response.data;
   },
 
-  getAdminAnalytics: async (days = 30) => {
-    const response = await api.get('/api/analytics/admin', {
+  getAdminAnalytics: async (days = 30): Promise<AdminAnalytics> => {
+    const response = await api.get<AdminAnalytics>('/api/analytics/admin', {
       params: { days },
     });
     return response.data;
@@ -355,6 +377,21 @@ export const adminApi = {
     const response = await api.post(`/api/admin/limit-requests/${requestId}/deny`, {
       response: responseMsg,
     });
+    return response.data;
+  },
+
+  getLimitReviews: async (page = 1, perPage = 100): Promise<AdminLimitReviewPage> => {
+    const response = await api.get<AdminLimitReviewPage>('/api/admin/limit-reviews', {
+      params: { page, per_page: perPage },
+    });
+    return response.data;
+  },
+
+  resolveLimitReview: async (userId: string, reason: string): Promise<{ success: boolean }> => {
+    const response = await api.post<{ success: boolean }>(
+      `/api/admin/limit-reviews/${userId}/resolve`,
+      { reason },
+    );
     return response.data;
   },
 

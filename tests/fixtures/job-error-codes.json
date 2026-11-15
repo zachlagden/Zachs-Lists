@@ -1,0 +1,15 @@
+{
+  "worker": {
+    "invalid_config": { "refunds_quota": false },
+    "no_sources": { "refunds_quota": false },
+    "all_sources_failed": { "refunds_quota": true },
+    "no_domains": { "refunds_quota": false },
+    "target_missing": { "refunds_quota": false },
+    "domain_limit_exceeded": { "refunds_quota": false },
+    "internal": { "refunds_quota": true }
+  },
+  "backend": {
+    "worker_abandoned": { "refunds_quota": true },
+    "superseded": { "refunds_quota": true }
+  }
+}

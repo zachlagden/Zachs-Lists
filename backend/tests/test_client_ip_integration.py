@@ -3,10 +3,11 @@ from unittest.mock import Mock
 import pytest
 from flask import Flask
 
-from app.blueprints import lists
 from app.extensions import limiter
 from app.models.analytics import Analytics
+from app.services import download_recorder
 from app.utils.client_ip import get_client_ip
+from app.utils.rate_limits import rate_limit_key
 
 
 @pytest.mark.parametrize(
@@ -28,7 +29,7 @@ def test_global_limits_are_independent_per_visitor(
 
     headers["CF-Connecting-IP"] = "203.0.113.20"
     assert client.get(path, headers=headers, environ_overrides=peer).status_code == 200
-    assert limiter._key_func is get_client_ip
+    assert limiter._key_func is rate_limit_key
 
 
 def test_changing_spoofed_headers_does_not_reset_the_limit(app: Flask) -> None:
@@ -79,13 +80,15 @@ def test_download_analytics_uses_the_same_resolver(
 ) -> None:
     record = Mock()
     lookup = Mock(return_value=(None, None))
-    monkeypatch.setattr(Analytics, "record_request", record)
-    monkeypatch.setattr(lists, "get_geo_data", lookup)
+    monkeypatch.setattr(Analytics, "record_download", record)
+    monkeypatch.setattr(download_recorder.geoip, "locate", lookup)
     with app.test_request_context(
         headers={"CF-Connecting-IP": "198.51.100.10", "X-Forwarded-For": upstream},
         environ_base={"REMOTE_ADDR": "10.0.0.2"},
     ):
-        lists.record_analytics("default", "all_domains", "", "hosts", 12)
-    assert lists.get_client_ip is get_client_ip
-    assert record.call_args.kwargs["ip_hash"] == lists.hash_ip(expected)
-    lookup.assert_called_once_with(expected)
+        download_recorder.record_download("default", "all_domains", "", "hosts", 12)
+        expected_hash = download_recorder.visitor_hash(expected)
+    assert download_recorder.get_client_ip is get_client_ip
+    assert record.call_args.kwargs["visitor_hash"] == expected_hash
+    assert expected not in str(record.call_args)
+    lookup.assert_called_once_with("", expected)

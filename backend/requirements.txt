@@ -3,6 +3,7 @@ Flask==3.1.3
 flask-pymongo==2.3.0
 flask-cors==6.0.0
 flask-limiter==3.5.0
+redis==5.2.1
 flask-socketio==5.6.1
 Werkzeug==3.1.9
 
@@ -10,7 +11,7 @@ Werkzeug==3.1.9
 python-socketio==5.16.2
 
 # Database
-pymongo==4.6.3
+pymongo==4.18.3
 
 # HTTP client
 requests==2.33.0
@@ -35,7 +36,7 @@ gevent-websocket==0.10.1
 whitenoise==6.8.2
 
 # Formatting
-black==26.3.1
+black==26.10.1
 
 # Development
 pytest==9.0.3

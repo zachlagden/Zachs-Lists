@@ -2,18 +2,42 @@
 Scheduled tasks for the application.
 
 Tasks:
-- Weekly rebuild of all user lists (Sunday 2 AM UTC)
-- Weekly rebuild of default lists (Sunday 1 AM UTC)
-- Reset weekly manual update counters (Sunday midnight UTC)
+- Hourly default list sync check (minute 15)
+- Weekly rebuild of default lists (Sunday 06:30 UTC)
+- Weekly rebuild of all user lists (Sunday 07:30 UTC)
 - Daily cache cleanup (3 AM UTC)
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 
+from app.services.default_refresh import (
+    DEFAULT_REBUILD_HOUR,
+    DEFAULT_REBUILD_MINUTE,
+    HOURLY_SYNC_MINUTE,
+    USER_REBUILD_HOUR,
+    USER_REBUILD_MINUTE,
+    hourly_check,
+    weekly_rebuild,
+)
+
 logger = logging.getLogger(__name__)
+
+JOB_HISTORY_DAYS = 30
+SCHEDULE_TIMEZONE = "UTC"
+
+
+def delete_finished_jobs_before(cutoff: datetime) -> int:
+    from app.extensions import mongo
+    from app.models.job import Job
+
+    finished = [Job.STATUS_COMPLETED, Job.STATUS_FAILED, Job.STATUS_SKIPPED]
+    result = mongo.db[Job.COLLECTION].delete_many(
+        {"created_at": {"$lt": cutoff}, "status": {"$in": finished}}
+    )
+    return result.deleted_count
 
 
 def register_scheduled_tasks(app, scheduler):
@@ -26,75 +50,54 @@ def register_scheduled_tasks(app, scheduler):
     """
 
     @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=1, minute=0),
+        CronTrigger(minute=HOURLY_SYNC_MINUTE, timezone=SCHEDULE_TIMEZONE),
+        id="hourly_default_sync",
+        name="Hourly Default Lists Sync Check",
+    )
+    def hourly_default_sync():
+        with app.app_context():
+            try:
+                hourly_check(datetime.utcnow())
+
+            except Exception as e:
+                logger.exception(f"Failed default lists sync check: {e}")
+
+    @scheduler.scheduled_job(
+        CronTrigger(
+            day_of_week="sun",
+            hour=DEFAULT_REBUILD_HOUR,
+            minute=DEFAULT_REBUILD_MINUTE,
+            timezone=SCHEDULE_TIMEZONE,
+        ),
         id="weekly_default_rebuild",
         name="Weekly Default Lists Rebuild",
     )
     def weekly_default_rebuild():
-        """Rebuild default lists every Sunday at 1 AM UTC."""
         with app.app_context():
             try:
-                from app.services.job_queue import JobQueue
-                from app.models.job import Job
-
                 logger.info("Starting weekly default lists rebuild")
-                job = JobQueue.queue_default_job(job_type=Job.TYPE_SCHEDULED)
-                logger.info(f"Queued default rebuild job: {job.job_id}")
+                weekly_rebuild()
 
             except Exception as e:
                 logger.exception(f"Failed to queue default rebuild: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=2, minute=0),
+        CronTrigger(
+            day_of_week="sun",
+            hour=USER_REBUILD_HOUR,
+            minute=USER_REBUILD_MINUTE,
+            timezone=SCHEDULE_TIMEZONE,
+        ),
         id="weekly_user_rebuild",
         name="Weekly User Lists Rebuild",
     )
     def weekly_user_rebuild():
-        """Rebuild all user lists every Sunday at 2 AM UTC."""
         with app.app_context():
             try:
-                from bson import ObjectId
-                from app.models.user import User
-                from app.services.job_queue import JobQueue
-                from app.models.job import Job
+                from app.services.build_admission import queue_scheduled_user_builds
 
                 logger.info("Starting weekly user lists rebuild")
-
-                # Get all enabled users with configs
-                users = User.get_all_enabled()
-                queued = 0
-                skipped = 0
-
-                for user in users:
-                    # Check if user has a config
-                    config = user.get_config("blocklists.conf")
-                    if not config or not config.strip():
-                        continue
-
-                    user_id = ObjectId(user.id)
-
-                    # Skip if user has an active job (queued or processing)
-                    if Job.has_active_job_for_user(user_id):
-                        logger.info(f"Skipping {user.username}: active job in progress")
-                        skipped += 1
-                        continue
-
-                    # Skip if user completed a manual build in last 30 minutes
-                    if Job.user_completed_recently(
-                        user_id, minutes=30, job_type=Job.TYPE_MANUAL
-                    ):
-                        logger.info(f"Skipping {user.username}: recent manual build")
-                        skipped += 1
-                        continue
-
-                    try:
-                        JobQueue.queue_job(user, job_type=Job.TYPE_SCHEDULED)
-                        queued += 1
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to queue rebuild for {user.username}: {e}"
-                        )
-
+                queued, skipped = queue_scheduled_user_builds()
                 logger.info(
                     f"Queued weekly rebuild for {queued} users, skipped {skipped}"
                 )
@@ -103,33 +106,7 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed to queue user rebuilds: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(day_of_week="sun", hour=0, minute=0),
-        id="reset_weekly_limits",
-        name="Reset Weekly Manual Update Limits",
-    )
-    def reset_weekly_limits():
-        """Reset weekly manual update counters every Sunday at midnight UTC."""
-        with app.app_context():
-            try:
-                from app.extensions import mongo
-
-                result = mongo.db.users.update_many(
-                    {},
-                    {
-                        "$set": {
-                            "stats.manual_updates_this_week": 0,
-                            "stats.week_reset_at": datetime.utcnow(),
-                        }
-                    },
-                )
-
-                logger.info(f"Reset weekly limits for {result.modified_count} users")
-
-            except Exception as e:
-                logger.exception(f"Failed to reset weekly limits: {e}")
-
-    @scheduler.scheduled_job(
-        CronTrigger(hour=3, minute=0),
+        CronTrigger(hour=3, minute=0, timezone=SCHEDULE_TIMEZONE),
         id="daily_cache_cleanup",
         name="Daily Cache Cleanup",
     )
@@ -140,7 +117,7 @@ def register_scheduled_tasks(app, scheduler):
                 from app.services.cache_manager import CacheManager
 
                 cache_manager = CacheManager()
-                cleaned = cache_manager.cleanup_stale(days=30)
+                cleaned = cache_manager.cleanup_stale()
 
                 if cleaned > 0:
                     logger.info(f"Cleaned up {cleaned} stale cache entries")
@@ -149,7 +126,7 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed cache cleanup: {e}")
 
     @scheduler.scheduled_job(
-        CronTrigger(hour=4, minute=0),
+        CronTrigger(hour=4, minute=0, timezone=SCHEDULE_TIMEZONE),
         id="daily_job_cleanup",
         name="Daily Job History Cleanup",
     )
@@ -157,45 +134,14 @@ def register_scheduled_tasks(app, scheduler):
         """Clean up old job records daily at 4 AM UTC."""
         with app.app_context():
             try:
-                from app.extensions import mongo
-                from datetime import timedelta
+                cutoff = datetime.utcnow() - timedelta(days=JOB_HISTORY_DAYS)
+                deleted = delete_finished_jobs_before(cutoff)
 
-                # Delete jobs older than 30 days
-                cutoff = datetime.utcnow() - timedelta(days=30)
-
-                result = mongo.db.jobs.delete_many({"created_at": {"$lt": cutoff}})
-
-                if result.deleted_count > 0:
-                    logger.info(f"Cleaned up {result.deleted_count} old job records")
+                if deleted > 0:
+                    logger.info(f"Cleaned up {deleted} old job records")
 
             except Exception as e:
                 logger.exception(f"Failed job cleanup: {e}")
-
-    @scheduler.scheduled_job(
-        CronTrigger(day=1, hour=5, minute=0),
-        id="monthly_analytics_aggregation",
-        name="Monthly Analytics Aggregation",
-    )
-    def monthly_analytics_aggregation():
-        """Aggregate old analytics data monthly (1st of month, 5 AM UTC)."""
-        with app.app_context():
-            try:
-                from app.extensions import mongo
-                from datetime import timedelta
-
-                # Keep daily granularity for last 90 days, aggregate older data
-                cutoff = datetime.utcnow() - timedelta(days=90)
-
-                # Remove old daily analytics (we could aggregate first if needed)
-                result = mongo.db.analytics.delete_many({"date": {"$lt": cutoff}})
-
-                if result.deleted_count > 0:
-                    logger.info(
-                        f"Cleaned up {result.deleted_count} old analytics records"
-                    )
-
-            except Exception as e:
-                logger.exception(f"Failed analytics aggregation: {e}")
 
     @scheduler.scheduled_job(
         "interval",
@@ -206,7 +152,7 @@ def register_scheduled_tasks(app, scheduler):
     def reset_stale_jobs():
         """Reset jobs from dead workers back to queued status.
 
-        Runs every minute. Jobs that haven't received a heartbeat in 10 minutes
+        Runs every minute. Jobs that haven't received a heartbeat in 2 minutes
         are considered stale and reset to queued status so they can be picked
         up by another worker.
         """
@@ -214,7 +160,9 @@ def register_scheduled_tasks(app, scheduler):
             try:
                 from app.models.job import Job
 
-                reset_count, abandoned_count = Job.reset_stale(timeout_minutes=10)
+                reset_count, abandoned_count = Job.reset_stale(
+                    timeout_minutes=Job.STALE_AFTER_MINUTES
+                )
 
                 if reset_count > 0:
                     logger.info(f"Reset {reset_count} stale job(s) to queued status")
@@ -254,32 +202,3 @@ def register_scheduled_tasks(app, scheduler):
                 logger.exception(f"Failed to prune dead workers: {e}")
 
     logger.info("Registered scheduled tasks")
-
-
-def trigger_default_rebuild(app):
-    """Manually trigger default lists rebuild."""
-    with app.app_context():
-        from app.services.job_queue import JobQueue
-        from app.models.job import Job
-
-        job = JobQueue.queue_default_job(job_type=Job.TYPE_ADMIN)
-        return job
-
-
-def trigger_all_user_rebuilds(app):
-    """Manually trigger rebuild for all users."""
-    with app.app_context():
-        from app.models.user import User
-        from app.services.job_queue import JobQueue
-        from app.models.job import Job
-
-        users = User.get_all_enabled()
-        jobs = []
-
-        for user in users:
-            config = user.get_config("blocklists.conf")
-            if config and config.strip():
-                job = JobQueue.queue_job(user, job_type=Job.TYPE_ADMIN)
-                jobs.append(job)
-
-        return jobs

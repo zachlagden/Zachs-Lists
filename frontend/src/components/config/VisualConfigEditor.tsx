@@ -4,6 +4,7 @@ import {
   CATEGORIES,
   parseConfig,
   serializeConfig,
+  serializeLine,
   groupByCategory,
   CategoryValue,
 } from './types';
@@ -52,7 +53,7 @@ export default function VisualConfigEditor({
       configParts.push(comment.raw || '');
     }
     for (const line of newLines) {
-      configParts.push(`${line.url}|${line.name}|${line.category}`);
+      configParts.push(serializeLine(line));
     }
 
     onChange(configParts.join('\n'));
@@ -77,7 +78,7 @@ export default function VisualConfigEditor({
       configParts.push(comment.raw || '');
     }
     for (const line of allLines) {
-      configParts.push(`${line.url}|${line.name}|${line.category}`);
+      configParts.push(serializeLine(line));
     }
 
     onChange(configParts.join('\n'));

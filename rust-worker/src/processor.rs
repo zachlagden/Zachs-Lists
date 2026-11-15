@@ -1,998 +1,822 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bson::DateTime as BsonDateTime;
-use chrono::Utc;
 use mongodb::Database;
-use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
+use crate::cancellation::{Cancellation, Cancelled};
 use crate::config::Config;
-use crate::db::job::{Job, JobRepository, JobType};
+use crate::db::cache::content_hash;
+use crate::db::job::{Job, JobRepository, JobWriteError};
 use crate::db::progress::{
-    JobProgress, JobResult, JobStage, OutputFile, SourceProgress,
-    SourceStatus, StageSnapshot,
+    error_code, GenerationProgress, JobProgress, JobResult, LimitMeasurement,
 };
-use crate::db::user::{ListMetadata, MatchedUser, UserRepository};
+use crate::db::user::{ListMetadata, Publication, PublishOutcome, Target, UserRepository};
 use crate::db::user_config::UserConfigRepository;
+use crate::domain_limit::{judge, too_many_sources, LimitVerdict};
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
-use crate::generator::OutputGenerator;
-use crate::whitelist::WhitelistManager;
+use crate::generation::{
+    discard_generation, manifest_exists, prune_generations, remove_empty_directories,
+    remove_legacy_flat_files, BuildIdentity, Manifest,
+};
+use crate::generator::COMBINED_LIST_NAME;
+use crate::inputs_digest::{inputs_digest, PROCESSOR_VERSION};
+use crate::progress_tracker::{LiveProgress, ProgressTracker};
+use crate::stages::{
+    apply_whitelist, extract_source, generate_outputs, plan_whitelist, CategoryDomains,
+    GeneratedOutput, SourceBody, StageThread,
+};
 
-/// Domains organized by category for per-category output generation
-pub struct CategoryDomains {
-    /// Map from category name to domains in that category
-    /// None key = uncategorized sources
-    pub by_category: HashMap<Option<String>, HashSet<String>>,
-    /// Raw adblock rules keyed by domain (for adblock output passthrough)
-    /// Only populated for domains that came from adblock-format sources
-    pub adblock_rules: HashMap<String, String>,
+pub const UNCHANGED_SKIP_REASON: &str = "Nothing changed since the last build";
+pub const SUPERSEDED_SKIP_REASON: &str =
+    "A newer build has already published these lists, so this build was not published";
+const TARGET_MISSING_MESSAGE: &str = "The account was deleted before the build could be published";
+const EMPTY_DIRECTORY_LEVELS_ABOVE_GENERATIONS: usize = 3;
+
+const CANCELLATION_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+const DOWNLOAD_HANDOFF_CAPACITY: usize = 1;
+
+struct Downloaded {
+    index: usize,
+    result: DownloadResult,
+    held_slot: OwnedSemaphorePermit,
 }
 
-impl CategoryDomains {
-    pub fn new() -> Self {
-        Self {
-            by_category: HashMap::new(),
-            adblock_rules: HashMap::new(),
+#[derive(Debug)]
+pub struct BuildFailure {
+    pub error: BuildError,
+    pub progress: Option<Box<JobProgress>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error("the build was cancelled")]
+    Cancelled,
+    #[error("the job lease was lost")]
+    LeaseLost,
+    #[error("{message}")]
+    Rejected { code: &'static str, message: String },
+    #[error("{message}")]
+    OverDomainLimit {
+        limit: LimitMeasurement,
+        message: String,
+    },
+    #[error("{0:#}")]
+    Internal(anyhow::Error),
+}
+
+impl BuildError {
+    fn rejected(code: &'static str, message: &str) -> Self {
+        Self::Rejected {
+            code,
+            message: message.to_string(),
         }
     }
+}
 
-    /// Total domain count across all categories (deduplicated)
-    pub fn total_count(&self) -> usize {
-        self.by_category
-            .values()
-            .flatten()
-            .collect::<HashSet<&String>>()
-            .len()
+impl From<anyhow::Error> for BuildError {
+    fn from(error: anyhow::Error) -> Self {
+        if error.downcast_ref::<Cancelled>().is_some() {
+            return Self::Cancelled;
+        }
+        if matches!(
+            error.downcast_ref::<JobWriteError>(),
+            Some(JobWriteError::LeaseLost)
+        ) {
+            return Self::LeaseLost;
+        }
+        Self::Internal(error)
     }
+}
 
-    /// Check whether a domain is present in any category
-    pub fn contains(&self, domain: &str) -> bool {
-        self.by_category.values().any(|d| d.contains(domain))
+impl From<JobWriteError> for BuildError {
+    fn from(error: JobWriteError) -> Self {
+        match error {
+            JobWriteError::LeaseLost => Self::LeaseLost,
+            other => Self::Internal(other.into()),
+        }
     }
+}
 
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.by_category.values().all(|d| d.is_empty())
+impl From<Cancelled> for BuildError {
+    fn from(_: Cancelled) -> Self {
+        Self::Cancelled
     }
+}
 
-    /// Number of categories
-    pub fn category_count(&self) -> usize {
-        self.by_category.len()
-    }
+struct BuildConfig {
+    blocklists: String,
+    whitelist: String,
 }
 
 /// Main job processor that orchestrates the entire pipeline
 pub struct JobProcessor {
+    cancellation: Cancellation,
     config: Config,
     job_repo: JobRepository,
     user_config_repo: UserConfigRepository,
     user_repo: UserRepository,
-    downloader: Downloader,
-    extractor: DomainExtractor,
+    downloader: Arc<Downloader>,
+    extractor: Arc<DomainExtractor>,
+    stage_thread: StageThread,
 }
 
 impl JobProcessor {
     /// Create a new job processor
-    pub fn new(config: Config, job_repo: JobRepository, db: &Database) -> Result<Self> {
-        let downloader = Downloader::new(config.clone(), db)?;
-        let extractor = DomainExtractor::new();
+    pub fn new(
+        config: Config,
+        job_repo: JobRepository,
+        db: &Database,
+        cancellation: Cancellation,
+    ) -> Result<Self> {
+        let downloader = Arc::new(Downloader::new(config.clone(), db)?);
+        let extractor = Arc::new(DomainExtractor::new());
         let user_config_repo = UserConfigRepository::new(db);
         let user_repo = UserRepository::new(db);
 
         Ok(Self {
+            cancellation,
             config,
             job_repo,
             user_config_repo,
             user_repo,
             downloader,
             extractor,
+            stage_thread: StageThread::start()?,
         })
     }
 
-    /// Compute config hash (SHA256 of blocklists + whitelist)
-    fn compute_config_hash(blocklists: &str, whitelist: &str) -> String {
-        let combined = format!("{}\n---SEPARATOR---\n{}", blocklists, whitelist);
-        let mut hasher = Sha256::new();
-        hasher.update(combined.as_bytes());
-        format!("{:x}", hasher.finalize())
-    }
-
-    /// Compute normalized config fingerprint for cross-user matching
-    ///
-    /// Creates a fingerprint from sorted, normalized sources and whitelist patterns.
-    /// Two configs with same sources and whitelist (regardless of comments/order) → same fingerprint.
-    fn compute_config_fingerprint(blocklists: &str, whitelist: &str) -> Result<String> {
-        // Parse and sort sources by URL
-        let mut sources = Downloader::parse_config(blocklists)?;
-        sources.sort_by(|a, b| a.url.cmp(&b.url));
-
-        // Create normalized string representation of sources
-        let sources_str: Vec<String> = sources
-            .iter()
-            .map(|s| {
-                format!(
-                    "{}|{}|{}",
-                    s.url.to_lowercase().trim_end_matches('/'),
-                    s.name.to_lowercase(),
-                    s.category.as_deref().unwrap_or("").to_lowercase()
-                )
-            })
-            .collect();
-
-        // Parse and sort whitelist patterns
-        let whitelist_mgr = WhitelistManager::from_content(whitelist);
-        let patterns = whitelist_mgr.patterns_as_strings();
-
-        // Hash combined normalized content
-        let combined = format!("{}\n---\n{}", sources_str.join("\n"), patterns.join("\n"));
-        let mut hasher = Sha256::new();
-        hasher.update(combined.as_bytes());
-        Ok(format!("{:x}", hasher.finalize()))
-    }
-
-    /// Copy output files from a matching user to the target user
-    async fn copy_output_files(
-        &self,
-        source: &MatchedUser,
-        target_username: &str,
-    ) -> Result<Vec<OutputFile>> {
-        let source_dir = self.config.output_dir(&source.username);
-        let target_dir = self.config.output_dir(target_username);
-
-        info!(
-            "Copying output files from {} to {}",
-            source_dir.display(),
-            target_dir.display()
-        );
-
-        // Ensure target directory exists
-        std::fs::create_dir_all(&target_dir)?;
-
-        // Clean up any existing files in target
-        if let Ok(entries) = std::fs::read_dir(&target_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "gz") {
-                    let _ = std::fs::remove_file(&path);
-                }
-            }
+    async fn build_config(&self, job: &Job) -> Result<BuildConfig> {
+        if let Some(snapshot) = &job.config_snapshot {
+            return Ok(BuildConfig {
+                blocklists: snapshot.blocklists.clone(),
+                whitelist: snapshot.whitelist.clone().unwrap_or_default(),
+            });
         }
-
-        // Copy all .gz files from source to target
-        let mut output_files = Vec::new();
-        let entries = std::fs::read_dir(&source_dir)?;
-
-        for entry in entries.flatten() {
-            let filename = entry.file_name();
-            let filename_str = filename.to_string_lossy();
-
-            if filename_str.ends_with(".txt.gz") {
-                let source_path = entry.path();
-                let target_path = target_dir.join(&filename);
-
-                std::fs::copy(&source_path, &target_path)?;
-
-                // Extract format and domain count from filename
-                // Format: {name}_{format}.txt.gz (e.g., all_domains_hosts.txt.gz)
-                let base_name = filename_str.trim_end_matches(".txt.gz");
-                let parts: Vec<&str> = base_name.rsplitn(2, '_').collect();
-                let format = if parts.len() == 2 {
-                    parts[0].to_string()
-                } else {
-                    "unknown".to_string()
-                };
-
-                // Get domain count from source's list metadata if available
-                let domain_count = source
-                    .lists
-                    .iter()
-                    .find(|l| base_name.starts_with(&l.name))
-                    .map(|l| l.domain_count)
-                    .unwrap_or(0);
-
-                let size_bytes = std::fs::metadata(&target_path)?.len();
-
-                output_files.push(OutputFile {
-                    name: filename_str.to_string(),
-                    format,
-                    size_bytes,
-                    domain_count,
-                });
-
-                debug!("Copied {} ({} bytes)", filename_str, size_bytes);
-            }
-        }
-
-        info!(
-            "Copied {} output files ({} bytes total)",
-            output_files.len(),
-            output_files.iter().map(|f| f.size_bytes).sum::<u64>()
-        );
-
-        Ok(output_files)
+        let stored = self.user_config_repo.get_config(&job.username).await?;
+        Ok(BuildConfig {
+            blocklists: stored.blocklists.unwrap_or_default(),
+            whitelist: stored.whitelist.unwrap_or_default(),
+        })
     }
 
     /// Process a single job
-    pub async fn process_job(&self, job: &Job) -> Result<()> {
+    pub async fn process_job(&self, job: &Job) -> Result<(), BuildFailure> {
+        let mut live = None;
+        let Err(error) = self.build(job, &mut live).await else {
+            return Ok(());
+        };
+        let progress = match live.take() {
+            Some(live) => match live.stop().await {
+                Ok(progress) => Some(Box::new(progress)),
+                Err(stopped) => {
+                    warn!(
+                        "Progress writer for job {} did not stop cleanly: {:#}",
+                        job.job_id, stopped
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+        Err(BuildFailure { error, progress })
+    }
+
+    async fn build(&self, job: &Job, live: &mut Option<LiveProgress>) -> Result<(), BuildError> {
         let start_time = Instant::now();
         info!(
-            "Processing job {} for user {}",
-            job.job_id, job.username
+            "Processing {:?} job {} for user {}",
+            job.job_type, job.job_id, job.username
         );
 
         if job.force_rebuild {
-            info!("Force rebuild requested - bypassing all caching optimizations");
+            info!("Force rebuild requested: the build publishes even when nothing changed");
         }
 
-        // Load config from MongoDB
-        let config_content = match self.user_config_repo.get_blocklists(&job.username).await {
-            Ok(content) => content,
-            Err(e) => {
-                self.job_repo
-                    .fail(&job.id, vec![format!("Failed to load config: {}", e)])
-                    .await?;
-                return Ok(());
-            }
-        };
+        self.cancellation.check()?;
 
-        // Load whitelist content early for config hash calculation
-        let whitelist_content = self.user_config_repo.get_whitelist(&job.username).await
-            .unwrap_or_default();
+        let BuildConfig {
+            blocklists: config_content,
+            whitelist: whitelist_content,
+        } = self.build_config(job).await?;
 
-        // Compute current config hash
-        let current_config_hash = Self::compute_config_hash(&config_content, &whitelist_content);
-
-        // Compute normalized fingerprint for cross-user matching
-        let config_fingerprint = Self::compute_config_fingerprint(&config_content, &whitelist_content)?;
-
-        // Parse sources
-        let sources = Downloader::parse_config(&config_content)?;
+        let sources =
+            Downloader::parse_config(&config_content).map_err(|invalid| BuildError::Rejected {
+                code: error_code::INVALID_CONFIG,
+                message: format!("Blocklist configuration is invalid: {invalid}"),
+            })?;
         if sources.is_empty() {
-            self.job_repo
-                .fail(&job.id, vec!["No valid sources in config".to_string()])
-                .await?;
-            return Ok(());
+            return Err(BuildError::rejected(
+                error_code::NO_SOURCES,
+                "No valid sources in config",
+            ));
+        }
+
+        if let Some(message) = too_many_sources(sources.len(), job.max_source_lists()) {
+            return Err(BuildError::Rejected {
+                code: error_code::INVALID_CONFIG,
+                message,
+            });
         }
 
         info!("Found {} sources to process", sources.len());
+        self.cancellation.check()?;
 
-        // Check for "no changes" optimization
-        // Skip if: config hash unchanged AND all sources would be cache hits
-        if job.job_type != JobType::Scheduled && !job.force_rebuild {
-            if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
-                if stored_hash == current_config_hash {
-                    // Config unchanged, check if all sources are cached
-                    let all_cached = self.downloader.check_all_cached(&sources).await;
-                    if all_cached {
-                        info!(
-                            "Skipping job {} - no changes detected (config hash matches, all sources cached)",
-                            job.job_id
-                        );
-                        self.job_repo
-                            .skip(
-                                &job.id,
-                                "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
-                            )
-                            .await?;
-                        return Ok(());
-                    }
-                }
-            }
+        let tracker = Arc::new(ProgressTracker::downloading(&sources));
+        let flusher = live.insert(LiveProgress::start(
+            self.job_repo.clone(),
+            job.id,
+            Arc::clone(&tracker),
+            self.cancellation.clone(),
+            Duration::from_millis(self.config.progress_update_interval_ms),
+        ));
+        flusher.flush_now().await?;
+
+        let (extracted, content_hashes) = self
+            .download_and_extract_stage(&sources, job.force_rebuild, &tracker)
+            .await?;
+        let downloaded = tracker.source_summary();
+
+        if downloaded.completed == 0 {
+            return Err(BuildError::rejected(
+                error_code::ALL_SOURCES_FAILED,
+                "All source downloads failed",
+            ));
         }
 
-        // Check for matching config fingerprint in other users (copy-on-match optimization)
-        if job.job_type != JobType::Scheduled && !job.force_rebuild {
-        if let Ok(Some(matched)) = self
-            .user_repo
-            .find_user_by_fingerprint(&config_fingerprint, &job.username)
-            .await
+        info!(
+            "Extracted domains from {} sources across {} categories",
+            downloaded.completed,
+            extracted.category_count()
+        );
+
+        if extracted.is_empty() {
+            return Err(BuildError::rejected(
+                error_code::NO_DOMAINS,
+                "No domains extracted",
+            ));
+        }
+
+        self.cancellation.check()?;
+
+        let cancellation = self.cancellation.clone();
+        let (plan, digest) = self
+            .stage_thread
+            .run(move || {
+                let plan = plan_whitelist(&whitelist_content, extracted, &cancellation)?;
+                let digest = inputs_digest(
+                    PROCESSOR_VERSION,
+                    &sources,
+                    &plan.parsed.whitelist.patterns_as_strings(),
+                    &content_hashes,
+                );
+                Ok((plan, digest))
+            })
+            .await?;
+
+        let target = Target {
+            username: &job.username,
+            user_id: job.user_id,
+        };
+        let output_dir = self.config.output_dir(&job.username);
+        if !job.force_rebuild
+            && self
+                .is_already_published(&target, &output_dir, &digest)
+                .await?
         {
             info!(
-                "Config matches user '{}' - copying output files instead of rebuilding",
-                matched.username
+                "Skipping job {}: its inputs match the published generation",
+                job.job_id
             );
-
-            // Get source user's last job stats first (needed for domain counts and stats)
-            let source_stats = self
-                .job_repo
-                .get_last_completed_result(&matched.username)
-                .await
-                .ok()
-                .flatten();
-
-            // Copy output files from matched user
-            match self.copy_output_files(&matched, &job.username).await {
-                Ok(mut output_files) => {
-                    // Populate domain counts from source_stats.output_files if available
-                    // This handles the case where matched.lists is empty (e.g., __default__)
-                    if let Some(ref src) = source_stats {
-                        for file in &mut output_files {
-                            if let Some(src_file) = src.output_files.iter().find(|f| f.name == file.name) {
-                                file.domain_count = src_file.domain_count;
-                            }
-                        }
-                    }
-
-                    let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
-                    let unique_domains = output_files
-                        .iter()
-                        .find(|f| f.name.starts_with("all_domains"))
-                        .map(|f| f.domain_count)
-                        .unwrap_or_else(|| {
-                            // Fallback to source stats or matched.total_domains
-                            source_stats
-                                .as_ref()
-                                .map(|s| s.unique_domains)
-                                .unwrap_or(matched.total_domains)
-                        });
-
-                    // Build result indicating this was a copy, with stats from source
-                    let result = if let Some(ref src) = source_stats {
-                        JobResult::copied_from_user(
-                            matched.username.clone(),
-                            src.total_domains,
-                            unique_domains,
-                            output_files.clone(),
-                            src.sources_processed,
-                            src.sources_failed,
-                            src.whitelisted_removed,
-                            src.categories.clone(),
-                        )
-                    } else {
-                        // Fallback if no source job found
-                        JobResult::copied_from_user(
-                            matched.username.clone(),
-                            matched.total_domains,
-                            unique_domains,
-                            output_files.clone(),
-                            0,
-                            0,
-                            0,
-                            std::collections::HashMap::new(),
-                        )
-                    };
-
-                    // Copy full progress from source job (includes whitelist breakdown, stage snapshots)
-                    let progress = if let Ok(Some(mut source_progress)) = self
-                        .job_repo
-                        .get_last_completed_progress(&matched.username)
-                        .await
-                    {
-                        // Ensure it shows as completed
-                        source_progress.current_step = "completed".to_string();
-                        source_progress.stage = JobStage::Completed;
-                        source_progress
-                    } else {
-                        // Fallback to minimal progress if source not found
-                        let sources_count = source_stats
-                            .as_ref()
-                            .map(|s| s.sources_processed + s.sources_failed)
-                            .unwrap_or(0);
-                        let mut p = JobProgress::default();
-                        p.current_step = "completed".to_string();
-                        p.stage = JobStage::Completed;
-                        p.total_sources = sources_count;
-                        p.processed_sources = sources_count;
-                        p
-                    };
-                    self.job_repo.update_progress(&job.id, &progress).await?;
-
-                    // Mark job as completed
-                    self.job_repo.complete(&job.id, result).await?;
-
-                    // Build list metadata from output files
-                    let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-                    let mut all_lists: Vec<ListMetadata> = Vec::new();
-
-                    // If we have lists from matched user, use those
-                    if !matched.lists.is_empty() {
-                        for list in &matched.lists {
-                            all_lists.push(ListMetadata {
-                                name: list.name.clone(),
-                                is_public: true,
-                                formats: list.formats.clone(),
-                                domain_count: list.domain_count,
-                                last_updated: now,
-                            });
-                        }
-                    } else {
-                        // Build list metadata from output files
-                        let mut seen_names: HashSet<String> = HashSet::new();
-                        for file in &output_files {
-                            let base_name = file.name.trim_end_matches(".txt.gz");
-                            let name = base_name.rsplitn(2, '_').last().unwrap_or(base_name);
-                            if !seen_names.contains(name) {
-                                seen_names.insert(name.to_string());
-                                all_lists.push(ListMetadata {
-                                    name: name.to_string(),
-                                    is_public: true,
-                                    formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
-                                    domain_count: file.domain_count,
-                                    last_updated: now,
-                                });
-                            }
-                        }
-                    }
-
-                    // Update user document
-                    if let Err(e) = self
-                        .user_repo
-                        .update_after_build(
-                            &job.username,
-                            all_lists,
-                            unique_domains,
-                            total_output_size,
-                            current_config_hash.clone(),
-                            config_fingerprint.clone(),
-                        )
-                        .await
-                    {
-                        warn!(
-                            "Failed to update user document for {}: {}",
-                            job.username, e
-                        );
-                    }
-
-                    let duration = start_time.elapsed();
-                    info!(
-                        "Job {} completed in {:.2}s (copied from {}) - {} domains",
-                        job.job_id,
-                        duration.as_secs_f64(),
-                        matched.username,
-                        unique_domains
-                    );
-
-                    return Ok(());
-                }
-                Err(e) => {
-                    // Copy failed, fall through to normal build
-                    warn!(
-                        "Failed to copy files from {}: {} - proceeding with normal build",
-                        matched.username, e
-                    );
-                }
+            if let Some(flusher) = live.take() {
+                flusher.stop().await?;
             }
-        }
-        }
-
-        // Initialize progress tracking
-        let progress = Arc::new(Mutex::new(JobProgress::downloading(sources.len() as u64)));
-
-        // Initialize source progress
-        {
-            let mut p = progress.lock().await;
-            p.sources = sources
-                .iter()
-                .map(|s| SourceProgress {
-                    id: Downloader::hash_url(&s.url),
-                    name: s.name.clone(),
-                    url: s.url.clone(),
-                    status: SourceStatus::Pending,
-                    cache_hit: None,
-                    bytes_downloaded: 0,
-                    bytes_total: None,
-                    download_percent: None,
-                    download_time_ms: None,
-                    domain_count: None,
-                    domain_change: None,
-                    format_breakdown: None,
-                    detected_formats: Vec::new(),
-                    error: None,
-                    warnings: Vec::new(),
-                    started_at: None,
-                    completed_at: None,
-                })
-                .collect();
-        }
-
-        // Update progress in DB
-        self.update_progress(&job.id, &progress).await?;
-
-        // Stages 1 and 2: download and extract, batch by batch
-        let (download_results, category_domains) = self
-            .download_and_extract_stage(
-                &job.id,
-                sources,
-                job.force_rebuild,
-                Arc::clone(&progress),
-            )
-            .await?;
-
-        // Check for complete failure
-        let successful_downloads = download_results.iter().filter(|r| r.error.is_none()).count();
-
-        if successful_downloads == 0 {
-            self.job_repo
-                .fail(
-                    &job.id,
-                    vec!["All source downloads failed".to_string()],
-                )
-                .await?;
+            self.job_repo.skip(&job.id, UNCHANGED_SKIP_REASON).await?;
             return Ok(());
         }
 
-        info!(
-            "Extracted {} unique domains across {} categories",
-            category_domains.total_count(),
-            category_domains.category_count()
-        );
+        tracker.begin_whitelist(
+            plan.domains_before,
+            plan.parsed.whitelist.pattern_count() as u64,
+        )?;
+        flusher.flush_now().await?;
 
-        if category_domains.is_empty() {
-            self.job_repo
-                .fail(&job.id, vec!["No domains extracted".to_string()])
-                .await?;
-            return Ok(());
-        }
-
-        // Stage 3: Whitelist filtering
-        let (filtered_domains, whitelist_removed, _whitelist_progress) = self
-            .whitelist_stage(&job.id, &job.username, category_domains, Arc::clone(&progress))
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(&tracker);
+        let filtered = self
+            .stage_thread
+            .run(move || {
+                Ok(apply_whitelist(plan, &cancellation, &|tick| {
+                    reporting.whitelist_checked(tick.checked, tick.newly_removed)
+                })?)
+            })
             .await?;
-
+        let whitelist_removed = filtered.progress.total_removed;
+        if filtered.ignored_lines > 0 {
+            warn!(
+                "Ignored {} unusable whitelist lines for {}",
+                filtered.ignored_lines, job.username
+            );
+        }
         info!(
             "{} domains after whitelist filtering ({} removed)",
-            filtered_domains.total_count(),
-            whitelist_removed
+            filtered.progress.domains_after, whitelist_removed
         );
+        tracker.whitelist_finished(filtered.progress);
 
-        // Stage 4: Generate output files (per-category + combined)
-        let output_files = self
-            .generation_stage(&job.id, &job.username, filtered_domains, Arc::clone(&progress))
+        self.cancellation.check()?;
+
+        let limit = LimitMeasurement {
+            max_domains: job.max_domains(),
+            actual_domains: filtered.domains_in_all_categories,
+        };
+        let over_limit_warning = match judge(&limit, self.config.enforce_domain_limit) {
+            LimitVerdict::Within => None,
+            LimitVerdict::OverButObserved { warning } => {
+                warn!("Job {} is over its domain limit: {}", job.job_id, warning);
+                Some(warning)
+            }
+            LimitVerdict::OverAndEnforced { error } => {
+                return Err(BuildError::OverDomainLimit {
+                    limit,
+                    message: error,
+                });
+            }
+        };
+
+        tracker.begin_generation(GenerationProgress::pending(
+            filtered.generation.files_total,
+            filtered.generation.domains_per_format,
+        ))?;
+        flusher.flush_now().await?;
+
+        let identity = BuildIdentity {
+            job_id: job.job_id.clone(),
+            job_created_at: job.created_at.to_chrono(),
+            attempt: job.attempt,
+            inputs_digest: digest,
+        };
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(&tracker);
+        let generation_output_dir = output_dir.clone();
+        let domains: CategoryDomains = filtered.domains;
+        let generated = self
+            .stage_thread
+            .run(move || {
+                generate_outputs(
+                    generation_output_dir,
+                    identity,
+                    domains,
+                    &cancellation,
+                    &|event| reporting.generation_event(event),
+                )
+            })
             .await?;
+        let GeneratedOutput {
+            generation,
+            categories,
+        } = generated;
+        let manifest = generation.manifest;
 
-        // Calculate final stats
-        let sources_processed = download_results.iter().filter(|r| r.error.is_none()).count() as u64;
-        let sources_failed = download_results.iter().filter(|r| r.error.is_some()).count() as u64;
-        let total_domains: u64 = {
-            let p = progress.lock().await;
-            p.sources.iter().filter_map(|s| s.domain_count).sum()
-        };
-        // Get unique domains from the combined "all_domains" file
-        let unique_domains = output_files
+        let unique_domains = manifest
+            .files
             .iter()
-            .find(|f| f.name.starts_with("all_domains"))
-            .map(|f| f.domain_count)
+            .find(|file| file.list == COMBINED_LIST_NAME)
+            .map(|file| file.domain_count)
             .unwrap_or(0);
-
-        // Calculate total output size
-        let total_output_size: u64 = output_files.iter().map(|f| f.size_bytes).sum();
-
-        // Build result
-        let result = JobResult::success(
-            sources_processed,
-            sources_failed,
-            total_domains,
+        let mut warnings = downloaded.warnings;
+        if filtered.ignored_lines > 0 {
+            warnings.push(format!(
+                "{} whitelist lines were ignored because they are not valid patterns",
+                filtered.ignored_lines
+            ));
+        }
+        warnings.extend(over_limit_warning);
+        let result = JobResult {
+            sources_processed: downloaded.completed,
+            sources_failed: downloaded.failed,
+            sources_stale: downloaded.stale,
+            total_domains: downloaded.total_domains,
             unique_domains,
-            whitelist_removed,
-            output_files.clone(),
-        );
-
-        // Mark job as completed
-        self.job_repo.complete(&job.id, result).await?;
-
-        // Update user document with lists and stats
-        // Build list metadata for all categories + all_domains
-        let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
-        let mut all_lists: Vec<ListMetadata> = Vec::new();
-
-        // Group output files by category to build ListMetadata for each
-        // Files are named: {category}_{format}.txt.gz (e.g., advertising_hosts.txt.gz)
-        // or all_domains_{format}.txt.gz for the combined list
-        let mut category_domain_counts: HashMap<String, u64> = HashMap::new();
-        for file in &output_files {
-            // Skip all_domains files - handled separately below
-            if file.name.starts_with("all_domains") {
-                continue;
-            }
-
-            // Extract category name: e.g., "advertising_hosts.txt.gz" -> "advertising"
-            // or "uncategorized_hosts.txt.gz" -> "uncategorized"
-            if let Some(category) = file.name.split('_').next() {
-                // Only count hosts format files to get domain count (avoid triple-counting)
-                if file.format == "hosts" {
-                    category_domain_counts.insert(category.to_string(), file.domain_count);
-                }
-            }
-        }
-
-        // Build ListMetadata for each category
-        for (category, domain_count) in &category_domain_counts {
-            let list = ListMetadata {
-                name: category.clone(),
-                is_public: true,  // All lists are always public
-                formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
-                domain_count: *domain_count,
-                last_updated: now,
-            };
-            all_lists.push(list);
-        }
-
-        // Add all_domains (combined list)
-        let all_domains_list = ListMetadata {
-            name: "all_domains".to_string(),
-            is_public: true,  // All lists are always public
-            formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
-            domain_count: unique_domains,
-            last_updated: now,
+            whitelisted_removed: whitelist_removed,
+            output_files: manifest
+                .files
+                .iter()
+                .map(|file| file.output_file())
+                .collect(),
+            categories,
+            warnings,
+            generation_id: Some(manifest.generation_id.clone()),
+            limit: Some(limit),
+            ..JobResult::default()
         };
-        all_lists.push(all_domains_list);
 
-        info!(
-            "Saving {} lists for user {}: {:?}",
-            all_lists.len(),
-            job.username,
-            all_lists.iter().map(|l| &l.name).collect::<Vec<_>>()
-        );
-
-        // Update user document
-        if let Err(e) = self.user_repo.update_after_build(
-            &job.username,
-            all_lists,
-            unique_domains,
-            total_output_size,
-            current_config_hash,
-            config_fingerprint,
-        ).await {
-            warn!("Failed to update user document for {}: {}", job.username, e);
-            // Don't fail the job for this - it's not critical
+        let mut pointer_may_have_moved = false;
+        let outcome = self
+            .publish_and_complete(
+                job,
+                &target,
+                &manifest,
+                &result,
+                &tracker,
+                live,
+                &mut pointer_may_have_moved,
+            )
+            .await;
+        if !pointer_may_have_moved {
+            self.discard_unpublished(&output_dir, &manifest.generation_id)
+                .await;
         }
+        if matches!(
+            outcome,
+            Err(BuildError::Rejected {
+                code: error_code::TARGET_MISSING,
+                ..
+            })
+        ) {
+            self.remove_directories_of_missing_target(&output_dir).await;
+        }
+        outcome?;
 
-        let duration = start_time.elapsed();
         info!(
-            "Job {} completed in {:.2}s - {} domains",
+            "Job {} finished in {:.2}s with {} domains",
             job.job_id,
-            duration.as_secs_f64(),
+            start_time.elapsed().as_secs_f64(),
             unique_domains
         );
 
         Ok(())
     }
 
-    /// Download stage: fetch all sources in parallel
-    /// Download and extract in batches, so only one batch of source content is
-    /// ever resident. Holding every source until extraction was what pushed
-    /// large configs past the container memory limit.
-    async fn download_and_extract_stage(
+    async fn is_already_published(
         &self,
-        job_id: &bson::oid::ObjectId,
-        sources: Vec<Source>,
-        force: bool,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<(Vec<DownloadResult>, CategoryDomains)> {
-        let batch_size = self.config.max_concurrent_downloads.max(1);
-        let mut results: Vec<DownloadResult> = Vec::with_capacity(sources.len());
-        let mut category_domains = CategoryDomains::new();
+        target: &Target<'_>,
+        output_dir: &Path,
+        digest: &str,
+    ) -> Result<bool, BuildError> {
+        let Some(published) = self.user_repo.published_state(target).await? else {
+            return Ok(false);
+        };
+        if published.inputs_digest.as_deref() != Some(digest) {
+            return Ok(false);
+        }
+        let output_dir = output_dir.to_path_buf();
+        Ok(self
+            .stage_thread
+            .run(move || Ok(manifest_exists(&output_dir, &published.generation_id)))
+            .await?)
+    }
 
-        for batch in sources.chunks(batch_size) {
-            // Progress updates are handled after all downloads complete
-            // to avoid frequent DB writes during parallel downloads
-            let mut batch_results = self
-                .downloader
-                .download_sources(batch.to_vec(), force, |_idx, _source_progress| {})
-                .await;
+    #[allow(clippy::too_many_arguments)]
+    async fn publish_and_complete(
+        &self,
+        job: &Job,
+        target: &Target<'_>,
+        manifest: &Manifest,
+        result: &JobResult,
+        tracker: &ProgressTracker,
+        live: &mut Option<LiveProgress>,
+        pointer_may_have_moved: &mut bool,
+    ) -> Result<(), BuildError> {
+        self.cancellation.check()?;
+        tracker.complete()?;
+        let final_progress = match live.take() {
+            Some(flusher) => flusher.stop().await?,
+            None => return Err(BuildError::Internal(anyhow!("progress writer is missing"))),
+        };
+        self.cancellation.check()?;
 
-            // Extract straight away so each source's bytes are freed here
-            self.extraction_stage(
-                job_id,
-                &mut batch_results,
-                &mut category_domains,
-                Arc::clone(&progress),
+        let lists = list_metadata(manifest);
+        info!(
+            "Publishing generation {} with {} lists for {}",
+            manifest.generation_id,
+            lists.len(),
+            job.username
+        );
+        *pointer_may_have_moved = true;
+        let published = self
+            .user_repo
+            .publish(
+                target,
+                &Publication {
+                    generation_id: &manifest.generation_id,
+                    job_id: &job.job_id,
+                    job_created_at: job.created_at,
+                    attempt: job.attempt,
+                    inputs_digest: &manifest.inputs_digest,
+                    lists: &lists,
+                    total_domains: result.unique_domains,
+                    total_output_size_bytes: manifest.total_size_bytes(),
+                },
             )
             .await?;
-
-            results.extend(batch_results);
-        }
-
-        // Final progress update
-        {
-            let mut p = progress.lock().await;
-            for (idx, result) in results.iter().enumerate() {
-                if idx < p.sources.len() {
-                    p.sources[idx].status = if result.error.is_some() {
-                        SourceStatus::Failed
-                    } else {
-                        SourceStatus::Completed
-                    };
-                    p.sources[idx].cache_hit = Some(result.cache_hit);
-                    p.sources[idx].bytes_downloaded = result.bytes_downloaded;
-                    p.sources[idx].download_time_ms = Some(result.download_time_ms);
-                    p.sources[idx].error = result.error.clone();
-                    p.sources[idx].warnings = result.warnings.clone();
-                }
+        let replaced = match published {
+            PublishOutcome::Published { replaced } => replaced,
+            PublishOutcome::Superseded => {
+                info!(
+                    "Job {} was not published because a newer build already was",
+                    job.job_id
+                );
+                *pointer_may_have_moved = false;
+                self.job_repo.skip(&job.id, SUPERSEDED_SKIP_REASON).await?;
+                return Ok(());
             }
-            p.processed_sources = p.sources.len() as u64;
-        }
+            PublishOutcome::TargetMissing => {
+                *pointer_may_have_moved = false;
+                return Err(BuildError::rejected(
+                    error_code::TARGET_MISSING,
+                    TARGET_MISSING_MESSAGE,
+                ));
+            }
+        };
 
-        self.update_progress(job_id, &progress).await?;
-
-        Ok((results, category_domains))
+        let completed = self
+            .job_repo
+            .complete(&job.id, result, &final_progress)
+            .await;
+        self.tidy_after_publish(job, manifest, replaced).await;
+        Ok(completed?)
     }
 
-    /// Extraction stage: extract domains and organize by category
-    async fn extraction_stage(
-        &self,
-        _job_id: &bson::oid::ObjectId,
-        download_results: &mut [DownloadResult],
-        category_domains: &mut CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<()> {
-        for result in download_results.iter_mut() {
-            if result.error.is_some() {
-                continue;
-            }
-
-            // Take ownership so the raw bytes are freed as soon as this source
-            // has been extracted, instead of staying resident for the whole job
-            let content = match result.content.take() {
-                Some(bytes) => bytes,
-                None => {
-                    warn!("No content for {}", result.source.name);
-                    continue;
-                }
-            };
-
-            // Extract domains from content with format breakdown
-            let extraction_output = {
-                let content_str = String::from_utf8_lossy(&content);
-                self.extractor
-                    .extract_from_content_with_breakdown(&content_str)
-            };
-            drop(content);
-
-            let extraction_results = extraction_output.results;
-            let format_breakdown = extraction_output.format_breakdown;
-
-            // domain_count = total domains from this source
-            let source_domain_count = extraction_results.len() as u64;
-
-            // Calculate domain_change = current - previous
-            let domain_change = result.previous_domain_count
-                .map(|prev| source_domain_count as i64 - prev as i64);
-
-            // Get detected format names
-            let detected_formats = format_breakdown.detected_formats();
-
-            // Get category from source
-            let category = result.source.category.clone();
-
-            // Add domains to category bucket and store raw adblock rules
-            let category_set = category_domains.by_category
-                .entry(category.clone())
-                .or_insert_with(HashSet::new);
-            let count_before = category_set.len();
-
-            for extraction_result in extraction_results {
-                // Store raw adblock rule if present (for adblock output passthrough).
-                // Only adblock-sourced domains need a clone; the rest move straight in.
-                if let Some(raw_rule) = extraction_result.raw_adblock_rule {
-                    category_domains
-                        .adblock_rules
-                        .insert(extraction_result.domain.clone(), raw_rule);
-                }
-                category_set.insert(extraction_result.domain);
-            }
-
-            let new_in_category = category_set.len() - count_before;
-
-            debug!(
-                "Extracted {} domains from {} [category: {:?}] ({} new in category, change: {:?}, formats: {:?})",
-                source_domain_count,
-                result.source.name,
-                category,
-                new_in_category,
-                domain_change,
-                detected_formats
-            );
-
-            // Update source progress with domain_count, domain_change, and format info
-            {
-                let mut p = progress.lock().await;
-                if let Some(source) = p.sources.iter_mut().find(|s| s.id == result.url_hash) {
-                    source.domain_count = Some(source_domain_count);
-                    source.domain_change = domain_change;
-                    source.format_breakdown = Some(format_breakdown);
-                    source.detected_formats = detected_formats;
-                }
-            }
-
-            // Save domain_count to cache for next run
-            if let Err(e) = self.downloader.update_domain_count(&result.url_hash, source_domain_count).await {
-                warn!("Failed to update domain count in cache for {}: {}", result.source.name, e);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Whitelist stage: filter out whitelisted domains from all categories
-    async fn whitelist_stage(
-        &self,
-        job_id: &bson::oid::ObjectId,
-        username: &str,
-        category_domains: CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<(CategoryDomains, u64, crate::db::progress::WhitelistProgress)> {
-        // Borrow every unique domain for global stats, without cloning them
-        let unique_domains: Vec<&String> = category_domains
-            .by_category
-            .values()
-            .flatten()
-            .collect::<HashSet<&String>>()
-            .into_iter()
-            .collect();
-        let domains_before = unique_domains.len() as u64;
-
-        // Capture downloading stage snapshot before transitioning
-        {
-            let mut p = progress.lock().await;
-            let snapshot = StageSnapshot {
-                completed_at: chrono::Utc::now().to_rfc3339(),
-                data: serde_json::json!({
-                    "sources": &p.sources,
-                    "total_sources": p.total_sources,
-                    "processed_sources": p.processed_sources,
-                }),
-            };
-            p.stage_snapshots.insert("downloading".to_string(), snapshot);
-        }
-
-        // Update progress to whitelist stage
-        {
-            let mut p = progress.lock().await;
-            p.to_whitelist(domains_before);
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        // Load whitelist from MongoDB
-        let whitelist_content = self.user_config_repo.get_whitelist(username).await?;
-        let whitelist = WhitelistManager::from_content(&whitelist_content);
-
-        // Whitelist stats over ALL domains (pattern matches, etc.)
-        let (total_removed, pattern_matches) = whitelist.filter_stats(&unique_domains);
-        drop(unique_domains);
-
-        // Filter each category separately
-        let mut filtered = CategoryDomains::new();
-        for (category, domains) in category_domains.by_category {
-            let (remaining, _, _) = whitelist.filter_domains(domains);
-            if !remaining.is_empty() {
-                filtered.by_category.insert(category, remaining);
-            }
-        }
-
-        // Copy over adblock_rules for domains that remain after whitelist filtering
-        for (domain, rule) in category_domains.adblock_rules {
-            if filtered.contains(&domain) {
-                filtered.adblock_rules.insert(domain, rule);
-            }
-        }
-
-        let domains_after = filtered.total_count() as u64;
-
-        // Create whitelist progress
-        let whitelist_progress = whitelist.create_progress(domains_before, domains_after, pattern_matches);
-
-        // Update progress
-        {
-            let mut p = progress.lock().await;
-            p.whitelist = Some(whitelist_progress.clone());
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        Ok((filtered, total_removed, whitelist_progress))
-    }
-
-    /// Generation stage: create output files for each category and combined
-    async fn generation_stage(
-        &self,
-        job_id: &bson::oid::ObjectId,
-        username: &str,
-        category_domains: CategoryDomains,
-        progress: Arc<Mutex<JobProgress>>,
-    ) -> Result<Vec<OutputFile>> {
-        let total_domains = category_domains.total_count() as u64;
-
-        // Capture whitelist stage snapshot before transitioning
-        {
-            let mut p = progress.lock().await;
-            if let Some(whitelist) = &p.whitelist {
-                let snapshot = StageSnapshot {
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                    data: serde_json::to_value(whitelist).unwrap_or(serde_json::Value::Null),
-                };
-                p.stage_snapshots.insert("whitelist".to_string(), snapshot);
-            }
-        }
-
-        // Update progress to generation stage
-        {
-            let mut p = progress.lock().await;
-            p.to_generation(total_domains);
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        // Create output generator
-        let output_dir = self.config.output_dir(username);
-        let generator = OutputGenerator::new(output_dir);
-
-        // Clean up old files
-        generator.cleanup_old_files()?;
-
-        // Extract adblock_rules before consuming category_domains
-        let adblock_rules = category_domains.adblock_rules;
-
-        // Convert HashSets to sorted Vecs per category
-        let sorted_by_category: HashMap<Option<String>, Vec<String>> = category_domains
-            .by_category
-            .into_iter()
-            .map(|(cat, domains)| (cat, DomainExtractor::sort_domains(domains)))
-            .collect();
-
-        // Generate all category files in parallel (with adblock passthrough)
-        let mut output_files = generator.generate_all_categories(&sorted_by_category, &adblock_rules)?;
-
-        // Create combined "all domains" list (deduplicated across categories).
-        // Note: nsfw category is excluded from the combined list.
-        // The per-category files are already written above, so consume the
-        // sorted sets and move their domains rather than cloning the lot.
-        let all_domains: HashSet<String> = sorted_by_category
-            .into_iter()
-            .filter(|(cat, _)| {
-                // Exclude nsfw category from all_domains
-                !matches!(cat, Some(c) if c == "nsfw")
+    async fn tidy_after_publish(&self, job: &Job, manifest: &Manifest, replaced: Option<String>) {
+        let output_dir = self.config.output_dir(&job.username);
+        let published = manifest.order();
+        let generation_id = manifest.generation_id.clone();
+        let tidied = self
+            .stage_thread
+            .run(move || {
+                let mut keep = vec![generation_id.as_str()];
+                keep.extend(replaced.as_deref());
+                let pruned = prune_generations(&output_dir, published, &keep, SystemTime::now())?;
+                Ok((pruned, remove_legacy_flat_files(&output_dir)?))
             })
-            .flat_map(|(_, domains)| domains.into_iter())
-            .collect();
-        let all_sorted = DomainExtractor::sort_domains(all_domains);
-
-        // Generate combined files (all_domains_*.txt.gz) for backward compatibility
-        let progress_clone = Arc::clone(&progress);
-        let combined_files = generator.generate_all(&all_sorted, &adblock_rules, |gen_progress| {
-            let progress = Arc::clone(&progress_clone);
-            let gen_progress = gen_progress.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    let mut p = progress.lock().await;
-                    p.generation = Some(gen_progress);
-                });
-            });
-        })?;
-        output_files.extend(combined_files);
-
-        // Capture generation stage snapshot before completing
-        {
-            let mut p = progress.lock().await;
-            if let Some(generation) = &p.generation {
-                let snapshot = StageSnapshot {
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                    data: serde_json::to_value(generation).unwrap_or(serde_json::Value::Null),
-                };
-                p.stage_snapshots.insert("generation".to_string(), snapshot);
+            .await;
+        match tidied {
+            Ok((pruned, legacy_removed)) => {
+                if legacy_removed > 0 {
+                    info!(
+                        "Removed {} files of the old flat layout for {}",
+                        legacy_removed, job.username
+                    );
+                }
+                debug!("Kept generations {:?} for {}", pruned.kept, job.username);
             }
+            Err(error) => warn!(
+                "Could not tidy old output for {} after publishing: {:#}",
+                job.username, error
+            ),
         }
-
-        // Final progress update
-        {
-            let mut p = progress.lock().await;
-            p.to_completed();
-        }
-        self.update_progress(job_id, &progress).await?;
-
-        Ok(output_files)
     }
 
-    /// Update progress in database
-    async fn update_progress(
+    async fn discard_unpublished(&self, output_dir: &Path, generation_id: &str) {
+        let output_dir = output_dir.to_path_buf();
+        let generation_id = generation_id.to_string();
+        let discarded = self
+            .stage_thread
+            .run(move || discard_generation(&output_dir, &generation_id))
+            .await;
+        if let Err(error) = discarded {
+            warn!("Could not remove an unpublished generation: {:#}", error);
+        }
+    }
+
+    async fn remove_directories_of_missing_target(&self, output_dir: &Path) {
+        let generations = crate::generation::generations_dir(output_dir);
+        let removed = self
+            .stage_thread
+            .run(move || {
+                remove_empty_directories(&generations, EMPTY_DIRECTORY_LEVELS_ABOVE_GENERATIONS)
+            })
+            .await;
+        if let Err(error) = removed {
+            warn!(
+                "Could not remove the directories of a deleted account: {:#}",
+                error
+            );
+        }
+    }
+
+    fn start_downloads_in_config_order(
         &self,
-        job_id: &bson::oid::ObjectId,
-        progress: &Arc<Mutex<JobProgress>>,
-    ) -> Result<()> {
-        let p = progress.lock().await;
-        self.job_repo.update_progress(job_id, &*p).await?;
-        Ok(())
+        sources: Vec<Source>,
+        force: bool,
+        tracker: &Arc<ProgressTracker>,
+        handoff: mpsc::Sender<Downloaded>,
+    ) -> JoinSet<Result<(), tokio::task::JoinError>> {
+        let slots = Arc::new(Semaphore::new(self.config.max_concurrent_downloads.max(1)));
+        let downloader = Arc::clone(&self.downloader);
+        let tracker = Arc::clone(tracker);
+        let cancellation = self.cancellation.clone();
+        let mut dispatcher = JoinSet::new();
+        dispatcher.spawn(async move {
+            let mut downloads = JoinSet::new();
+            for (index, source) in sources.into_iter().enumerate() {
+                let Ok(held_slot) = Arc::clone(&slots).acquire_owned().await else {
+                    break;
+                };
+                if cancellation.is_cancelled() {
+                    break;
+                }
+                let handoff = handoff.clone();
+                let downloader = Arc::clone(&downloader);
+                let tracker = Arc::clone(&tracker);
+                downloads.spawn(async move {
+                    tracker.source_started(index);
+                    let report_bytes =
+                        |downloaded, total| tracker.source_bytes(index, downloaded, total);
+                    let result = downloader
+                        .download_source_reporting(&source, force, &report_bytes)
+                        .await;
+                    tracker.source_downloaded(index, &result);
+                    let handed_over = handoff
+                        .send(Downloaded {
+                            index,
+                            result,
+                            held_slot,
+                        })
+                        .await;
+                    if handed_over.is_err() {
+                        debug!("Build stopped before {} could be extracted", source.name);
+                    }
+                });
+            }
+            drop(handoff);
+            while let Some(joined) = downloads.join_next().await {
+                joined?;
+            }
+            Ok(())
+        });
+        dispatcher
+    }
+
+    async fn download_and_extract_stage(
+        &self,
+        sources: &[Source],
+        force: bool,
+        tracker: &Arc<ProgressTracker>,
+    ) -> Result<(CategoryDomains, Vec<Option<String>>), BuildError> {
+        let (handoff, mut downloads) = mpsc::channel::<Downloaded>(DOWNLOAD_HANDOFF_CAPACITY);
+        let categories: Vec<Option<String>> = sources
+            .iter()
+            .map(|source| source.category.clone())
+            .collect();
+        let mut dispatcher =
+            self.start_downloads_in_config_order(sources.to_vec(), force, tracker, handoff);
+
+        let mut extracted = CategoryDomains::default();
+        let mut content_hashes: Vec<Option<String>> = vec![None; sources.len()];
+        loop {
+            self.cancellation.check()?;
+            let downloaded =
+                match tokio::time::timeout(CANCELLATION_CHECK_INTERVAL, downloads.recv()).await {
+                    Err(_) => continue,
+                    Ok(None) => break,
+                    Ok(Some(downloaded)) => downloaded,
+                };
+            extracted = self
+                .extract_downloaded(
+                    downloaded,
+                    &categories,
+                    extracted,
+                    &mut content_hashes,
+                    tracker,
+                )
+                .await?;
+        }
+
+        while let Some(dispatched) = dispatcher.join_next().await {
+            dispatched
+                .and_then(|downloads| downloads)
+                .map_err(|stopped| anyhow!("A source download task failed: {stopped}"))?;
+        }
+        self.cancellation.check()?;
+
+        Ok((extracted, content_hashes))
+    }
+
+    async fn extract_downloaded(
+        &self,
+        downloaded: Downloaded,
+        categories: &[Option<String>],
+        extracted: CategoryDomains,
+        content_hashes: &mut [Option<String>],
+        tracker: &Arc<ProgressTracker>,
+    ) -> Result<CategoryDomains, BuildError> {
+        let Downloaded {
+            index,
+            mut result,
+            held_slot,
+        } = downloaded;
+        if result.error.is_some() {
+            return Ok(extracted);
+        }
+        let content = result
+            .content
+            .take()
+            .ok_or_else(|| anyhow!("Source {} has no body to extract", result.source.name))?;
+        if let Some(used) = content_hashes.get_mut(index) {
+            *used = Some(
+                result
+                    .content_hash
+                    .take()
+                    .unwrap_or_else(|| content_hash(&content)),
+            );
+        }
+        let body = SourceBody {
+            source_index: index,
+            category: categories.get(index).cloned().flatten(),
+            abp: result.source.abp,
+            content,
+        };
+
+        tracker.source_extracting(index);
+        let extractor = Arc::clone(&self.extractor);
+        let cancellation = self.cancellation.clone();
+        let reporting = Arc::clone(tracker);
+        let (extracted, extraction) = self
+            .stage_thread
+            .run(move || {
+                let mut extracted = extracted;
+                let extraction =
+                    extract_source(&extractor, body, &mut extracted, &cancellation, &|count| {
+                        reporting.source_domains_extracted(index, count)
+                    })?;
+                Ok((extracted, extraction))
+            })
+            .await?;
+        drop(held_slot);
+
+        debug!(
+            "Extracted {} domains from {} (formats: {:?})",
+            extraction.domain_count,
+            result.source.name,
+            extraction.format_breakdown.detected_formats()
+        );
+        tracker.source_completed(
+            index,
+            extraction.domain_count,
+            result.previous_domain_count,
+            extraction.format_breakdown,
+        );
+
+        if let Err(e) = self
+            .downloader
+            .update_domain_count(&result.url_hash, extraction.domain_count)
+            .await
+        {
+            warn!(
+                "Failed to update domain count in cache for {}: {}",
+                result.source.name, e
+            );
+        }
+
+        Ok(extracted)
     }
 }
+
+fn list_metadata(manifest: &Manifest) -> Vec<ListMetadata> {
+    let published_at = BsonDateTime::from_chrono(manifest.created_at);
+    let mut lists: BTreeMap<&str, ListMetadata> = BTreeMap::new();
+    for file in &manifest.files {
+        let list = lists
+            .entry(file.list.as_str())
+            .or_insert_with(|| ListMetadata {
+                name: file.list.clone(),
+                is_public: true,
+                formats: Vec::new(),
+                domain_count: file.domain_count,
+                last_updated: published_at,
+            });
+        list.formats.push(file.format.clone());
+    }
+    let format_order = |format: &String| {
+        crate::db::progress::OUTPUT_FORMAT_NAMES
+            .iter()
+            .position(|known| known == format)
+    };
+    lists
+        .into_values()
+        .map(|mut list| {
+            list.formats.sort_by_key(format_order);
+            list
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "processor_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "publishing_tests.rs"]
+mod publishing_tests;
+
+#[cfg(test)]
+#[path = "domain_limit_build_tests.rs"]
+mod domain_limit_build_tests;

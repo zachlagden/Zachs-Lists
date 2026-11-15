@@ -1,9 +1,11 @@
 from unittest.mock import Mock
 
+import mongomock
 import pytest
 from flask import Flask
 
 import app.socketio as realtime
+from app.extensions import mongo
 from app.models.user import User
 
 
@@ -26,6 +28,7 @@ def test_access_is_checked_before_protected_event(
     account.is_admin = True
     account.auth_version = 0
     monkeypatch.setattr(User, "get_by_id", Mock(return_value=account))
+    monkeypatch.setattr(mongo, "db", mongomock.MongoClient().default)
     realtime.init_socketio(app)
     http = app.test_client()
     with http.session_transaction() as session:

@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 from bson import ObjectId
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class Announcement:
@@ -21,7 +22,7 @@ class Announcement:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         return str(self._id) if self._id else None
 
     @property
@@ -64,18 +65,20 @@ class Announcement:
             "message": self.message,
             "type": self.type,
             "is_active": self.is_active,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "expires_at": utc_iso(self.expires_at),
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": utc_iso(self.created_at),
+            "updated_at": utc_iso(self.updated_at),
         }
 
-    def update(self, **kwargs) -> None:
-        """Update announcement fields."""
-        update_fields = {"updated_at": datetime.utcnow()}
+    UPDATABLE_FIELDS = ("title", "message", "type", "is_active", "expires_at")
 
-        for field in ["title", "message", "type", "is_active", "expires_at"]:
-            if field in kwargs and kwargs[field] is not None:
+    def update(self, **kwargs: Any) -> None:
+        """Update announcement fields."""
+        update_fields: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+
+        for field in self.UPDATABLE_FIELDS:
+            if field in kwargs:
                 update_fields[field] = kwargs[field]
 
         mongo.db[self.COLLECTION].update_one({"_id": self._id}, {"$set": update_fields})

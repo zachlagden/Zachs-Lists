@@ -2,20 +2,20 @@
 User blueprint - config, whitelist, lists, jobs, build.
 """
 
-import os
 import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
-import gevent
 
 from app.blueprints.auth import login_required
-from app.extensions import mongo
+from app.extensions import limiter, mongo
 from app.models.user import User
 from app.models.job import Job
+from app.services.build_admission import AdmissionError, admit_build
+from app.services.job_feed import job_payload, job_payloads
+from app.services.limit_review import enforcing_domain_limit
 from app.utils.validators import (
-    validate_blocklist_config,
-    validate_blocklist_config_strict,
+    WhitelistValidationUnavailable,
     validate_whitelist,
     validate_config_urls,
     VALID_CATEGORIES,
@@ -24,8 +24,36 @@ from app.socketio import emit_validation_progress, emit_validation_complete
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.cache import CacheMetadata
 from app.utils.config_revision import ConfigRevisionConflict
+from app.models.announcement import Announcement
+from app.models.limit_request import LimitRequest, PendingRequestExists
+from app.services import default_template
+from app.utils.rate_limits import configured_limit
+from app.utils.request_fields import (
+    FieldError,
+    is_utf8_text,
+    json_object,
+    object_id,
+    optional_bool,
+    query_int,
+    register_field_errors,
+    required_choice,
+    required_int,
+    required_string,
+    required_text,
+)
+from app.utils.time import utc_iso
 
 user_bp = Blueprint("user", __name__)
+register_field_errors(user_bp)
+
+MAX_METADATA_URLS = 100
+MAX_METADATA_URL_LENGTH = 8192
+MIN_REASON_LENGTH = 10
+MAX_REASON_LENGTH = 1000
+PENDING_REQUEST_EXISTS = {
+    "error": "You already have a pending limit request",
+    "code": "pending_request_exists",
+}
 
 
 def _generate_config_hash(config: str) -> str:
@@ -221,14 +249,21 @@ def get_categories(user: User):
 
 
 @user_bp.route("/config/url-metadata", methods=["POST"])
+@limiter.limit(configured_limit("RATELIMIT_URL_METADATA"))
 @login_required
 def get_url_metadata(user: User):
     """Fetch cached metadata (domain counts) for a list of URLs."""
-    data = request.get_json()
-    urls = data.get("urls", [])
+    urls = json_object().get("urls")
 
-    if not urls or len(urls) > 100:
-        return jsonify({"error": "Provide 1-100 URLs"}), 400
+    if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_METADATA_URLS:
+        raise FieldError(f"Provide 1-{MAX_METADATA_URLS} URLs", "urls")
+    if not all(
+        isinstance(url, str)
+        and len(url) <= MAX_METADATA_URL_LENGTH
+        and is_utf8_text(url)
+        for url in urls
+    ):
+        raise FieldError("urls must be a list of URL strings", "urls")
 
     result = {}
     for url in urls:
@@ -279,8 +314,7 @@ def get_whitelist(user: User):
 @login_required
 def update_whitelist(user: User):
     """Update whitelist."""
-    data = request.get_json()
-    whitelist = data.get("whitelist", "")
+    whitelist = required_text(json_object(), "whitelist")
 
     # Validate size
     max_size = user.limits["max_config_size_mb"] * 1024 * 1024
@@ -295,7 +329,17 @@ def update_whitelist(user: User):
         )
 
     # Validate patterns
-    errors = validate_whitelist(whitelist)
+    try:
+        errors = validate_whitelist(whitelist)
+    except WhitelistValidationUnavailable:
+        return (
+            jsonify(
+                {
+                    "error": "The whitelist could not be checked, so it was not saved. Try again shortly."
+                }
+            ),
+            503,
+        )
     if errors:
         return jsonify({"error": "Invalid whitelist", "details": errors}), 400
 
@@ -318,21 +362,16 @@ def get_lists(user: User):
     return jsonify(
         {
             "lists": user.lists,
+            "published_at": utc_iso(user.published_at),
+            "generation_id": user.published_generation,
             "stats": {
                 **user.stats,
-                "last_build_at": (
-                    user.stats["last_build_at"].isoformat()
-                    if user.stats.get("last_build_at")
-                    else None
-                ),
-                "week_reset_at": (
-                    user.stats["week_reset_at"].isoformat()
-                    if user.stats.get("week_reset_at")
-                    else None
-                ),
+                "last_build_at": utc_iso(user.stats.get("last_build_at")),
+                "week_reset_at": utc_iso(user.stats.get("week_reset_at")),
             },
             "limits": user.limits,
             "remaining_updates": user.get_remaining_manual_updates(),
+            "enforce_domain_limit": enforcing_domain_limit(),
         }
     )
 
@@ -341,82 +380,33 @@ def get_lists(user: User):
 @login_required
 def trigger_build(user: User):
     """Trigger manual build."""
-    from bson import ObjectId
-
-    # Check if user has a config
-    config = user.get_config("blocklists.conf")
-    if not config or not config.strip():
-        return jsonify({"error": "No blocklist configuration found"}), 400
-
-    # Check manual update limit
-    if not user.can_do_manual_update():
-        return (
-            jsonify(
-                {
-                    "error": "Weekly manual update limit reached",
-                    "remaining": 0,
-                    "resets_at": user.stats["week_reset_at"].isoformat(),
-                }
-            ),
-            429,
-        )
-
-    # Check if user already has an active job
-    if Job.has_active_job_for_user(ObjectId(user.id)):
-        return (
-            jsonify(
-                {
-                    "error": "A build is already in progress",
-                    "remaining_updates": user.get_remaining_manual_updates(),
-                }
-            ),
-            429,
-        )
-
-    # Check cooldown (5 minutes between manual builds)
-    cooldown_remaining = Job.get_cooldown_remaining(
-        ObjectId(user.id), cooldown_minutes=5
-    )
-    if cooldown_remaining > 0:
-        minutes = cooldown_remaining // 60
-        seconds = cooldown_remaining % 60
-        return (
-            jsonify(
-                {
-                    "error": f"Please wait {minutes}m {seconds}s before triggering another build",
-                    "cooldown_remaining": cooldown_remaining,
-                    "remaining_updates": user.get_remaining_manual_updates(),
-                }
-            ),
-            429,
-        )
-
-    # Queue job
-    from app.services.job_queue import JobQueue
-
-    job = JobQueue.queue_job(user, job_type=Job.TYPE_MANUAL)
-    user.increment_manual_updates()
+    try:
+        job = admit_build(user, Job.TYPE_MANUAL, requested_by=user)
+    except AdmissionError as refusal:
+        return jsonify(refusal.to_response()), refusal.status
 
     current_app.logger.info(
         f"User {user.username} triggered manual build: {job.job_id}"
     )
+    current = User.get_by_id(user.id) or user
 
     return jsonify(
         {
             "job_id": job.job_id,
             "status": job.status,
-            "remaining_updates": user.get_remaining_manual_updates(),
+            "remaining_updates": current.get_remaining_manual_updates(),
         }
     )
 
 
 @user_bp.route("/jobs", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
 @login_required
 def get_jobs(user: User):
     """Get user's job history."""
     from bson import ObjectId
 
-    limit = request.args.get("limit", 20, type=int)
+    limit = query_int("limit", 20, 1, 100)
     jobs = Job.get_by_user(ObjectId(user.id), limit=limit)
 
     # Check for unread failures
@@ -424,13 +414,14 @@ def get_jobs(user: User):
 
     return jsonify(
         {
-            "jobs": [j.to_dict() for j in jobs],
+            "jobs": job_payloads(jobs),
             "has_unread_failures": has_unread_failures,
         }
     )
 
 
 @user_bp.route("/jobs/<job_id>", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
 @login_required
 def get_job(user: User, job_id: str):
     """Get specific job status."""
@@ -438,14 +429,16 @@ def get_job(user: User, job_id: str):
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
-    # Check ownership
-    if job.user_id and str(job.user_id) != user.id:
+    owned = job.user_id is not None and str(job.user_id) == user.id
+    shared_with_admins = job.user_id is None and user.is_admin
+    if not owned and not shared_with_admins:
         return jsonify({"error": "Job not found"}), 404
 
-    return jsonify(job.to_dict())
+    return jsonify(job_payload(job))
 
 
 @user_bp.route("/jobs/mark-read", methods=["POST"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
 @login_required
 def mark_jobs_read(user: User):
     """Mark all failed jobs as read."""
@@ -459,38 +452,11 @@ def mark_jobs_read(user: User):
 @login_required
 def copy_default_template(user: User):
     """Copy default config as a template for user."""
-    from app.extensions import mongo
-
-    # Get default config from MongoDB system_config collection
-    system_config = mongo.db["system_config"].find_one({"_id": "default_config"})
-
-    if not system_config:
-        return jsonify({"error": "Default configuration not available"}), 404
-
-    config_content = system_config.get("blocklists", "")
-    whitelist_content = system_config.get("whitelist", "")
-
-    # Check for overwrite option
-    data = request.get_json() or {}
-    overwrite = data.get("overwrite", False)
-
-    existing_config = user.get_config("blocklists.conf")
-    if existing_config and not overwrite:
-        return (
-            jsonify(
-                {
-                    "error": "Configuration already exists",
-                    "has_existing": True,
-                    "message": "Set overwrite=true to replace existing configuration",
-                }
-            ),
-            409,
-        )
-
-    # Save configs
-    user.save_config("blocklists.conf", config_content)
-    if whitelist_content:
-        user.save_config("whitelist.txt", whitelist_content)
+    overwrite = optional_bool(json_object(), "overwrite") or False
+    try:
+        copied = default_template.copy_default_template(user, overwrite)
+    except default_template.TemplateRefusal as refusal:
+        return jsonify(refusal.to_response()), refusal.status
 
     current_app.logger.info(f"User {user.username} copied default template")
 
@@ -498,10 +464,7 @@ def copy_default_template(user: User):
         {
             "success": True,
             "message": "Default template copied successfully",
-            "copied": {
-                "blocklists_conf": True,
-                "whitelist_txt": bool(whitelist_content),
-            },
+            "copied": copied,
         }
     )
 
@@ -513,66 +476,43 @@ def copy_default_template(user: User):
 @login_required
 def submit_limit_request(user: User):
     """Submit a request for a higher domain limit."""
-    from app.models.limit_request import LimitRequest
-
-    data = request.get_json()
-    requested_tier = data.get("requested_tier")
-    reason = data.get("reason", "").strip()
-    intended_use = data.get("intended_use", "personal")
-
-    # Validate requested tier
-    domain_tiers = current_app.config.get(
-        "DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000]
-    )
-    current_limit = user.limits.get("max_domains", domain_tiers[0])
-
-    # Filter to tiers higher than current limit
+    data = json_object()
+    domain_tiers = current_app.config["DOMAIN_TIERS"]
+    current_limit = user.limits["max_domains"]
     available_tiers = [t for t in domain_tiers if t > current_limit]
 
     if not available_tiers:
         return jsonify({"error": "You are already at the maximum tier"}), 400
 
-    if requested_tier not in available_tiers:
-        return (
-            jsonify(
-                {"error": "Invalid tier requested", "available_tiers": available_tiers}
-            ),
-            400,
-        )
-
-    # Validate reason
-    if not reason or len(reason) < 10:
-        return (
-            jsonify({"error": "Please provide a reason (at least 10 characters)"}),
-            400,
-        )
-
-    if len(reason) > 1000:
-        return jsonify({"error": "Reason too long (max 1000 characters)"}), 400
-
-    # Validate intended use
-    if intended_use not in LimitRequest.INTENDED_USE_OPTIONS:
-        return (
-            jsonify(
-                {
-                    "error": "Invalid intended use",
-                    "options": LimitRequest.INTENDED_USE_OPTIONS,
-                }
-            ),
-            400,
-        )
-
-    # Check for existing pending request
-    if LimitRequest.has_pending_request(user.id):
-        return jsonify({"error": "You already have a pending limit request"}), 400
-
-    # Create request
-    limit_request = LimitRequest.create(
-        user=user,
-        requested_tier=requested_tier,
-        reason=reason,
-        intended_use=intended_use,
+    requested_tier = required_int(
+        data, "requested_tier", min(available_tiers), max(available_tiers)
     )
+    if requested_tier not in available_tiers:
+        raise FieldError(
+            "Invalid tier requested",
+            "requested_tier",
+            available_tiers=available_tiers,
+        )
+
+    reason = required_string(data, "reason", MAX_REASON_LENGTH, MIN_REASON_LENGTH)
+    intended_use = (
+        required_choice(data, "intended_use", LimitRequest.INTENDED_USE_OPTIONS)
+        if data.get("intended_use") is not None
+        else "personal"
+    )
+
+    if LimitRequest.has_pending_request(user.id):
+        return jsonify(PENDING_REQUEST_EXISTS), 409
+
+    try:
+        limit_request = LimitRequest.create(
+            user=user,
+            requested_tier=requested_tier,
+            reason=reason,
+            intended_use=intended_use,
+        )
+    except PendingRequestExists:
+        return jsonify(PENDING_REQUEST_EXISTS), 409
 
     current_app.logger.info(
         f"User {user.username} submitted limit request for {requested_tier:,} domains"
@@ -593,15 +533,10 @@ def submit_limit_request(user: User):
 @login_required
 def get_limit_requests(user: User):
     """Get user's limit requests."""
-    from app.models.limit_request import LimitRequest
-
     requests = LimitRequest.get_by_user(user.id)
 
-    # Also get available tiers for the user
-    domain_tiers = current_app.config.get(
-        "DOMAIN_TIERS", [2_000_000, 5_000_000, 10_000_000]
-    )
-    current_limit = user.limits.get("max_domains", domain_tiers[0])
+    domain_tiers = current_app.config["DOMAIN_TIERS"]
+    current_limit = user.limits["max_domains"]
     available_tiers = [t for t in domain_tiers if t > current_limit]
     has_pending = LimitRequest.has_pending_request(user.id)
 
@@ -611,7 +546,7 @@ def get_limit_requests(user: User):
             "current_limit": current_limit,
             "available_tiers": available_tiers,
             "has_pending": has_pending,
-            "max_limit": current_app.config.get("MAX_DOMAINS_LIMIT", 10_000_000),
+            "max_limit": current_app.config["MAX_DOMAINS_LIMIT"],
         }
     )
 
@@ -658,8 +593,6 @@ def mark_notification_read(user: User, notification_id: str):
 @login_required
 def get_announcements(user: User):
     """Get active announcements excluding dismissed ones."""
-    from app.models.announcement import Announcement
-
     active = Announcement.get_active()
     dismissed = set(user.dismissed_announcements)
 
@@ -672,5 +605,8 @@ def get_announcements(user: User):
 @login_required
 def dismiss_announcement(user: User, announcement_id: str):
     """Dismiss an announcement for this user."""
+    object_id(announcement_id, "announcement_id")
+    if Announcement.get_by_id(announcement_id) is None:
+        return jsonify({"error": "Announcement not found"}), 404
     user.dismiss_announcement(announcement_id)
     return jsonify({"success": True})

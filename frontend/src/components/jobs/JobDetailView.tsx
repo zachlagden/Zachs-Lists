@@ -4,6 +4,7 @@ import type {
   SourceProgress,
   WhitelistProgress,
   FormatProgress,
+  GenerationProgress,
   JobStatus,
   EnhancedJobProgress,
 } from '../../types';
@@ -86,6 +87,8 @@ export default function JobDetailView({
           queue_position: null,
           queue_delay_remaining_ms: null,
           stage_started_at: null,
+          stages: { downloading: null, whitelist: null, generation: null },
+          stage_snapshots: {},
           current_step: 'downloading',
           current_source: null,
         };
@@ -96,12 +99,12 @@ export default function JobDetailView({
         return <WhitelistStage whitelist={whitelistData} />;
       }
       case 'generation': {
-        const generationData = data as {
-          formats?: FormatProgress[];
-          current_format?: string | null;
-        };
-        const generationProgress = {
-          formats: generationData.formats || [],
+        const generationData = data as Partial<GenerationProgress>;
+        const generationFormats = generationData.formats || [];
+        const generationProgress: GenerationProgress = {
+          files_total: generationData.files_total ?? generationFormats.length,
+          files_completed: generationData.files_completed ?? generationFormats.length,
+          formats: generationFormats,
           current_format: generationData.current_format || null,
         };
         return <GenerationStage generation={generationProgress} formats={formats} />;

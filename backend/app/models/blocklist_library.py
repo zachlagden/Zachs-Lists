@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from bson import ObjectId
 
 from app.extensions import mongo
+from app.utils.time import utc_iso
 
 
 class BlocklistLibrary:
@@ -36,7 +37,7 @@ class BlocklistLibrary:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         """Get entry ID as string."""
         return str(self._id) if self._id else None
 
@@ -92,8 +93,8 @@ class BlocklistLibrary:
             "aggressiveness": self.aggressiveness,
             "domain_count": self.domain_count,
             "added_by": self.added_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": utc_iso(self.created_at),
+            "updated_at": utc_iso(self.updated_at),
         }
 
     @classmethod
@@ -134,7 +135,7 @@ class BlocklistLibrary:
     def get_grouped_by_category(cls) -> Dict[str, List["BlocklistLibrary"]]:
         """Get all entries grouped by category."""
         entries = cls.get_all()
-        grouped = {}
+        grouped: Dict[str, List["BlocklistLibrary"]] = {}
         for entry in entries:
             if entry.category not in grouped:
                 grouped[entry.category] = []
@@ -184,7 +185,7 @@ class BlocklistLibrary:
         domain_count: Optional[int] = None,
     ) -> bool:
         """Update library entry."""
-        update_data = {"updated_at": datetime.utcnow()}
+        update_data: Dict[str, Any] = {"updated_at": datetime.utcnow()}
 
         if url is not None:
             update_data["url"] = url
@@ -225,7 +226,7 @@ class BlocklistLibrary:
     @classmethod
     def url_exists(cls, url: str, exclude_id: Optional[str] = None) -> bool:
         """Check if URL already exists in library."""
-        query = {"url": url}
+        query: Dict[str, Any] = {"url": url}
         if exclude_id:
             try:
                 query["_id"] = {"$ne": ObjectId(exclude_id)}
@@ -234,9 +235,12 @@ class BlocklistLibrary:
         return cls.get_collection().count_documents(query) > 0
 
     @classmethod
-    def ensure_indexes(cls):
+    def ensure_indexes(cls) -> None:
         """Create indexes for the collection."""
         collection = cls.get_collection()
-        collection.create_index("url", unique=True)
-        collection.create_index("category")
-        collection.create_index([("category", 1), ("recommended", -1), ("name", 1)])
+        collection.create_index("url", unique=True, name="url_1")
+        collection.create_index("category", name="category_1")
+        collection.create_index(
+            [("category", 1), ("recommended", -1), ("name", 1)],
+            name="category_1_recommended_-1_name_1",
+        )

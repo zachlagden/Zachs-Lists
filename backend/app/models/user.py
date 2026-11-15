@@ -8,17 +8,37 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
+from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 from flask import current_app
 
 from app.extensions import mongo
 from app.utils.config_revision import ConfigRevisionConflict
+from app.utils.time import utc_iso, week_start
 
 
 class User:
     """User model representing a GitHub-authenticated user."""
 
     COLLECTION = "users"
+    LIMIT_CONFIG_KEYS = {
+        "max_source_lists": ("DEFAULT_MAX_SOURCE_LISTS", "MAX_SOURCE_LISTS_LIMIT"),
+        "max_domains": ("DEFAULT_MAX_DOMAINS", "MAX_DOMAINS_LIMIT"),
+        "max_config_size_mb": (
+            "DEFAULT_MAX_CONFIG_SIZE_MB",
+            "MAX_CONFIG_SIZE_MB_LIMIT",
+        ),
+        "manual_updates_per_week": (
+            "DEFAULT_MANUAL_UPDATES_PER_WEEK",
+            "MAX_MANUAL_UPDATES_PER_WEEK_LIMIT",
+        ),
+    }
+    MAX_NOTIFICATIONS = 100
+    MAX_IP_LOG_ENTRIES = 50
+    LIMIT_REVIEW_OPEN = "open"
+    LIMIT_REVIEW_RESOLVED = "resolved"
+    PERMANENT_BAN = timedelta(days=36500)
+    LONGEST_TIMED_BAN = timedelta(days=3650)
 
     def __init__(self, data: Dict[str, Any]):
         self._data = data
@@ -88,6 +108,15 @@ class User:
         return True
 
     @property
+    def ban_ends_at(self) -> Optional[datetime]:
+        banned_until = self.banned_until
+        if not self.is_banned or banned_until is None:
+            return None
+        if banned_until - datetime.utcnow() > self.LONGEST_TIMED_BAN:
+            return None
+        return banned_until
+
+    @property
     def is_root(self) -> bool:
         """Check if user is the root admin (from env)."""
         root_id = current_app.config.get("ROOT_GITHUB_ID")
@@ -132,16 +161,21 @@ class User:
                 "manual_updates_per_week": 999999,
             }
 
-        defaults = {
-            "max_source_lists": current_app.config["DEFAULT_MAX_SOURCE_LISTS"],
-            "max_domains": current_app.config["DEFAULT_MAX_DOMAINS"],
-            "max_config_size_mb": current_app.config["DEFAULT_MAX_CONFIG_SIZE_MB"],
-            "manual_updates_per_week": current_app.config[
-                "DEFAULT_MANUAL_UPDATES_PER_WEEK"
-            ],
+        return {**self.default_limits(), **self._data.get("limits", {})}
+
+    @classmethod
+    def default_limits(cls) -> Dict[str, int]:
+        return {
+            name: current_app.config[default_key]
+            for name, (default_key, _) in cls.LIMIT_CONFIG_KEYS.items()
         }
-        user_limits = self._data.get("limits", {})
-        return {**defaults, **user_limits}
+
+    @classmethod
+    def limit_maximums(cls) -> Dict[str, int]:
+        return {
+            name: current_app.config[maximum_key]
+            for name, (_, maximum_key) in cls.LIMIT_CONFIG_KEYS.items()
+        }
 
     @property
     def notifications(self) -> List[Dict[str, Any]]:
@@ -155,14 +189,27 @@ class User:
             "total_output_size_bytes": 0,
             "last_build_at": None,
             "manual_updates_this_week": 0,
-            "week_reset_at": datetime.utcnow(),
+            "week_reset_at": None,
         }
         user_stats = self._data.get("stats", {})
-        return {**defaults, **user_stats}
+        return {
+            **defaults,
+            **user_stats,
+            "manual_updates_this_week": self.manual_updates_used(),
+        }
 
     @property
     def lists(self) -> List[Dict[str, Any]]:
         return self._data.get("lists", [])
+
+    @property
+    def published_generation(self) -> Optional[str]:
+        return self._data.get("published_generation")
+
+    @property
+    def published_at(self) -> Optional[datetime]:
+        published = self._data.get("published")
+        return published.get("published_at") if isinstance(published, dict) else None
 
     @property
     def ip_log(self) -> List[Dict[str, Any]]:
@@ -186,20 +233,6 @@ class User:
         """Get user's output directory."""
         return os.path.join(self.get_user_dir(), "output")
 
-    def get_output_path(self, list_name: str, format_type: str) -> str:
-        """Get path to output file for a specific list and format."""
-        filename = f"{list_name}_{format_type}.txt"
-        return os.path.join(self.get_output_dir(), filename)
-
-    def get_config_hash(self) -> str:
-        """Compute SHA256 hash of blocklists.conf + whitelist.txt for change detection."""
-        import hashlib
-
-        blocklists = self.get_config("blocklists.conf") or ""
-        whitelist = self.get_config("whitelist.txt") or ""
-        combined = f"{blocklists}\n---SEPARATOR---\n{whitelist}"
-        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
-
     # Config methods
     CONFIG_SCHEMA_VERSION = 1
     _CONFIG_FIELD_MAP = {
@@ -220,9 +253,17 @@ class User:
         self, filename: str, content: str, expected_revision: int | None = None
     ) -> None:
         """Save config to MongoDB."""
-        field = self._CONFIG_FIELD_MAP.get(filename)
-        if not field:
-            raise ValueError(f"Unknown config file: {filename}")
+        self.save_configs({filename: content}, expected_revision)
+
+    def save_configs(
+        self, contents: Dict[str, str], expected_revision: int | None = None
+    ) -> None:
+        fields: Dict[str, str] = {}
+        for filename, content in contents.items():
+            field = self._CONFIG_FIELD_MAP.get(filename)
+            if not field:
+                raise ValueError(f"Unknown config file: {filename}")
+            fields[field] = content
 
         query: Dict[str, Any] = {"_id": self._id}
         if expected_revision == 0:
@@ -236,7 +277,7 @@ class User:
             query,
             {
                 "$set": {
-                    f"config.{field}": content,
+                    **{f"config.{field}": content for field, content in fields.items()},
                     "config.version": self.CONFIG_SCHEMA_VERSION,
                     "updated_at": datetime.utcnow(),
                 },
@@ -250,7 +291,7 @@ class User:
         # Update local cache
         if "config" not in self._data:
             self._data["config"] = {}
-        self._data["config"][field] = content
+        self._data["config"].update(fields)
         self._data["config"]["revision"] = (
             expected_revision if expected_revision is not None else self.config_revision
         ) + 1
@@ -275,67 +316,20 @@ class User:
                 return lst
         return None
 
-    def update_lists(self, lists_data: List[Dict[str, Any]]) -> None:
-        """Update user's lists."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {"$set": {"lists": lists_data, "updated_at": datetime.utcnow()}},
-        )
-
     # Stats methods
-    def update_stats(
-        self, total_domains: int = None, total_output_size_bytes: int = None
-    ) -> None:
-        """Update user statistics."""
-        update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
-        if total_domains is not None:
-            update["stats.total_domains"] = total_domains
-        if total_output_size_bytes is not None:
-            update["stats.total_output_size_bytes"] = total_output_size_bytes
-        update["stats.last_build_at"] = datetime.utcnow()
 
-        mongo.db[self.COLLECTION].update_one({"_id": self._id}, {"$set": update})
-
-    def can_do_manual_update(self) -> bool:
-        """Check if user can perform a manual update."""
-        # Admins can always do manual updates
-        if self.is_admin:
-            return True
-
-        stats = self.stats
-        week_reset = stats.get("week_reset_at", datetime.utcnow() - timedelta(days=8))
-
-        # Check if week has reset
-        if datetime.utcnow() - week_reset > timedelta(days=7):
-            # Reset counter
-            mongo.db[self.COLLECTION].update_one(
-                {"_id": self._id},
-                {
-                    "$set": {
-                        "stats.manual_updates_this_week": 0,
-                        "stats.week_reset_at": datetime.utcnow(),
-                    }
-                },
-            )
-            return True
-
-        return (
-            stats.get("manual_updates_this_week", 0)
-            < self.limits["manual_updates_per_week"]
-        )
-
-    def increment_manual_updates(self) -> None:
-        """Increment manual update counter."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id}, {"$inc": {"stats.manual_updates_this_week": 1}}
-        )
-
-    def get_remaining_manual_updates(self) -> int:
-        """Get remaining manual updates for this week."""
-        stats = self.stats
+    def manual_updates_used(self, now: Optional[datetime] = None) -> int:
+        stats = self._data.get("stats", {})
+        counted_from = stats.get("week_reset_at")
+        current_week = week_start(now or datetime.utcnow())
+        if not isinstance(counted_from, datetime) or counted_from < current_week:
+            return 0
         used = stats.get("manual_updates_this_week", 0)
+        return used if isinstance(used, int) and used > 0 else 0
+
+    def get_remaining_manual_updates(self, now: Optional[datetime] = None) -> int:
         limit = self.limits["manual_updates_per_week"]
-        return max(0, limit - used)
+        return max(0, limit - self.manual_updates_used(now))
 
     # Admin methods
     def set_enabled(self, enabled: bool) -> None:
@@ -352,12 +346,18 @@ class User:
 
             disconnect_user(self.id)
 
-    def set_limits(self, limits: Dict[str, int]) -> None:
-        """Set custom limits for user."""
+    def apply_limits(self, changes: Dict[str, int]) -> Dict[str, int]:
+        defaults = self.default_limits()
+        wanted = {**defaults, **self._data.get("limits", {}), **changes}
+        overrides = {
+            name: wanted[name] for name in defaults if wanted[name] != defaults[name]
+        }
         mongo.db[self.COLLECTION].update_one(
             {"_id": self._id},
-            {"$set": {"limits": limits, "updated_at": datetime.utcnow()}},
+            {"$set": {"limits": overrides, "updated_at": datetime.utcnow()}},
         )
+        self._data["limits"] = overrides
+        return overrides
 
     def ban(self, until: datetime, reason: str = None) -> None:
         """Ban user until a specific time."""
@@ -428,7 +428,13 @@ class User:
         mongo.db[self.COLLECTION].update_one(
             {"_id": self._id},
             {
-                "$push": {"notifications": {"$each": [notification], "$position": 0}},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": self.MAX_NOTIFICATIONS,
+                    }
+                },
                 "$set": {"updated_at": datetime.utcnow()},
             },
         )
@@ -446,58 +452,237 @@ class User:
         """Get unread notifications."""
         return [n for n in self.notifications if not n.get("read", False)]
 
-    def log_ip_access(self, ip: str) -> None:
-        """Log an IP address access (hashed for privacy)."""
-        import hashlib
+    @property
+    def limit_review(self) -> Optional[Dict[str, Any]]:
+        review = self._data.get("limit_review")
+        return review if isinstance(review, dict) else None
 
-        # Hash IP for privacy (consistent with analytics)
-        ip_hash = hashlib.sha256(ip.encode()).hexdigest()[:16]
-        now = datetime.utcnow()
+    def serialized_limit_review(self) -> Optional[Dict[str, Any]]:
+        review = self.limit_review
+        if review is None:
+            return None
+        return {
+            "actual_domains": review.get("actual_domains"),
+            "max_domains": review.get("max_domains"),
+            "method": review.get("method"),
+            "detected_at": utc_iso(review.get("detected_at")),
+            "notified_at": utc_iso(review.get("notified_at")),
+            "status": review.get("status"),
+            "resolved_at": utc_iso(review.get("resolved_at")),
+            "resolved_by": review.get("resolved_by"),
+            "resolved_reason": review.get("resolved_reason"),
+        }
 
-        # Check if this IP hash already exists
-        existing = mongo.db[self.COLLECTION].find_one(
-            {"_id": self._id, "ip_log.ip_hash": ip_hash}, {"ip_log.$": 1}
+    @classmethod
+    def _users(cls, users: Optional[Collection[Any]]) -> Collection[Any]:
+        return users if users is not None else mongo.db[cls.COLLECTION]
+
+    @classmethod
+    def open_limit_review(
+        cls,
+        user_id: ObjectId,
+        actual_domains: int,
+        max_domains: int,
+        method: str,
+        now: datetime,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        opened = cls._users(users).update_one(
+            {"_id": user_id, "limit_review.status": {"$ne": cls.LIMIT_REVIEW_OPEN}},
+            {
+                "$set": {
+                    "limit_review": {
+                        "actual_domains": actual_domains,
+                        "max_domains": max_domains,
+                        "method": method,
+                        "detected_at": now,
+                        "notified_at": None,
+                        "status": cls.LIMIT_REVIEW_OPEN,
+                        "resolved_at": None,
+                        "resolved_by": None,
+                        "resolved_reason": None,
+                    }
+                }
+            },
         )
+        return opened.matched_count == 1
 
-        if existing:
-            # Update existing entry
-            mongo.db[self.COLLECTION].update_one(
-                {"_id": self._id, "ip_log.ip_hash": ip_hash},
-                {
-                    "$set": {"ip_log.$.last_seen": now},
-                    "$inc": {"ip_log.$.access_count": 1},
-                },
-            )
-        else:
-            # Add new IP entry
-            mongo.db[self.COLLECTION].update_one(
-                {"_id": self._id},
-                {
-                    "$push": {
-                        "ip_log": {
-                            "ip_hash": ip_hash,
-                            "first_seen": now,
-                            "last_seen": now,
-                            "access_count": 1,
-                        }
+    @classmethod
+    def refresh_limit_review(
+        cls,
+        user_id: ObjectId,
+        changes: Dict[str, Any],
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        refreshed = cls._users(users).update_one(
+            {"_id": user_id, "limit_review.status": cls.LIMIT_REVIEW_OPEN},
+            {
+                "$set": {
+                    f"limit_review.{name}": value for name, value in changes.items()
+                }
+            },
+        )
+        return refreshed.matched_count == 1
+
+    @classmethod
+    def resolve_limit_review(
+        cls,
+        user_id: ObjectId,
+        resolved_by: str,
+        reason: str,
+        now: datetime,
+        covered_by_limit: Optional[int] = None,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        still_open: Dict[str, Any] = {
+            "_id": user_id,
+            "limit_review.status": cls.LIMIT_REVIEW_OPEN,
+        }
+        if covered_by_limit is not None:
+            still_open["limit_review.actual_domains"] = {"$lte": covered_by_limit}
+        resolved = cls._users(users).update_one(
+            still_open,
+            {
+                "$set": {
+                    "limit_review.status": cls.LIMIT_REVIEW_RESOLVED,
+                    "limit_review.resolved_at": now,
+                    "limit_review.resolved_by": resolved_by,
+                    "limit_review.resolved_reason": reason,
+                }
+            },
+        )
+        return resolved.matched_count == 1
+
+    @classmethod
+    def notify_limit_review_once(
+        cls,
+        user_id: ObjectId,
+        notification: Dict[str, Any],
+        now: datetime,
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        notified = cls._users(users).update_one(
+            {
+                "_id": user_id,
+                "limit_review.status": cls.LIMIT_REVIEW_OPEN,
+                "limit_review.notified_at": None,
+            },
+            {
+                "$set": {"limit_review.notified_at": now, "updated_at": now},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": cls.MAX_NOTIFICATIONS,
                     }
                 },
-            )
+            },
+        )
+        return notified.matched_count == 1
+
+    @classmethod
+    def notify_unless_unread(
+        cls,
+        user_id: ObjectId,
+        notification: Dict[str, Any],
+        users: Optional[Collection[Any]] = None,
+    ) -> bool:
+        same_type_unread = {
+            "$elemMatch": {"type": notification["type"], "read": {"$ne": True}}
+        }
+        notified = cls._users(users).update_one(
+            {"_id": user_id, "notifications": {"$not": same_type_unread}},
+            {
+                "$set": {"updated_at": notification["created_at"]},
+                "$push": {
+                    "notifications": {
+                        "$each": [notification],
+                        "$position": 0,
+                        "$slice": cls.MAX_NOTIFICATIONS,
+                    }
+                },
+            },
+        )
+        return notified.matched_count == 1
+
+    def log_ip_access(self, ip: str) -> None:
+        from app.services.download_recorder import access_log_hash
+
+        ip_hash = access_log_hash(ip)
+        now = datetime.utcnow()
+        users = mongo.db[self.COLLECTION]
+        seen_again = {
+            "$set": {"ip_log.$.last_seen": now},
+            "$inc": {"ip_log.$.access_count": 1},
+        }
+        known_address = {"_id": self._id, "ip_log.ip_hash": ip_hash}
+        if users.update_one(known_address, seen_again).matched_count:
+            return
+        added = users.update_one(
+            {"_id": self._id, "ip_log.ip_hash": {"$ne": ip_hash}},
+            {
+                "$push": {
+                    "ip_log": {
+                        "$each": [
+                            {
+                                "ip_hash": ip_hash,
+                                "first_seen": now,
+                                "last_seen": now,
+                                "access_count": 1,
+                            }
+                        ],
+                        "$slice": -self.MAX_IP_LOG_ENTRIES,
+                    }
+                }
+            },
+        )
+        if not added.matched_count:
+            users.update_one(known_address, seen_again)
+
+    def serialized_ip_log(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "ip_hash": entry.get("ip_hash"),
+                "first_seen": utc_iso(entry.get("first_seen")),
+                "last_seen": utc_iso(entry.get("last_seen")),
+                "access_count": entry.get("access_count", 0),
+            }
+            for entry in self.ip_log
+            if isinstance(entry, dict)
+        ]
 
     def delete_with_data(self) -> None:
-        """Delete user and their data."""
         import shutil
 
-        # Delete files
+        from app.models.analytics import Analytics
+        from app.models.featured_list import FeaturedList
+        from app.models.job import Job
+        from app.models.limit_request import LimitRequest
+        from app.socketio import disconnect_user
+
+        users = mongo.db[self.COLLECTION]
+        users.update_one(
+            {"_id": self._id},
+            {
+                "$set": {"is_enabled": False, "updated_at": datetime.utcnow()},
+                "$inc": {"auth_version": 1},
+            },
+        )
+        disconnect_user(self.id)
+
+        owned_by_id = {"user_id": self._id}
+        owned_by_name = {"list_type": Analytics.TYPE_USER, "username": self.username}
+        mongo.db[Job.COLLECTION].delete_many(owned_by_id)
+        mongo.db[LimitRequest.COLLECTION].delete_many(owned_by_id)
+        mongo.db["validation_tokens"].delete_many(owned_by_id)
+        mongo.db[FeaturedList.COLLECTION].delete_many({"username": self.username})
+        mongo.db[Analytics.COLLECTION].delete_many(owned_by_name)
+        mongo.db[Analytics.VISITORS_COLLECTION].delete_many(owned_by_name)
+        users.delete_one({"_id": self._id})
+
         user_dir = self.get_user_dir()
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir)
-
-        # Delete from database
-        mongo.db[self.COLLECTION].delete_one({"_id": self._id})
-        from app.socketio import disconnect_user
-
-        disconnect_user(self.id)
 
     # Serialization
     def _serialize_notifications(
@@ -515,9 +700,7 @@ class User:
                 "message": n.get("message"),
                 "data": n.get("data", {}),
                 "read": n.get("read", False),
-                "created_at": (
-                    n["created_at"].isoformat() if n.get("created_at") else None
-                ),
+                "created_at": utc_iso(n.get("created_at")),
             }
             for n in notifications
         ]
@@ -537,21 +720,14 @@ class User:
             "limits": self.limits,
             "stats": {
                 **self.stats,
-                "last_build_at": (
-                    self.stats["last_build_at"].isoformat()
-                    if self.stats.get("last_build_at")
-                    else None
-                ),
-                "week_reset_at": (
-                    self.stats["week_reset_at"].isoformat()
-                    if self.stats.get("week_reset_at")
-                    else None
-                ),
+                "last_build_at": utc_iso(self.stats.get("last_build_at")),
+                "week_reset_at": utc_iso(self.stats.get("week_reset_at")),
             },
             "lists": self.lists,
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
-            "created_at": self.created_at.isoformat(),
+            "limit_review": self.serialized_limit_review(),
+            "created_at": utc_iso(self.created_at),
         }
 
     def to_admin_dict(self) -> Dict[str, Any]:
@@ -559,24 +735,11 @@ class User:
         base = self.to_dict()
         base["github_id"] = self.github_id
         base["is_banned"] = self.is_banned
-        base["banned_until"] = (
-            self.banned_until.isoformat() if self.banned_until else None
-        )
+        base["banned_until"] = utc_iso(self.banned_until)
         base["ban_reason"] = self.ban_reason
-        # Serialize IP log with proper datetime formatting
-        base["ip_log"] = [
-            {
-                "ip_hash": entry.get("ip_hash"),
-                "first_seen": (
-                    entry["first_seen"].isoformat() if entry.get("first_seen") else None
-                ),
-                "last_seen": (
-                    entry["last_seen"].isoformat() if entry.get("last_seen") else None
-                ),
-                "access_count": entry.get("access_count", 0),
-            }
-            for entry in self.ip_log
-        ]
+        base["ip_log"] = self.serialized_ip_log()
+        base["default_limits"] = self.default_limits()
+        base["limit_maximums"] = self.limit_maximums()
         return base
 
     # Class methods
@@ -681,19 +844,6 @@ class User:
         raise ValueError("Could not reserve a public list identifier; retry sign-in")
 
     @classmethod
-    def get_all(cls, page: int = 1, per_page: int = 20) -> List["User"]:
-        """Get all users with pagination."""
-        skip = (page - 1) * per_page
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find()
-            .sort("created_at", -1)
-            .skip(skip)
-            .limit(per_page)
-        )
-        return [cls(data) for data in cursor]
-
-    @classmethod
     def get_all_filtered(
         cls,
         page: int = 1,
@@ -708,86 +858,72 @@ class User:
         """Get users with filtering, sorting, and pagination."""
         conditions: List[Dict[str, Any]] = []
 
-        # Exclude current user
         if exclude_user_id:
             conditions.append({"_id": {"$ne": exclude_user_id}})
 
-        # Search filter (username or email, case-insensitive)
         if search:
+            pattern = re.escape(search)
             conditions.append(
                 {
                     "$or": [
-                        {"username": {"$regex": search, "$options": "i"}},
-                        {"email": {"$regex": search, "$options": "i"}},
+                        {"username": {"$regex": pattern, "$options": "i"}},
+                        {"email": {"$regex": pattern, "$options": "i"}},
                     ]
                 }
             )
 
-        # Build role/status filter
+        configured_root = current_app.config.get("ROOT_GITHUB_ID")
+        root_id = (
+            configured_root
+            if type(configured_root) is int and configured_root > 0
+            else None
+        )
+        is_privileged: Dict[str, Any] = {
+            "$or": [{"is_admin": True}, {"github_id": root_id}]
+        }
+        is_regular: Dict[str, Any] = {
+            "is_admin": {"$ne": True},
+            "github_id": {"$ne": root_id},
+        }
+        if show_enabled and show_disabled:
+            status: Dict[str, Any] = {}
+        elif show_enabled:
+            status = {"is_enabled": {"$ne": False}}
+        elif show_disabled:
+            status = {"is_enabled": False}
+        else:
+            return [], 0
+
         role_conditions: List[Dict[str, Any]] = []
-
-        # Admins (including root users)
         if show_admins:
-            if show_enabled and show_disabled:
-                role_conditions.append({"$or": [{"is_admin": True}, {"is_root": True}]})
-            elif show_enabled:
-                role_conditions.append(
-                    {
-                        "$and": [
-                            {"$or": [{"is_admin": True}, {"is_root": True}]},
-                            {"is_enabled": True},
-                        ]
-                    }
-                )
-            elif show_disabled:
-                role_conditions.append(
-                    {
-                        "$and": [
-                            {"$or": [{"is_admin": True}, {"is_root": True}]},
-                            {"is_enabled": False},
-                        ]
-                    }
-                )
-
-        # Regular users (not admin, not root)
+            role_conditions.append({"$and": [is_privileged, status]})
         if show_regular:
-            regular_base: Dict[str, Any] = {
-                "is_admin": {"$ne": True},
-                "is_root": {"$ne": True},
-            }
-            if show_enabled and show_disabled:
-                role_conditions.append(regular_base)
-            elif show_enabled:
-                role_conditions.append({**regular_base, "is_enabled": True})
-            elif show_disabled:
-                role_conditions.append({**regular_base, "is_enabled": False})
-
-        # If no role conditions, return empty (all filters off)
+            role_conditions.append({**is_regular, **status})
         if not role_conditions:
             return [], 0
 
         conditions.append({"$or": role_conditions})
+        query = {"$and": conditions}
 
-        # Build final query
-        query = {"$and": conditions} if conditions else {}
-
-        # Get total count
         total = mongo.db[cls.COLLECTION].count_documents(query)
 
-        # Sort: is_root DESC, is_admin DESC, username ASC
-        sort_order = [
-            ("is_root", -1),
-            ("is_admin", -1),
-            ("username", 1),
-        ]
-
-        skip = (page - 1) * per_page
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find(query)
-            .sort(sort_order)
-            .skip(skip)
-            .limit(per_page)
+        cursor = mongo.db[cls.COLLECTION].aggregate(
+            [
+                {"$match": query},
+                {"$project": {"config": 0}},
+                {
+                    "$addFields": {
+                        "_root_rank": {
+                            "$cond": [{"$eq": ["$github_id", root_id]}, 1, 0]
+                        },
+                        "_admin_rank": {"$cond": [{"$eq": ["$is_admin", True]}, 1, 0]},
+                    }
+                },
+                {"$sort": {"_root_rank": -1, "_admin_rank": -1, "username": 1}},
+                {"$skip": (page - 1) * per_page},
+                {"$limit": per_page},
+                {"$project": {"_root_rank": 0, "_admin_rank": 0}},
+            ]
         )
 
         return [cls(data) for data in cursor], total

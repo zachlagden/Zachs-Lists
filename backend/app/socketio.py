@@ -5,13 +5,17 @@ Socket.IO initialization and event handlers.
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
 
 from itsdangerous import BadSignature
+from pymongo.errors import PyMongoError
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask import Flask, current_app, request, session
 from flask.sessions import SecureCookieSessionInterface
 
 from app.models.user import User
+from app.utils.time import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,19 @@ class SocketAccount:
     expires_at: float
 
 
+@dataclass
+class AccountAccess:
+    allowed: bool
+    is_admin: bool
+    auth_version: int
+    checked_at: float
+
+
+ACCESS_CACHE_SECONDS = 10.0
+ADMIN_ROOMS = ("jobs:all", "stats:admin")
+
 _connections: dict[str, SocketAccount] = {}
+_account_access: dict[str, AccountAccess] = {}
 _socket_app: Flask | None = None
 
 # Create Socket.IO instance
@@ -45,6 +61,7 @@ def init_socketio(app):
     global _socket_app
     _socket_app = app
     _connections.clear()
+    _account_access.clear()
     socketio.init_app(app, cors_allowed_origins=[app.config["FRONTEND_URL"]])
     register_handlers()
     if not app.config.get("TESTING"):
@@ -99,6 +116,32 @@ def _session_expiry() -> float:
     )
 
 
+def _access_for(user_id: str) -> AccountAccess:
+    now = time.monotonic()
+    cached = _account_access.get(user_id)
+    if cached is not None and now - cached.checked_at < ACCESS_CACHE_SECONDS:
+        return cached
+    user = User.get_by_id(user_id)
+    access = AccountAccess(
+        allowed=bool(user and user.is_enabled and not user.is_banned),
+        is_admin=bool(user and user.is_admin),
+        auth_version=user.auth_version if user else -1,
+        checked_at=now,
+    )
+    _account_access[user_id] = access
+    return access
+
+
+def _connection_allowed(sid: str, room: str | None) -> bool:
+    account = _connections.get(sid)
+    if account is None or account.expires_at <= time.time():
+        return False
+    access = _access_for(account.user_id)
+    if not access.allowed or access.auth_version != account.auth_version:
+        return False
+    return access.is_admin or room not in ADMIN_ROOMS
+
+
 def _prune_connections(room: str | None = None) -> None:
     participants = (
         list(socketio.server.manager.get_participants("/", room))
@@ -106,20 +149,12 @@ def _prune_connections(room: str | None = None) -> None:
         else [(sid, None) for sid in list(_connections)]
     )
     for sid, _ in participants:
-        account = _connections.get(sid)
-        user = User.get_by_id(account.user_id) if account else None
-        allowed = bool(
-            account
-            and user
-            and user.is_enabled
-            and not user.is_banned
-            and account.auth_version == user.auth_version
-            and account.expires_at > time.time()
-        )
-        if allowed and room in ("jobs:all", "stats:admin"):
-            allowed = bool(user and user.is_admin)
-        if not allowed:
+        if not _connection_allowed(sid, room):
             socketio.server.disconnect(sid, namespace="/")
+    connected_users = {account.user_id for account in _connections.values()}
+    for user_id in list(_account_access):
+        if user_id not in connected_users:
+            del _account_access[user_id]
 
 
 def _monitor_connections(app: Flask) -> None:
@@ -140,8 +175,27 @@ def _emit(event: str, data: dict, room: str) -> None:
 def disconnect_user(user_id: str) -> None:
     """Disconnect every socket for an account whose access or role changed."""
     room = f"account:{user_id}"
+    _account_access.pop(user_id, None)
     for sid, _ in list(socketio.server.manager.get_participants("/", room)):
         socketio.server.disconnect(sid, namespace="/")
+
+
+def _jobs_subscription(room: str) -> dict[str, Any]:
+    from app.services.job_feed import active_job_payloads
+
+    owner = room.removeprefix("jobs:")
+    acknowledgement: dict[str, Any] = {
+        "success": True,
+        "server_time": utc_iso(datetime.now(timezone.utc)),
+    }
+    try:
+        acknowledgement["jobs"] = active_job_payloads(
+            None if room == "jobs:all" else owner
+        )
+    except PyMongoError:
+        logger.exception("Could not load active jobs for %s", room)
+        acknowledgement["jobs"] = None
+    return acknowledgement
 
 
 def register_handlers():
@@ -169,7 +223,7 @@ def register_handlers():
         if room is None:
             return {"error": "Access denied"}
         join_room(room)
-        return {"success": True}
+        return _jobs_subscription(room)
 
     @socketio.on("unsubscribe:jobs")
     def handle_unsubscribe_jobs(data):
@@ -215,204 +269,30 @@ def register_handlers():
 # Event emitters
 
 
-def emit_job_created(job_data: dict, user_id: str = None):
-    """
-    Emit job:created event.
-
-    Args:
-        job_data: Job dictionary from job.to_dict()
-        user_id: User ID for user-specific room
-    """
-    # Emit to all jobs room (for admin)
-    _emit("job:created", job_data, "jobs:all")
-
-    # Emit to user-specific room
+def _emit_to_job_rooms(
+    event: str, job_data: dict[str, Any], user_id: str | None
+) -> None:
+    _emit(event, job_data, "jobs:all")
     if user_id:
-        _emit("job:created", job_data, f"jobs:{user_id}")
+        _emit(event, job_data, f"jobs:{user_id}")
 
 
-def emit_job_updated(job_data: dict, user_id: str = None):
-    """
-    Emit job:updated event (for status changes and progress).
-
-    Args:
-        job_data: Job dictionary from job.to_dict()
-        user_id: User ID for user-specific room
-    """
-    # Emit to all jobs room (for admin)
-    _emit("job:updated", job_data, "jobs:all")
-
-    # Emit to user-specific room
-    if user_id:
-        _emit("job:updated", job_data, f"jobs:{user_id}")
+def emit_job_created(job_data: dict[str, Any], user_id: str | None = None) -> None:
+    _emit_to_job_rooms("job:created", job_data, user_id)
 
 
-def emit_job_completed(job_data: dict, user_id: str = None):
-    """
-    Emit job:completed event.
+def emit_job_progress(job_data: dict[str, Any], user_id: str | None = None) -> None:
+    _emit_to_job_rooms("job:progress", job_data, user_id)
 
-    Args:
-        job_data: Job dictionary from job.to_dict()
-        user_id: User ID for user-specific room
-    """
-    # Emit to all jobs room (for admin)
-    _emit("job:completed", job_data, "jobs:all")
 
-    # Emit to user-specific room
-    if user_id:
-        _emit("job:completed", job_data, f"jobs:{user_id}")
-
-    # Also emit stats update for admin dashboard
+def emit_job_completed(job_data: dict[str, Any], user_id: str | None = None) -> None:
+    _emit_to_job_rooms("job:completed", job_data, user_id)
     emit_stats_updated()
-
-
-def emit_job_progress(job):
-    """
-    Emit job:progress event with full job state.
-
-    This is the consolidated event that replaces granular updates.
-    Called by JobStatusPoller every 500ms when job state changes.
-
-    For queued jobs, includes queue_info with position and worker stats.
-
-    Args:
-        job: Job instance
-    """
-    from app.models.job import Job
-
-    job_data = job.to_dict()
-    user_id = str(job.user_id) if job.user_id else None
-
-    # Add queue info for queued jobs
-    if job.status == Job.STATUS_QUEUED:
-        queue_stats = Job.get_queue_stats()
-        job_data["queue_info"] = {
-            "position": Job.get_queue_position(job.job_id),
-            "total_queued": queue_stats["queue_length"],
-            "active_workers": queue_stats["active_workers"],
-            "jobs_processing": queue_stats["processing_count"],
-        }
-
-    # Emit to all jobs room (for admin)
-    _emit("job:progress", job_data, "jobs:all")
-
-    # Emit to user-specific room
-    if user_id:
-        _emit("job:progress", job_data, f"jobs:{user_id}")
 
 
 def emit_stats_updated():
     """Emit stats:updated event to admin stats room."""
     _emit("stats:updated", {}, "stats:admin")
-
-
-# Enhanced progress event emitters
-
-
-def emit_stage_changed(job_id: str, stage: str, progress: dict, user_id: str = None):
-    """
-    Emit job:stage_changed event when job transitions between stages.
-
-    Args:
-        job_id: Job ID
-        stage: New stage (queue, downloading, whitelist, generation, completed)
-        progress: Enhanced progress dictionary
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "stage": stage, "progress": progress}
-    _emit("job:stage_changed", data, "jobs:all")
-    if user_id:
-        _emit("job:stage_changed", data, f"jobs:{user_id}")
-
-
-def emit_source_update(job_id: str, source_progress: dict, user_id: str = None):
-    """
-    Emit job:source_update event for per-source progress updates.
-
-    Args:
-        job_id: Job ID
-        source_progress: Source progress dictionary from SourceProgress.to_dict()
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "source": source_progress}
-    _emit("job:source_update", data, "jobs:all")
-    if user_id:
-        _emit("job:source_update", data, f"jobs:{user_id}")
-
-
-def emit_download_progress(
-    job_id: str,
-    source_id: str,
-    bytes_downloaded: int,
-    bytes_total: int = None,
-    user_id: str = None,
-):
-    """
-    Emit job:download_progress event for byte-level download progress.
-
-    Args:
-        job_id: Job ID
-        source_id: Source URL hash
-        bytes_downloaded: Bytes downloaded so far
-        bytes_total: Total bytes (None if unknown)
-        user_id: User ID for user-specific room
-    """
-    data = {
-        "job_id": job_id,
-        "source_id": source_id,
-        "bytes_downloaded": bytes_downloaded,
-        "bytes_total": bytes_total,
-    }
-    _emit("job:download_progress", data, "jobs:all")
-    if user_id:
-        _emit("job:download_progress", data, f"jobs:{user_id}")
-
-
-def emit_whitelist_update(job_id: str, whitelist_progress: dict, user_id: str = None):
-    """
-    Emit job:whitelist_update event for whitelist filtering progress.
-
-    Args:
-        job_id: Job ID
-        whitelist_progress: Whitelist progress dictionary
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "whitelist": whitelist_progress}
-    _emit("job:whitelist_update", data, "jobs:all")
-    if user_id:
-        _emit("job:whitelist_update", data, f"jobs:{user_id}")
-
-
-def emit_format_update(job_id: str, format_progress: dict, user_id: str = None):
-    """
-    Emit job:format_update event for output format generation progress.
-
-    Args:
-        job_id: Job ID
-        format_progress: Format progress dictionary from FormatProgress.to_dict()
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "format": format_progress}
-    _emit("job:format_update", data, "jobs:all")
-    if user_id:
-        _emit("job:format_update", data, f"jobs:{user_id}")
-
-
-def emit_job_skipped(job_id: str, reason: str, user_id: str = None):
-    """
-    Emit job:skipped event when a job is skipped.
-
-    Args:
-        job_id: Job ID
-        reason: Reason the job was skipped
-        user_id: User ID for user-specific room
-    """
-    data = {"job_id": job_id, "reason": reason}
-    _emit("job:skipped", data, "jobs:all")
-    if user_id:
-        _emit("job:skipped", data, f"jobs:{user_id}")
-    # Also emit stats update for admin dashboard
-    emit_stats_updated()
 
 
 # Config validation events

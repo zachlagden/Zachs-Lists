@@ -2,13 +2,18 @@
 Job model for MongoDB.
 """
 
-import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, cast
 from bson import ObjectId
-from pymongo import ReturnDocument
 
 from app.extensions import mongo
+from app.utils.job_document import (
+    failure_result,
+    initial_progress,
+    normalised_result,
+    revision_bump,
+)
+from app.utils.time import utc_iso
 
 
 class Job:
@@ -29,31 +34,55 @@ class Job:
     TYPE_ADMIN = "admin"
 
     # Priority levels (lower number = higher priority)
-    PRIORITY_HIGH = 1  # Default/admin jobs
-    PRIORITY_NORMAL = 2  # User jobs
+    PRIORITY_HIGH = 1
+    PRIORITY_NORMAL = 2
+    PRIORITY_LOW = 3
+
+    DEFAULT_TARGET_ID = "__default__"
+    ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_PROCESSING)
+    COOLDOWN_STATUSES = (STATUS_COMPLETED, STATUS_SKIPPED)
+    ERROR_WORKER_ABANDONED = "worker_abandoned"
+    ERROR_SUPERSEDED = "superseded"
 
     # Stale resets a job may accumulate before it is abandoned as unbuildable
     MAX_STALE_ATTEMPTS = 3
+
+    STALE_AFTER_MINUTES = 2
 
     def __init__(self, data: Dict[str, Any]):
         self._data = data
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         return str(self._id) if self._id else None
 
     @property
     def job_id(self) -> str:
-        return self._data.get("job_id")
+        return cast(str, self._data.get("job_id"))
 
     @property
-    def user_id(self) -> ObjectId:
+    def user_id(self) -> Optional[ObjectId]:
         return self._data.get("user_id")
 
     @property
-    def username(self) -> str:
+    def username(self) -> Optional[str]:
         return self._data.get("username")
+
+    @staticmethod
+    def target_id_for(document: Dict[str, Any]) -> Optional[str]:
+        stored = document.get("target_id")
+        if isinstance(stored, str) and stored:
+            return stored
+        if document.get("user_id"):
+            return str(document["user_id"])
+        if document.get("username") == Job.DEFAULT_TARGET_ID:
+            return Job.DEFAULT_TARGET_ID
+        return None
+
+    @property
+    def target_id(self) -> Optional[str]:
+        return self.target_id_for(self._data)
 
     @property
     def job_type(self) -> str:
@@ -74,6 +103,10 @@ class Job:
     @property
     def started_at(self) -> Optional[datetime]:
         return self._data.get("started_at")
+
+    @property
+    def attempt_started_at(self) -> Optional[datetime]:
+        return self._data.get("attempt_started_at")
 
     @property
     def completed_at(self) -> Optional[datetime]:
@@ -99,110 +132,20 @@ class Job:
     def heartbeat_at(self) -> Optional[datetime]:
         return self._data.get("heartbeat_at")
 
-    # Status methods
-    def start(self) -> None:
-        """Mark job as processing."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_PROCESSING,
-                    "started_at": datetime.utcnow(),
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_PROCESSING
-        self._data["started_at"] = datetime.utcnow()
-        self._emit_update()
+    @property
+    def rev(self) -> int:
+        return int(self._data.get("rev") or 0)
 
-    def update_progress(self, progress: Dict[str, Any]) -> None:
-        """Update job progress in MongoDB. WebSocket updates are handled by JobStatusPoller."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id}, {"$set": {"progress": progress}}
-        )
-        self._data["progress"] = progress
-        # Note: We no longer emit here - JobStatusPoller polls and emits consolidated updates
+    @property
+    def attempts(self) -> int:
+        attempt = self._data.get("attempt")
+        if isinstance(attempt, int) and not isinstance(attempt, bool):
+            return attempt
+        return int(self._data.get("stale_attempts") or 0)
 
-    def complete(self, result: Dict[str, Any]) -> None:
-        """Mark job as completed."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_COMPLETED,
-                    "completed_at": datetime.utcnow(),
-                    "result": result,
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_COMPLETED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = result
-        self._emit_completed()
-
-    def fail(self, errors: List[str]) -> None:
-        """Mark job as failed."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_FAILED,
-                    "completed_at": datetime.utcnow(),
-                    "result": {"errors": errors},
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_FAILED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = {"errors": errors}
-        self._emit_completed()
-
-    def skip(self, reason: str) -> None:
-        """Mark job as skipped (e.g., when another job is already running)."""
-        mongo.db[self.COLLECTION].update_one(
-            {"_id": self._id},
-            {
-                "$set": {
-                    "status": self.STATUS_SKIPPED,
-                    "completed_at": datetime.utcnow(),
-                    "result": {"skip_reason": reason},
-                }
-            },
-        )
-        self._data["status"] = self.STATUS_SKIPPED
-        self._data["completed_at"] = datetime.utcnow()
-        self._data["result"] = {"skip_reason": reason}
-        self._emit_skipped(reason)
-
-    def _emit_skipped(self, reason: str) -> None:
-        """Emit job skipped via Socket.IO."""
-        try:
-            from app.socketio import emit_job_skipped
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_skipped(self.job_id, reason, user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
-
-    def _emit_update(self) -> None:
-        """Emit job update via Socket.IO."""
-        try:
-            from app.socketio import emit_job_updated
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_updated(self.to_dict(), user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
-
-    def _emit_completed(self) -> None:
-        """Emit job completed via Socket.IO."""
-        try:
-            from app.socketio import emit_job_completed
-
-            user_id = str(self.user_id) if self.user_id else None
-            emit_job_completed(self.to_dict(), user_id)
-        except Exception:
-            pass  # Silently fail if Socket.IO not available
+    @property
+    def updated_at(self) -> Optional[datetime]:
+        return self._data.get("updated_at")
 
     # Serialization
     def to_dict(self) -> Dict[str, Any]:
@@ -212,116 +155,25 @@ class Job:
             "job_id": self.job_id,
             "user_id": str(self.user_id) if self.user_id else None,
             "username": self.username,
+            "target_id": self.target_id,
             "type": self.job_type,
             "status": self.status,
             "priority": self.priority,
             "progress": self.progress,
-            "result": self.result,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (
-                self.completed_at.isoformat() if self.completed_at else None
-            ),
-            "created_at": self.created_at.isoformat(),
+            "result": normalised_result(self.result),
+            "started_at": utc_iso(self.started_at),
+            "attempt_started_at": utc_iso(self.attempt_started_at),
+            "completed_at": utc_iso(self.completed_at),
+            "created_at": utc_iso(self.created_at),
             "worker_id": self.worker_id,
-        }
-
-    def get_progress_snapshot(self) -> Dict[str, Any]:
-        """Get a snapshot of job state for comparison in poller."""
-        return {
-            "status": self.status,
-            "progress": self.progress,
-            "result": self.result,
+            "read": bool(self._data.get("read", False)),
+            "force_rebuild": bool(self._data.get("force_rebuild", False)),
+            "attempts": self.attempts,
+            "rev": self.rev,
+            "updated_at": utc_iso(self.updated_at),
         }
 
     # Class methods
-    @classmethod
-    def create(
-        cls,
-        user_id: ObjectId,
-        username: str,
-        job_type: str = TYPE_MANUAL,
-        priority: int = PRIORITY_NORMAL,
-        force_rebuild: bool = False,
-    ) -> "Job":
-        """Create a new job."""
-        job_data = {
-            "job_id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "username": username,
-            "type": job_type,
-            "status": cls.STATUS_QUEUED,
-            "priority": priority,
-            "force_rebuild": force_rebuild,
-            "progress": {
-                "current_step": "queued",
-                "stage": "queue",
-                "total_sources": 0,
-                "processed_sources": 0,
-                "current_source": None,
-                "sources": [],
-                "whitelist": None,
-                "generation": None,
-                "queue_position": None,
-                "queue_delay_remaining_ms": None,
-                "stage_started_at": None,
-            },
-            "result": None,
-            "started_at": None,
-            "completed_at": None,
-            "created_at": datetime.utcnow(),
-            "worker_id": None,
-            "claimed_at": None,
-            "heartbeat_at": None,
-        }
-
-        result = mongo.db[cls.COLLECTION].insert_one(job_data)
-        job_data["_id"] = result.inserted_id
-
-        return cls(job_data)
-
-    @classmethod
-    def create_default(
-        cls,
-        job_type: str = TYPE_SCHEDULED,
-        priority: int = PRIORITY_HIGH,
-        force_rebuild: bool = False,
-    ) -> "Job":
-        """Create a job for default lists (no user). High priority by default."""
-        job_data = {
-            "job_id": str(uuid.uuid4()),
-            "user_id": None,
-            "username": "__default__",
-            "type": job_type,
-            "status": cls.STATUS_QUEUED,
-            "priority": priority,
-            "force_rebuild": force_rebuild,
-            "progress": {
-                "current_step": "queued",
-                "stage": "queue",
-                "total_sources": 0,
-                "processed_sources": 0,
-                "current_source": None,
-                "sources": [],
-                "whitelist": None,
-                "generation": None,
-                "queue_position": None,
-                "queue_delay_remaining_ms": None,
-                "stage_started_at": None,
-            },
-            "result": None,
-            "started_at": None,
-            "completed_at": None,
-            "created_at": datetime.utcnow(),
-            "worker_id": None,
-            "claimed_at": None,
-            "heartbeat_at": None,
-        }
-
-        result = mongo.db[cls.COLLECTION].insert_one(job_data)
-        job_data["_id"] = result.inserted_id
-
-        return cls(job_data)
-
     @classmethod
     def get_by_id(cls, job_id: str) -> Optional["Job"]:
         """Get job by ID (either _id or job_id)."""
@@ -339,10 +191,10 @@ class Job:
 
     @classmethod
     def get_by_user(
-        cls, user_id: ObjectId, limit: int = 20, status: str = None
+        cls, user_id: ObjectId, limit: int = 20, status: Optional[str] = None
     ) -> List["Job"]:
         """Get jobs for a user."""
-        query = {"user_id": user_id}
+        query: Dict[str, Any] = {"user_id": user_id}
         if status:
             query["status"] = status
 
@@ -355,16 +207,6 @@ class Job:
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
         cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
-        return [cls(data) for data in cursor]
-
-    @classmethod
-    def get_queued(cls) -> List["Job"]:
-        """Get queued jobs."""
-        cursor = (
-            mongo.db[cls.COLLECTION]
-            .find({"status": cls.STATUS_QUEUED})
-            .sort("created_at", 1)
-        )
         return [cls(data) for data in cursor]
 
     @classmethod
@@ -398,102 +240,21 @@ class Job:
     def mark_failures_read(cls, user_id: ObjectId) -> None:
         """Mark all user's failed jobs as read."""
         mongo.db[cls.COLLECTION].update_many(
-            {"user_id": user_id, "status": cls.STATUS_FAILED},
-            {"$set": {"read": True}},
+            {
+                "user_id": user_id,
+                "status": cls.STATUS_FAILED,
+                "read": {"$ne": True},
+            },
+            {"$set": {"read": True}, **revision_bump()},
         )
 
     # Worker-related methods for distributed processing
 
     @classmethod
-    def claim_next(cls, worker_id: str) -> Optional["Job"]:
-        """
-        Atomically claim the highest priority unclaimed job.
-        Uses MongoDB's findOneAndUpdate for distributed locking.
-
-        Args:
-            worker_id: Unique identifier of the worker claiming the job
-
-        Returns:
-            The claimed Job if one was available, None otherwise
-        """
-        now = datetime.utcnow()
-        doc = mongo.db[cls.COLLECTION].find_one_and_update(
-            {
-                "status": cls.STATUS_QUEUED,
-                "worker_id": None,
-            },
-            {
-                "$set": {
-                    "status": cls.STATUS_PROCESSING,
-                    "worker_id": worker_id,
-                    "claimed_at": now,
-                    "heartbeat_at": now,
-                    "started_at": now,
-                }
-            },
-            sort=[
-                ("priority", 1),
-                ("created_at", 1),
-            ],  # priority ASC (1=high), then FIFO
-            return_document=ReturnDocument.AFTER,
-        )
-        return cls(doc) if doc else None
-
-    @classmethod
-    def heartbeat(cls, job_id: str, worker_id: str) -> bool:
-        """
-        Update heartbeat timestamp for a job being processed.
-
-        Args:
-            job_id: The job_id of the job
-            worker_id: The worker's unique identifier
-
-        Returns:
-            True if heartbeat was updated, False if job not found or not owned by worker
-        """
-        result = mongo.db[cls.COLLECTION].update_one(
-            {
-                "job_id": job_id,
-                "worker_id": worker_id,
-                "status": cls.STATUS_PROCESSING,
-            },
-            {"$set": {"heartbeat_at": datetime.utcnow()}},
-        )
-        return result.modified_count > 0
-
-    @classmethod
-    def release(cls, job_id: str, worker_id: str) -> bool:
-        """
-        Release a job back to the queue (e.g., on worker shutdown or error).
-
-        Args:
-            job_id: The job_id of the job
-            worker_id: The worker's unique identifier
-
-        Returns:
-            True if job was released, False if job not found or not owned by worker
-        """
-        result = mongo.db[cls.COLLECTION].update_one(
-            {
-                "job_id": job_id,
-                "worker_id": worker_id,
-                "status": cls.STATUS_PROCESSING,
-            },
-            {
-                "$set": {
-                    "status": cls.STATUS_QUEUED,
-                    "worker_id": None,
-                    "claimed_at": None,
-                    "heartbeat_at": None,
-                    "started_at": None,
-                }
-            },
-        )
-        return result.modified_count > 0
-
-    @classmethod
     def reset_stale(
-        cls, timeout_minutes: int = 10, max_attempts: int = MAX_STALE_ATTEMPTS
+        cls,
+        timeout_minutes: int = STALE_AFTER_MINUTES,
+        max_attempts: int = MAX_STALE_ATTEMPTS,
     ) -> Tuple[int, int]:
         """
         Reset jobs from dead workers back to queued status.
@@ -527,19 +288,13 @@ class Job:
                     "claimed_at": None,
                     "heartbeat_at": None,
                     "completed_at": datetime.utcnow(),
-                    "result": {
-                        "sources_processed": 0,
-                        "sources_failed": 0,
-                        "total_domains": 0,
-                        "unique_domains": 0,
-                        "whitelisted_removed": 0,
-                        "output_files": [],
-                        "errors": [
-                            f"Abandoned after {max_attempts} attempts that each "
-                            f"died before completing (worker crashed or ran out of memory)"
-                        ],
-                    },
-                }
+                    "result": failure_result(
+                        cls.ERROR_WORKER_ABANDONED,
+                        f"Abandoned after {max_attempts} attempts that each "
+                        f"died before completing (worker crashed or ran out of memory)",
+                    ),
+                },
+                **revision_bump(),
             },
         )
 
@@ -551,9 +306,10 @@ class Job:
                     "worker_id": None,
                     "claimed_at": None,
                     "heartbeat_at": None,
-                    "started_at": None,
+                    "progress": initial_progress(),
                 },
-                "$inc": {"stale_attempts": 1},
+                "$inc": {"stale_attempts": 1, "rev": 1},
+                "$currentDate": {"updated_at": True},
             },
         )
 
@@ -580,89 +336,14 @@ class Job:
         """Count jobs waiting in queue."""
         return mongo.db[cls.COLLECTION].count_documents({"status": cls.STATUS_QUEUED})
 
-    @classmethod
-    def get_queue_position(cls, job_id: str) -> int:
-        """
-        Get the position of a job in the queue (1-based).
-        Returns 0 if job is not queued.
-        """
-        job = cls.get_by_id(job_id)
-        if not job or job.status != cls.STATUS_QUEUED:
-            return 0
-
-        # Count jobs ahead in queue (higher priority or same priority but earlier)
-        count = mongo.db[cls.COLLECTION].count_documents(
-            {
-                "status": cls.STATUS_QUEUED,
-                "$or": [
-                    {
-                        "priority": {"$lt": job.priority}
-                    },  # Higher priority (lower number)
-                    {"priority": job.priority, "created_at": {"$lt": job.created_at}},
-                ],
-            }
-        )
-        return count + 1  # 1-based position
-
-    @classmethod
-    def get_active_worker_count(cls) -> int:
-        """Count the number of active workers (distinct worker_ids processing jobs)."""
-        pipeline = [
-            {"$match": {"status": cls.STATUS_PROCESSING, "worker_id": {"$ne": None}}},
-            {"$group": {"_id": "$worker_id"}},
-            {"$count": "count"},
-        ]
-        result = list(mongo.db[cls.COLLECTION].aggregate(pipeline))
-        return result[0]["count"] if result else 0
-
-    @classmethod
-    def get_queue_stats(cls) -> dict:
-        """
-        Get comprehensive queue statistics.
-        Returns dict with queue_length, active_workers, processing_count.
-        """
-        return {
-            "queue_length": cls.count_queued(),
-            "active_workers": cls.get_active_worker_count(),
-            "processing_count": cls.count_processing(),
-        }
-
     # Cooldown and scheduling methods
 
     @classmethod
-    def has_active_job_for_user(cls, user_id: ObjectId) -> bool:
-        """
-        Check if user has any active job (queued or processing).
-        Used to prevent duplicate builds.
-        """
-        return (
-            mongo.db[cls.COLLECTION].count_documents(
-                {
-                    "user_id": user_id,
-                    "status": {"$in": [cls.STATUS_QUEUED, cls.STATUS_PROCESSING]},
-                }
-            )
-            > 0
+    def get_active_for_target(cls, target_id: str) -> Optional["Job"]:
+        data = mongo.db[cls.COLLECTION].find_one(
+            {"target_id": target_id, "status": {"$in": list(cls.ACTIVE_STATUSES)}}
         )
-
-    @classmethod
-    def get_last_completed_for_user(
-        cls, user_id: ObjectId, job_type: str = None
-    ) -> Optional["Job"]:
-        """
-        Get the most recently completed job for a user.
-        Optionally filter by job type (manual, scheduled, admin).
-        """
-        query = {
-            "user_id": user_id,
-            "status": cls.STATUS_COMPLETED,
-        }
-        if job_type:
-            query["type"] = job_type
-
-        doc = mongo.db[cls.COLLECTION].find(query).sort("completed_at", -1).limit(1)
-        docs = list(doc)
-        return cls(docs[0]) if docs else None
+        return cls(data) if data else None
 
     @classmethod
     def user_completed_recently(
@@ -691,11 +372,20 @@ class Job:
         Get remaining cooldown time in seconds for a user.
         Returns 0 if no cooldown active.
         """
-        last_job = cls.get_last_completed_for_user(user_id, job_type=cls.TYPE_MANUAL)
-        if not last_job or not last_job.completed_at:
+        last_ended = mongo.db[cls.COLLECTION].find_one(
+            {
+                "user_id": user_id,
+                "type": cls.TYPE_MANUAL,
+                "status": {"$in": list(cls.COOLDOWN_STATUSES)},
+                "completed_at": {"$type": "date"},
+            },
+            {"completed_at": 1},
+            sort=[("completed_at", -1)],
+        )
+        if last_ended is None:
             return 0
 
-        elapsed = (datetime.utcnow() - last_job.completed_at).total_seconds()
+        elapsed = (datetime.utcnow() - last_ended["completed_at"]).total_seconds()
         cooldown_seconds = cooldown_minutes * 60
         remaining = cooldown_seconds - elapsed
 

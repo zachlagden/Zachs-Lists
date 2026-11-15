@@ -1,0 +1,734 @@
+{
+  "mid_download": {
+    "progress": {
+      "current_step": "downloading",
+      "stage": "downloading",
+      "total_sources": 3,
+      "processed_sources": 1,
+      "current_source": "advertising",
+      "queue_position": null,
+      "queue_delay_remaining_ms": null,
+      "sources": [
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "name": "advertising",
+          "url": "https://lists.example.com/advertising.txt",
+          "status": "processing",
+          "cache_hit": false,
+          "stale": false,
+          "bytes_downloaded": 40960,
+          "bytes_total": 40960,
+          "download_percent": 100.0,
+          "download_time_ms": 412,
+          "domain_count": 1024,
+          "domain_change": null,
+          "format_breakdown": null,
+          "detected_formats": [],
+          "error": null,
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": null
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "name": "tracking",
+          "url": "https://lists.example.com/tracking.txt",
+          "status": "completed",
+          "cache_hit": true,
+          "stale": true,
+          "bytes_downloaded": 0,
+          "bytes_total": null,
+          "download_percent": null,
+          "download_time_ms": 95,
+          "domain_count": 1300,
+          "domain_change": 0,
+          "format_breakdown": {
+            "hosts": 0,
+            "plain": 1200,
+            "adblock": 100
+          },
+          "detected_formats": ["plain", "adblock"],
+          "error": null,
+          "warnings": [
+            "Stale source: upstream check failed (Source returned HTTP 503); using a verified cache body checked within 8 days"
+          ],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:07.400Z"
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "name": "malicious",
+          "url": "https://lists.example.com/malicious.txt",
+          "status": "downloading",
+          "cache_hit": null,
+          "stale": false,
+          "bytes_downloaded": 16384,
+          "bytes_total": 65536,
+          "download_percent": 25.0,
+          "download_time_ms": null,
+          "domain_count": null,
+          "domain_change": null,
+          "format_breakdown": null,
+          "detected_formats": [],
+          "error": null,
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": null
+        }
+      ],
+      "whitelist": null,
+      "generation": null,
+      "stage_started_at": "2026-03-04T05:06:07.000Z",
+      "stages": {
+        "downloading": {
+          "started_at": "2026-03-04T05:06:07.000Z",
+          "completed_at": null
+        },
+        "whitelist": null,
+        "generation": null
+      },
+      "stage_snapshots": {}
+    },
+    "result": null
+  },
+  "mid_generation": {
+    "progress": {
+      "current_step": "generation",
+      "stage": "generation",
+      "total_sources": 3,
+      "processed_sources": 3,
+      "current_source": null,
+      "queue_position": null,
+      "queue_delay_remaining_ms": null,
+      "sources": [
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "name": "advertising",
+          "url": "https://lists.example.com/advertising.txt",
+          "status": "completed",
+          "cache_hit": false,
+          "stale": false,
+          "bytes_downloaded": 40960,
+          "bytes_total": 40960,
+          "download_percent": 100.0,
+          "download_time_ms": 412,
+          "domain_count": 1800,
+          "domain_change": 25,
+          "format_breakdown": {
+            "hosts": 1800,
+            "plain": 0,
+            "adblock": 0
+          },
+          "detected_formats": ["hosts"],
+          "error": null,
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:07.900Z"
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "name": "tracking",
+          "url": "https://lists.example.com/tracking.txt",
+          "status": "completed",
+          "cache_hit": true,
+          "stale": true,
+          "bytes_downloaded": 0,
+          "bytes_total": null,
+          "download_percent": null,
+          "download_time_ms": 95,
+          "domain_count": 1300,
+          "domain_change": 0,
+          "format_breakdown": {
+            "hosts": 0,
+            "plain": 1200,
+            "adblock": 100
+          },
+          "detected_formats": ["plain", "adblock"],
+          "error": null,
+          "warnings": [
+            "Stale source: upstream check failed (Source returned HTTP 503); using a verified cache body checked within 8 days"
+          ],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:07.400Z"
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "name": "malicious",
+          "url": "https://lists.example.com/malicious.txt",
+          "status": "failed",
+          "cache_hit": false,
+          "stale": false,
+          "bytes_downloaded": 0,
+          "bytes_total": null,
+          "download_percent": null,
+          "download_time_ms": 2000,
+          "domain_count": null,
+          "domain_change": null,
+          "format_breakdown": null,
+          "detected_formats": [],
+          "error": "Source check failed (Source request timed out); no verified cache body checked within 8 days is available",
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:09.100Z"
+        }
+      ],
+      "whitelist": {
+        "domains_before": 3050,
+        "domains_after": 3000,
+        "domains_checked": 3050,
+        "total_removed": 50,
+        "processing": false,
+        "patterns_total": 4,
+        "patterns": [
+          {
+            "pattern": "*.cdn.example.com",
+            "pattern_type": "wildcard",
+            "match_count": 48,
+            "samples": ["a.cdn.example.com", "b.cdn.example.com"]
+          },
+          {
+            "pattern": "login.example.org",
+            "pattern_type": "exact",
+            "match_count": 2,
+            "samples": ["login.example.org"]
+          }
+        ],
+        "warnings": ["Whitelist line 7 was ignored: Invalid regex"]
+      },
+      "generation": {
+        "files_total": 9,
+        "files_completed": 4,
+        "current_format": "adblock",
+        "formats": [
+          {
+            "format": "hosts",
+            "status": "completed",
+            "domains_written": 6000,
+            "total_domains": 6000,
+            "percent": 100.0,
+            "file_size": null,
+            "gz_size": 18250
+          },
+          {
+            "format": "plain",
+            "status": "generating",
+            "domains_written": 2550,
+            "total_domains": 6000,
+            "percent": 42.5,
+            "file_size": null,
+            "gz_size": 6100
+          },
+          {
+            "format": "adblock",
+            "status": "generating",
+            "domains_written": 1500,
+            "total_domains": 6000,
+            "percent": 25.0,
+            "file_size": null,
+            "gz_size": null
+          }
+        ]
+      },
+      "stage_started_at": "2026-03-04T05:06:09.500Z",
+      "stages": {
+        "downloading": {
+          "started_at": "2026-03-04T05:06:07.000Z",
+          "completed_at": "2026-03-04T05:06:09.200Z"
+        },
+        "whitelist": {
+          "started_at": "2026-03-04T05:06:09.200Z",
+          "completed_at": "2026-03-04T05:06:09.500Z"
+        },
+        "generation": {
+          "started_at": "2026-03-04T05:06:09.500Z",
+          "completed_at": null
+        }
+      },
+      "stage_snapshots": {
+        "downloading": {
+          "completed_at": "2026-03-04T05:06:09.200Z",
+          "data": {
+            "sources": [
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000001",
+                "name": "advertising",
+                "url": "https://lists.example.com/advertising.txt",
+                "status": "completed",
+                "cache_hit": false,
+                "stale": false,
+                "bytes_downloaded": 40960,
+                "bytes_total": 40960,
+                "download_percent": 100.0,
+                "download_time_ms": 412,
+                "domain_count": 1800,
+                "domain_change": 25,
+                "format_breakdown": {
+                  "hosts": 1800,
+                  "plain": 0,
+                  "adblock": 0
+                },
+                "detected_formats": ["hosts"],
+                "error": null,
+                "warnings": [],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:07.900Z"
+              },
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000002",
+                "name": "tracking",
+                "url": "https://lists.example.com/tracking.txt",
+                "status": "completed",
+                "cache_hit": true,
+                "stale": true,
+                "bytes_downloaded": 0,
+                "bytes_total": null,
+                "download_percent": null,
+                "download_time_ms": 95,
+                "domain_count": 1300,
+                "domain_change": 0,
+                "format_breakdown": {
+                  "hosts": 0,
+                  "plain": 1200,
+                  "adblock": 100
+                },
+                "detected_formats": ["plain", "adblock"],
+                "error": null,
+                "warnings": [
+                  "Stale source: upstream check failed (Source returned HTTP 503); using a verified cache body checked within 8 days"
+                ],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:07.400Z"
+              },
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000003",
+                "name": "malicious",
+                "url": "https://lists.example.com/malicious.txt",
+                "status": "failed",
+                "cache_hit": false,
+                "stale": false,
+                "bytes_downloaded": 0,
+                "bytes_total": null,
+                "download_percent": null,
+                "download_time_ms": 2000,
+                "domain_count": null,
+                "domain_change": null,
+                "format_breakdown": null,
+                "detected_formats": [],
+                "error": "Source check failed (Source request timed out); no verified cache body checked within 8 days is available",
+                "warnings": [],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:09.100Z"
+              }
+            ],
+            "total_sources": 3,
+            "processed_sources": 3
+          }
+        },
+        "whitelist": {
+          "completed_at": "2026-03-04T05:06:09.500Z",
+          "data": {
+            "domains_before": 3050,
+            "domains_after": 3000,
+            "domains_checked": 3050,
+            "total_removed": 50,
+            "processing": false,
+            "patterns_total": 4,
+            "patterns": [
+              {
+                "pattern": "*.cdn.example.com",
+                "pattern_type": "wildcard",
+                "match_count": 48,
+                "samples": ["a.cdn.example.com", "b.cdn.example.com"]
+              },
+              {
+                "pattern": "login.example.org",
+                "pattern_type": "exact",
+                "match_count": 2,
+                "samples": ["login.example.org"]
+              }
+            ],
+            "warnings": ["Whitelist line 7 was ignored: Invalid regex"]
+          }
+        }
+      }
+    },
+    "result": null
+  },
+  "completed": {
+    "progress": {
+      "current_step": "completed",
+      "stage": "completed",
+      "total_sources": 3,
+      "processed_sources": 3,
+      "current_source": null,
+      "queue_position": null,
+      "queue_delay_remaining_ms": null,
+      "sources": [
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "name": "advertising",
+          "url": "https://lists.example.com/advertising.txt",
+          "status": "completed",
+          "cache_hit": false,
+          "stale": false,
+          "bytes_downloaded": 40960,
+          "bytes_total": 40960,
+          "download_percent": 100.0,
+          "download_time_ms": 412,
+          "domain_count": 1800,
+          "domain_change": 25,
+          "format_breakdown": {
+            "hosts": 1800,
+            "plain": 0,
+            "adblock": 0
+          },
+          "detected_formats": ["hosts"],
+          "error": null,
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:07.900Z"
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "name": "tracking",
+          "url": "https://lists.example.com/tracking.txt",
+          "status": "completed",
+          "cache_hit": true,
+          "stale": true,
+          "bytes_downloaded": 0,
+          "bytes_total": null,
+          "download_percent": null,
+          "download_time_ms": 95,
+          "domain_count": 1300,
+          "domain_change": 0,
+          "format_breakdown": {
+            "hosts": 0,
+            "plain": 1200,
+            "adblock": 100
+          },
+          "detected_formats": ["plain", "adblock"],
+          "error": null,
+          "warnings": [
+            "Stale source: upstream check failed (Source returned HTTP 503); using a verified cache body checked within 8 days"
+          ],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:07.400Z"
+        },
+        {
+          "id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "name": "malicious",
+          "url": "https://lists.example.com/malicious.txt",
+          "status": "failed",
+          "cache_hit": false,
+          "stale": false,
+          "bytes_downloaded": 0,
+          "bytes_total": null,
+          "download_percent": null,
+          "download_time_ms": 2000,
+          "domain_count": null,
+          "domain_change": null,
+          "format_breakdown": null,
+          "detected_formats": [],
+          "error": "Source check failed (Source request timed out); no verified cache body checked within 8 days is available",
+          "warnings": [],
+          "started_at": "2026-03-04T05:06:07.100Z",
+          "completed_at": "2026-03-04T05:06:09.100Z"
+        }
+      ],
+      "whitelist": {
+        "domains_before": 3050,
+        "domains_after": 3000,
+        "domains_checked": 3050,
+        "total_removed": 50,
+        "processing": false,
+        "patterns_total": 4,
+        "patterns": [
+          {
+            "pattern": "*.cdn.example.com",
+            "pattern_type": "wildcard",
+            "match_count": 48,
+            "samples": ["a.cdn.example.com", "b.cdn.example.com"]
+          },
+          {
+            "pattern": "login.example.org",
+            "pattern_type": "exact",
+            "match_count": 2,
+            "samples": ["login.example.org"]
+          }
+        ],
+        "warnings": ["Whitelist line 7 was ignored: Invalid regex"]
+      },
+      "generation": {
+        "files_total": 9,
+        "files_completed": 9,
+        "current_format": null,
+        "formats": [
+          {
+            "format": "hosts",
+            "status": "completed",
+            "domains_written": 6000,
+            "total_domains": 6000,
+            "percent": 100.0,
+            "file_size": null,
+            "gz_size": 18250
+          },
+          {
+            "format": "plain",
+            "status": "completed",
+            "domains_written": 6000,
+            "total_domains": 6000,
+            "percent": 100.0,
+            "file_size": null,
+            "gz_size": 14800
+          },
+          {
+            "format": "adblock",
+            "status": "completed",
+            "domains_written": 6000,
+            "total_domains": 6000,
+            "percent": 100.0,
+            "file_size": null,
+            "gz_size": 16020
+          }
+        ]
+      },
+      "stage_started_at": "2026-03-04T05:06:10.300Z",
+      "stages": {
+        "downloading": {
+          "started_at": "2026-03-04T05:06:07.000Z",
+          "completed_at": "2026-03-04T05:06:09.200Z"
+        },
+        "whitelist": {
+          "started_at": "2026-03-04T05:06:09.200Z",
+          "completed_at": "2026-03-04T05:06:09.500Z"
+        },
+        "generation": {
+          "started_at": "2026-03-04T05:06:09.500Z",
+          "completed_at": "2026-03-04T05:06:10.300Z"
+        }
+      },
+      "stage_snapshots": {
+        "downloading": {
+          "completed_at": "2026-03-04T05:06:09.200Z",
+          "data": {
+            "sources": [
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000001",
+                "name": "advertising",
+                "url": "https://lists.example.com/advertising.txt",
+                "status": "completed",
+                "cache_hit": false,
+                "stale": false,
+                "bytes_downloaded": 40960,
+                "bytes_total": 40960,
+                "download_percent": 100.0,
+                "download_time_ms": 412,
+                "domain_count": 1800,
+                "domain_change": 25,
+                "format_breakdown": {
+                  "hosts": 1800,
+                  "plain": 0,
+                  "adblock": 0
+                },
+                "detected_formats": ["hosts"],
+                "error": null,
+                "warnings": [],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:07.900Z"
+              },
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000002",
+                "name": "tracking",
+                "url": "https://lists.example.com/tracking.txt",
+                "status": "completed",
+                "cache_hit": true,
+                "stale": true,
+                "bytes_downloaded": 0,
+                "bytes_total": null,
+                "download_percent": null,
+                "download_time_ms": 95,
+                "domain_count": 1300,
+                "domain_change": 0,
+                "format_breakdown": {
+                  "hosts": 0,
+                  "plain": 1200,
+                  "adblock": 100
+                },
+                "detected_formats": ["plain", "adblock"],
+                "error": null,
+                "warnings": [
+                  "Stale source: upstream check failed (Source returned HTTP 503); using a verified cache body checked within 8 days"
+                ],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:07.400Z"
+              },
+              {
+                "id": "0000000000000000000000000000000000000000000000000000000000000003",
+                "name": "malicious",
+                "url": "https://lists.example.com/malicious.txt",
+                "status": "failed",
+                "cache_hit": false,
+                "stale": false,
+                "bytes_downloaded": 0,
+                "bytes_total": null,
+                "download_percent": null,
+                "download_time_ms": 2000,
+                "domain_count": null,
+                "domain_change": null,
+                "format_breakdown": null,
+                "detected_formats": [],
+                "error": "Source check failed (Source request timed out); no verified cache body checked within 8 days is available",
+                "warnings": [],
+                "started_at": "2026-03-04T05:06:07.100Z",
+                "completed_at": "2026-03-04T05:06:09.100Z"
+              }
+            ],
+            "total_sources": 3,
+            "processed_sources": 3
+          }
+        },
+        "whitelist": {
+          "completed_at": "2026-03-04T05:06:09.500Z",
+          "data": {
+            "domains_before": 3050,
+            "domains_after": 3000,
+            "domains_checked": 3050,
+            "total_removed": 50,
+            "processing": false,
+            "patterns_total": 4,
+            "patterns": [
+              {
+                "pattern": "*.cdn.example.com",
+                "pattern_type": "wildcard",
+                "match_count": 48,
+                "samples": ["a.cdn.example.com", "b.cdn.example.com"]
+              },
+              {
+                "pattern": "login.example.org",
+                "pattern_type": "exact",
+                "match_count": 2,
+                "samples": ["login.example.org"]
+              }
+            ],
+            "warnings": ["Whitelist line 7 was ignored: Invalid regex"]
+          }
+        },
+        "generation": {
+          "completed_at": "2026-03-04T05:06:10.300Z",
+          "data": {
+            "files_total": 9,
+            "files_completed": 9,
+            "current_format": null,
+            "formats": [
+              {
+                "format": "hosts",
+                "status": "completed",
+                "domains_written": 6000,
+                "total_domains": 6000,
+                "percent": 100.0,
+                "file_size": null,
+                "gz_size": 18250
+              },
+              {
+                "format": "plain",
+                "status": "completed",
+                "domains_written": 6000,
+                "total_domains": 6000,
+                "percent": 100.0,
+                "file_size": null,
+                "gz_size": 14800
+              },
+              {
+                "format": "adblock",
+                "status": "completed",
+                "domains_written": 6000,
+                "total_domains": 6000,
+                "percent": 100.0,
+                "file_size": null,
+                "gz_size": 16020
+              }
+            ]
+          }
+        }
+      }
+    },
+    "result": {
+      "sources_processed": 2,
+      "sources_failed": 1,
+      "sources_stale": 1,
+      "total_domains": 3100,
+      "unique_domains": 3000,
+      "whitelisted_removed": 50,
+      "output_files": [
+        {
+          "name": "advertising_hosts.txt.gz",
+          "format": "hosts",
+          "size_bytes": 5200,
+          "domain_count": 1780
+        },
+        {
+          "name": "advertising_plain.txt.gz",
+          "format": "plain",
+          "size_bytes": 4300,
+          "domain_count": 1780
+        },
+        {
+          "name": "advertising_adblock.txt.gz",
+          "format": "adblock",
+          "size_bytes": 4700,
+          "domain_count": 1780
+        },
+        {
+          "name": "tracking_hosts.txt.gz",
+          "format": "hosts",
+          "size_bytes": 3950,
+          "domain_count": 1220
+        },
+        {
+          "name": "tracking_plain.txt.gz",
+          "format": "plain",
+          "size_bytes": 3100,
+          "domain_count": 1220
+        },
+        {
+          "name": "tracking_adblock.txt.gz",
+          "format": "adblock",
+          "size_bytes": 3320,
+          "domain_count": 1220
+        },
+        {
+          "name": "all_domains_hosts.txt.gz",
+          "format": "hosts",
+          "size_bytes": 9100,
+          "domain_count": 3000
+        },
+        {
+          "name": "all_domains_plain.txt.gz",
+          "format": "plain",
+          "size_bytes": 7400,
+          "domain_count": 3000
+        },
+        {
+          "name": "all_domains_adblock.txt.gz",
+          "format": "adblock",
+          "size_bytes": 8000,
+          "domain_count": 3000
+        }
+      ],
+      "categories": {
+        "advertising": 1780,
+        "tracking": 1220
+      },
+      "errors": [],
+      "warnings": [
+        "Source tracking is stale: its upstream check failed, so the last verified copy was used",
+        "Source malicious could not be used: Source check failed (Source request timed out); no verified cache body checked within 8 days is available",
+        "1 whitelist lines were ignored because they are not valid patterns"
+      ],
+      "error_code": null,
+      "skip_reason": null,
+      "generation_id": "0b9d6f3e-5a51-4c0e-9d0a-3f2b8c7e1a44",
+      "limit": { "max_domains": 4000000, "actual_domains": 3000 }
+    }
+  }
+}

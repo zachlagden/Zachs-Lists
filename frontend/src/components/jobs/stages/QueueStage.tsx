@@ -37,7 +37,7 @@ export default function QueueStage({ progress, queueInfo }: QueueStageProps) {
   // Use queue_info from WebSocket if available, otherwise fall back to progress
   const position = queueInfo?.position ?? progress.queue_position ?? 0;
   const totalQueued = queueInfo?.total_queued ?? 0;
-  const activeWorkers = queueInfo?.active_workers ?? 0;
+  const activeWorkers = queueInfo?.workers_alive ?? queueInfo?.active_workers ?? 0;
   const jobsProcessing = queueInfo?.jobs_processing ?? 0;
 
   return (

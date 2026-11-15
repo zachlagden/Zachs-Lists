@@ -1,7 +1,9 @@
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, LinkedList};
+
+use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
 
 /// Result of extracting from a line
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +39,7 @@ impl FormatBreakdown {
     }
 
     /// Get the primary (most common) format
+    #[cfg(test)]
     pub fn primary_format(&self) -> Option<&'static str> {
         let max = self.hosts.max(self.plain).max(self.adblock);
         if max == 0 {
@@ -55,8 +58,21 @@ impl FormatBreakdown {
 /// Result of extraction with format breakdown
 #[derive(Debug, Clone)]
 pub struct ExtractionOutput {
-    pub results: Vec<ExtractionResult>,
+    pub batches: Vec<Vec<ExtractionResult>>,
     pub format_breakdown: FormatBreakdown,
+}
+
+impl ExtractionOutput {
+    pub fn domain_count(&self) -> u64 {
+        self.batches.iter().map(|batch| batch.len() as u64).sum()
+    }
+}
+
+#[derive(Default)]
+struct PartialExtraction {
+    results: Vec<ExtractionResult>,
+    format_breakdown: FormatBreakdown,
+    unreported: u64,
 }
 
 /// Detected format of a single line
@@ -81,6 +97,7 @@ pub struct DomainExtractor {
     css_filter_pattern: Regex,
     /// Pattern to detect modifiers that mean this isn't a DNS-level block
     skip_modifiers_pattern: Regex,
+    abp_wildcard_pattern: Regex,
 }
 
 impl DomainExtractor {
@@ -102,7 +119,28 @@ impl DomainExtractor {
             // $badfilter = exception rule that DISABLES a blocking rule
             // $removeparam, $redirect, $csp, $replace, $cookie = browser-level features
             skip_modifiers_pattern: Regex::new(r"(?i)\$(.*,)?(third-party|badfilter|removeparam|redirect|csp|replace|cookie)").unwrap(),
+            abp_wildcard_pattern: Regex::new(r"^\*\.([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)$").unwrap(),
         }
+    }
+
+    fn extract_line(&self, line: &str, abp: bool) -> Option<(ExtractionResult, DetectedFormat)> {
+        if abp {
+            if let Some(domain) = self
+                .abp_wildcard_pattern
+                .captures(line.trim())
+                .and_then(|captures| captures.get(1))
+            {
+                let domain = domain.as_str().to_lowercase();
+                return Some((
+                    ExtractionResult {
+                        raw_adblock_rule: Some(format!("||{domain}^")),
+                        domain,
+                    },
+                    DetectedFormat::Adblock,
+                ));
+            }
+        }
+        self.extract_domain(line)
     }
 
     /// Extract domain from a single line, returns result and detected format
@@ -168,45 +206,53 @@ impl DomainExtractor {
         None
     }
 
-    /// Extract domains from file content (parallel processing)
-    /// Returns just the results for backward compatibility
-    pub fn extract_from_content(&self, content: &str) -> Vec<ExtractionResult> {
-        content
+    pub fn extract(
+        &self,
+        content: &str,
+        abp: bool,
+        cancellation: &Cancellation,
+        report_extracted: &(dyn Fn(u64) + Send + Sync),
+    ) -> Result<ExtractionOutput, Cancelled> {
+        let merged = content
             .par_lines()
-            .filter_map(|line| self.extract_domain(line).map(|(result, _)| result))
-            .collect()
-    }
-
-    /// Extract domains from file content with format breakdown
-    pub fn extract_from_content_with_breakdown(&self, content: &str) -> ExtractionOutput {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        let hosts_count = AtomicU64::new(0);
-        let plain_count = AtomicU64::new(0);
-        let adblock_count = AtomicU64::new(0);
-
-        let results: Vec<ExtractionResult> = content
-            .par_lines()
-            .filter_map(|line| {
-                self.extract_domain(line).map(|(result, format)| {
+            .try_fold(PartialExtraction::default, |mut partial, line| {
+                cancellation.check()?;
+                if let Some((result, format)) = self.extract_line(line, abp) {
                     match format {
-                        DetectedFormat::Hosts => hosts_count.fetch_add(1, Ordering::Relaxed),
-                        DetectedFormat::Plain => plain_count.fetch_add(1, Ordering::Relaxed),
-                        DetectedFormat::Adblock => adblock_count.fetch_add(1, Ordering::Relaxed),
-                    };
-                    result
-                })
+                        DetectedFormat::Hosts => partial.format_breakdown.hosts += 1,
+                        DetectedFormat::Plain => partial.format_breakdown.plain += 1,
+                        DetectedFormat::Adblock => partial.format_breakdown.adblock += 1,
+                    }
+                    partial.results.push(result);
+                    partial.unreported += 1;
+                    if partial.unreported == WORK_GRAIN as u64 {
+                        report_extracted(partial.unreported);
+                        partial.unreported = 0;
+                    }
+                }
+                Ok(partial)
             })
-            .collect();
+            .map(|partial| partial.map(|partial| LinkedList::from([partial])))
+            .try_reduce(LinkedList::new, |mut left, mut right| {
+                left.append(&mut right);
+                Ok(left)
+            })?;
 
-        ExtractionOutput {
-            results,
-            format_breakdown: FormatBreakdown {
-                hosts: hosts_count.load(Ordering::Relaxed),
-                plain: plain_count.load(Ordering::Relaxed),
-                adblock: adblock_count.load(Ordering::Relaxed),
-            },
+        let mut output = ExtractionOutput {
+            batches: Vec::with_capacity(merged.len()),
+            format_breakdown: FormatBreakdown::default(),
+        };
+        let mut unreported = 0;
+        for partial in merged {
+            output.format_breakdown.hosts += partial.format_breakdown.hosts;
+            output.format_breakdown.plain += partial.format_breakdown.plain;
+            output.format_breakdown.adblock += partial.format_breakdown.adblock;
+            unreported += partial.unreported;
+            output.batches.push(partial.results);
         }
+        report_extracted(unreported);
+
+        Ok(output)
     }
 
     /// Sort domains alphabetically (parallel sort)
@@ -292,7 +338,10 @@ mod tests {
         let extractor = DomainExtractor::new();
 
         // $third-party rules cannot work at DNS level - skip them
-        assert_eq!(extractor.extract_domain("||facebook.com^$third-party"), None);
+        assert_eq!(
+            extractor.extract_domain("||facebook.com^$third-party"),
+            None
+        );
         assert_eq!(
             extractor.extract_domain("||tracker.com^$third-party,image"),
             None
@@ -417,9 +466,11 @@ mod tests {
                        plain1.com\n\
                        plain2.com";
 
-        let output = extractor.extract_from_content_with_breakdown(content);
+        let output = extractor
+            .extract(content, false, &Cancellation::default(), &|_| {})
+            .unwrap();
 
-        assert_eq!(output.results.len(), 7);
+        assert_eq!(output.domain_count(), 7);
         assert_eq!(output.format_breakdown.hosts, 2);
         assert_eq!(output.format_breakdown.adblock, 3);
         assert_eq!(output.format_breakdown.plain, 2);
@@ -428,6 +479,44 @@ mod tests {
         assert!(formats.contains(&"hosts".to_string()));
         assert!(formats.contains(&"adblock".to_string()));
         assert!(formats.contains(&"plain".to_string()));
+    }
+
+    #[test]
+    fn wildcard_line_on_an_abp_source_becomes_an_adblock_rule() {
+        let extractor = DomainExtractor::new();
+        assert_eq!(
+            extractor.extract_line("  *.Ads.Example.com ", true),
+            Some((
+                ExtractionResult {
+                    domain: "ads.example.com".to_string(),
+                    raw_adblock_rule: Some("||ads.example.com^".to_string()),
+                },
+                DetectedFormat::Adblock
+            ))
+        );
+        assert_eq!(extractor.extract_line("*.ads.example.com", false), None);
+        for unsupported in ["*.com", "*.*.example.com", "*ads.example.com", "*."] {
+            assert_eq!(extractor.extract_line(unsupported, true), None);
+        }
+    }
+
+    #[test]
+    fn abp_source_reads_every_other_line_shape_as_before() {
+        let extractor = DomainExtractor::new();
+        for line in [
+            "0.0.0.0 ads.example.com",
+            "||ads.example.com^$important",
+            "ads.example.com",
+            "# *.ads.example.com",
+            "||ads.example.com^$third-party",
+            "example.com##.banner",
+        ] {
+            assert_eq!(
+                extractor.extract_line(line, true),
+                extractor.extract_line(line, false),
+                "{line}"
+            );
+        }
     }
 
     #[test]
@@ -444,5 +533,30 @@ mod tests {
 
         breakdown.plain = 300;
         assert_eq!(breakdown.primary_format(), Some("plain"));
+    }
+
+    #[test]
+    fn extraction_reports_every_domain_and_stops_when_cancelled() {
+        let extractor = DomainExtractor::new();
+        let content: String = (0..50_000)
+            .map(|n| format!("0.0.0.0 d{n}.example\n"))
+            .collect();
+        let reported = std::sync::atomic::AtomicU64::new(0);
+        let count = |extracted| {
+            reported.fetch_add(extracted, std::sync::atomic::Ordering::Relaxed);
+        };
+
+        let output = extractor
+            .extract(&content, false, &Cancellation::default(), &count)
+            .unwrap();
+        assert_eq!(output.domain_count(), 50_000);
+        assert_eq!(output.format_breakdown.hosts, 50_000);
+        assert_eq!(reported.into_inner(), 50_000);
+
+        let cancelled = Cancellation::default();
+        cancelled.cancel();
+        assert!(extractor
+            .extract(&content, false, &cancelled, &|_| {})
+            .is_err());
     }
 }

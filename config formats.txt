@@ -9,6 +9,7 @@ blocklists.conf:
 1. Full format: url|name|category
 2. URL + name: url|name
 3. Just URL: url (name derived from domain)
+4. With the abp flag: url|name|category|abp - on this source a line of the form *.domain.com is read as ||domain.com^. The fourth field can only be abp (lowercase).
 
 a blocklist:
 1. Hosts format: 0.0.0.0 domain.com or 127.0.0.1 domain.com

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configuration · Zach's Lists preview</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body data-page="config" data-crumbs="<b>Configuration</b>">
+    <a class="skip" href="#content">Skip to content</a>
+    <div class="shell">
+      <main class="main">
+        <div class="page" id="content">
+          <div class="page-head">
+            <div>
+              <h1>Configuration</h1>
+              <p>Choose the lists to combine and the domains to keep out of the result.</p>
+            </div>
+            <div class="actions">
+              <div class="seg" role="group" aria-label="Editor">
+                <button aria-pressed="true">Visual</button>
+                <button aria-pressed="false">Text</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="seg" role="tablist" aria-label="Section" style="margin-bottom: 16px">
+            <button role="tab" aria-selected="true">Sources · 38</button>
+            <button role="tab" aria-selected="false">Whitelist · 14</button>
+          </div>
+
+          <div class="grid g-split">
+            <section class="card" aria-labelledby="src">
+              <div class="card-head">
+                <h2 id="src">Sources</h2>
+                <div class="right">
+                  <button class="btn sm" data-icon="list">Add from library</button>
+                  <button class="btn sm" data-icon="plus">Add by URL</button>
+                </div>
+              </div>
+              <div id="groups"></div>
+            </section>
+
+            <div class="stack" style="align-content: start">
+              <section class="card" aria-labelledby="lim">
+                <div class="card-head"><h2 id="lim">Limits</h2></div>
+                <div class="card-body stack" style="gap: 14px">
+                  <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px">
+                      <span>Sources</span><span class="num muted">38 of 50</span>
+                    </div>
+                    <div class="bar thin"><i style="width: 76%"></i></div>
+                  </div>
+                  <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px">
+                      <span>Domains, last build</span
+                      ><span class="num muted">3,412,907 of 4,000,000</span>
+                    </div>
+                    <div class="bar thin"><i style="width: 85%"></i></div>
+                  </div>
+                  <a class="btn sm" href="#">Ask for a higher limit</a>
+                </div>
+              </section>
+              <section class="card" aria-labelledby="chk">
+                <div class="card-head">
+                  <h2 id="chk">Check</h2>
+                  <div class="right"><span class="pill warn" data-icon="warn">1 problem</span></div>
+                </div>
+                <div class="card-body">
+                  <div class="note">
+                    <div>
+                      <h3>Line 42</h3>
+                      <p>
+                        The category <span class="mono">phising</span> is not one this site knows.
+                        Did you mean <span class="mono">malicious</span>?
+                      </p>
+                    </div>
+                  </div>
+                  <div class="note">
+                    <div>
+                      <h3>37 sources reachable</h3>
+                      <p>Checked a moment ago.</p>
+                    </div>
+                    <span class="pill ok" data-icon="check">OK</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="savebar" role="region" aria-label="Unsaved changes">
+            <span class="pill warn" data-icon="dash">Unsaved</span>
+            <span class="muted hide-sm">2 sources added, 1 removed since the last save.</span>
+            <span class="spacer"></span>
+            <button class="btn ghost">Discard</button>
+            <button class="btn">Save</button>
+            <button class="btn primary" data-icon="bolt">Save and build</button>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+    <script>
+      const groups = {
+        advertising: [
+          ['Acme Ads', 'https://lists.example.org/ads/main.txt', 24420, ''],
+          ['Example Mobile Ads', 'https://lists.example.org/ads/mobile.txt', 8672, ''],
+          ['Sample Ads Extra', 'https://lists.example.org/ads/extra.txt', 51936, 'new'],
+        ],
+        tracking: [
+          ['Demo Trackers', 'https://lists.example.org/tracking/core.txt', 38264, ''],
+          [
+            'Sample Telemetry B',
+            'https://lists.example.org/tracking/telemetry-b.txt',
+            18440,
+            'stale',
+          ],
+          ['Placeholder Analytics', 'https://lists.example.org/tracking/analytics.txt', 9156, ''],
+        ],
+        malicious: [
+          ['Example Malware', 'https://lists.example.org/threats/malware.txt', 291600, ''],
+          [
+            'Acme Phishing Extra',
+            'https://lists.example.org/threats/phishing-extra.txt',
+            0,
+            'failed',
+          ],
+          ['Demo Phishing', 'https://lists.example.org/threats/phishing.txt', 46152, ''],
+        ],
+      };
+      const tag = {
+        new: () => pill('info', 'plus', 'Not saved yet'),
+        stale: () => pill('warn', 'warn', 'Older copy'),
+        failed: () => pill('fail', 'x', 'Failed last build'),
+        '': () => '',
+      };
+      document.getElementById('groups').innerHTML = Object.entries(groups)
+        .map(
+          ([name, rows]) =>
+            `<div class="cat">${name}<span class="faint">${rows.length} shown</span></div>` +
+            rows
+              .map(
+                ([title, url, count, state]) => `<div class="row">
+                  <div style="min-width:0"><b>${title}</b><small>${url}</small></div>
+                  <span class="hide-sm">${tag[state]() || `<span class="faint num">${count.toLocaleString('en-GB')} domains</span>`}</span>
+                  <button class="btn sm ghost">Remove</button>
+                </div>`,
+              )
+              .join(''),
+        )
+        .join('');
+    </script>
+  </body>
+</html>
