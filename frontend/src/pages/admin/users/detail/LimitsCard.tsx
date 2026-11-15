@@ -7,20 +7,25 @@ import { Card, CardBody, CardHeader } from '../../../../components/ui/Card';
 import { Field, Input } from '../../../../components/ui/Field';
 import { StatusPill } from '../../../../components/ui/StatusPill';
 import { showToast } from '../../../../components/ui/toasts';
+import { acceptingSaved, withEdit, withoutEdit } from '../../../../lib/editOverlay';
 import type { UserLimits } from '../../../../types';
 import { focusFirstInvalid, formFailure } from '../../shared/fieldErrors';
 import type { Permission } from '../../shared/permissions';
 import {
   LIMIT_FIELDS,
   LIMIT_KEYS,
+  NO_LIMIT_EDITS,
   changedLimits,
+  describeChangedUnderneath,
   hasEdits,
   isOverride,
   limitErrors,
   limitHint,
   limitValues,
+  limitsChangedUnderneath,
+  shownLimits,
+  type LimitEdits,
   type LimitKey,
-  type LimitValues,
 } from './limitsForm';
 import { storeUser } from './userCache';
 import { LeaveDialog } from '../../../../components/ui/LeaveDialog';
@@ -34,18 +39,20 @@ export function LimitsCard({
   permission: Permission;
 }) {
   const client = useQueryClient();
-  const [values, setValues] = useState<LimitValues>(() => limitValues(user.limits));
+  const [edits, setEdits] = useState<LimitEdits>(NO_LIMIT_EDITS);
   const [checked, setChecked] = useState(false);
   const save = useMutation({
     mutationFn: (limits: Partial<UserLimits>) => updateAdminUser(user.id, { limits }),
     onSuccess: (updated) => {
       storeUser(client, updated);
-      setValues(limitValues(updated.limits));
+      setEdits(NO_LIMIT_EDITS);
       setChecked(false);
       showToast('ok', `Limits saved for ${updated.username}.`);
     },
   });
 
+  const saved = limitValues(user.limits);
+  const values = shownLimits(user, edits);
   const clientErrors = checked ? limitErrors(user, values) : {};
   const failure = save.isError
     ? formFailure<LimitKey>(save.error, {
@@ -54,12 +61,13 @@ export function LimitsCard({
         fallback: 'The limits could not be saved.',
       })
     : null;
-  const changes = changedLimits(user, values);
-  const dirty = hasEdits(user, values);
+  const changes = changedLimits(user, edits);
+  const dirty = hasEdits(user, edits);
+  const changedUnderneath = limitsChangedUnderneath(user, edits);
   const blocker = useUnsavedChangesGuard(dirty && permission.allowed);
 
   const change = (key: LimitKey, value: string) => {
-    setValues((current) => ({ ...current, [key]: value }));
+    setEdits((current) => withEdit(saved, current, key, value));
     if (save.isError) save.reset();
   };
 
@@ -124,6 +132,34 @@ export function LimitsCard({
                 );
               })}
             </div>
+            {changedUnderneath.length > 0 ? (
+              <Alert
+                tone="warn"
+                title="Someone else changed a limit you are editing"
+                actions={
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        setEdits((current) => changedUnderneath.reduce(withoutEdit, current))
+                      }
+                    >
+                      Use the new value
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEdits((current) => acceptingSaved(saved, current))}
+                    >
+                      Keep my edit
+                    </Button>
+                  </>
+                }
+              >
+                {describeChangedUnderneath(user, changedUnderneath)} Saving replaces it with what
+                you typed.
+              </Alert>
+            ) : null}
             {failure?.form ? <Alert tone="fail">{failure.form}</Alert> : null}
             {permission.allowed ? (
               <div className="flex flex-wrap items-center gap-3">
@@ -134,7 +170,7 @@ export function LimitsCard({
                   <Button
                     variant="ghost"
                     onClick={() => {
-                      setValues(limitValues(user.limits));
+                      setEdits(NO_LIMIT_EDITS);
                       setChecked(false);
                       save.reset();
                     }}

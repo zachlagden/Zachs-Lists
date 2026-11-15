@@ -6,6 +6,15 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { Field, Textarea } from '../../../components/ui/Field';
 import { showToast } from '../../../components/ui/toasts';
+import {
+  acceptingSaved,
+  editsChangedUnderneath,
+  pendingEdits,
+  shownValues,
+  withEdit,
+  withoutEdit,
+  type FieldEdits,
+} from '../../../lib/editOverlay';
 import type { DefaultConfig } from '../../../types';
 import { errorDetails, formFailure } from '../shared/fieldErrors';
 import { LeaveDialog } from '../../../components/ui/LeaveDialog';
@@ -14,6 +23,13 @@ import { useUnsavedChangesGuard } from '../../../hooks/useUnsavedChangesGuard';
 type ConfigField = 'config' | 'whitelist';
 
 const FIELDS: ReadonlyArray<ConfigField> = ['config', 'whitelist'];
+
+const FIELD_NAMES: Record<ConfigField, string> = {
+  config: 'sources',
+  whitelist: 'whitelist',
+};
+
+const NO_EDITS: FieldEdits<ConfigField> = {};
 
 function LineErrors({ title, details }: { title: string; details: string[] }) {
   return (
@@ -36,8 +52,13 @@ export interface ConfigEditorProps {
 
 export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
   const client = useQueryClient();
-  const [sources, setSources] = useState(config.config);
-  const [whitelist, setWhitelist] = useState(config.whitelist);
+  const [edits, setEdits] = useState(NO_EDITS);
+  const saved: Record<ConfigField, string> = {
+    config: config.config,
+    whitelist: config.whitelist,
+  };
+  const shown = shownValues(saved, edits);
+  const changedUnderneath = editsChangedUnderneath(saved, edits);
   const save = useMutation({
     mutationFn: (update: DefaultConfigUpdate) => updateDefaultConfig(update),
     onSuccess: async () => {
@@ -64,12 +85,13 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
   const details = save.isError ? errorDetails(save.error) : [];
   const serverSummary = save.isError ? toApiError(save.error).body.error : undefined;
   const summary = typeof serverSummary === 'string' ? serverSummary : 'This text has errors';
-  const changes: DefaultConfigUpdate = {
-    ...(sources !== config.config ? { config: sources } : {}),
-    ...(whitelist !== config.whitelist ? { whitelist } : {}),
-  };
+  const changes: DefaultConfigUpdate = pendingEdits(saved, edits);
   const dirty = Object.keys(changes).length > 0;
   const blocker = useUnsavedChangesGuard(dirty);
+
+  const change = (field: ConfigField, value: string) => {
+    setEdits((current) => withEdit(saved, current, field, value));
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -87,8 +109,8 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
             <Textarea
               mono
               rows={18}
-              value={sources}
-              onChange={(event) => setSources(event.target.value)}
+              value={shown.config}
+              onChange={(event) => change('config', event.target.value)}
               spellCheck={false}
               wrap="off"
             />
@@ -103,8 +125,8 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
             <Textarea
               mono
               rows={18}
-              value={whitelist}
-              onChange={(event) => setWhitelist(event.target.value)}
+              value={shown.whitelist}
+              onChange={(event) => change('whitelist', event.target.value)}
               spellCheck={false}
               wrap="off"
             />
@@ -112,6 +134,33 @@ export function ConfigEditor({ config, onDone }: ConfigEditorProps) {
           {failure?.fields.whitelist ? <LineErrors title={summary} details={details} /> : null}
         </div>
       </div>
+      {changedUnderneath.length > 0 ? (
+        <Alert
+          tone="warn"
+          title={`Someone else saved the ${changedUnderneath.map((field) => FIELD_NAMES[field]).join(' and the ')} while you were editing`}
+          actions={
+            <>
+              <Button
+                size="sm"
+                onClick={() =>
+                  setEdits((current) => changedUnderneath.reduce(withoutEdit, current))
+                }
+              >
+                Load the saved text
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEdits((current) => acceptingSaved(saved, current))}
+              >
+                Keep my edit
+              </Button>
+            </>
+          }
+        >
+          Saving replaces the text on the server with what you typed.
+        </Alert>
+      ) : null}
       {failure?.form ? (
         <Alert tone="fail" title="Nothing was saved">
           {failure.form}

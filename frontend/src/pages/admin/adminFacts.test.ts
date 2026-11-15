@@ -40,7 +40,18 @@ import {
   recentFailedBuilds,
   workerState,
 } from './overview/overviewFacts';
-import { changedLimits, isOverride, limitErrors, limitValues } from './users/detail/limitsForm';
+import { withEdit } from '../../lib/editOverlay';
+import {
+  NO_LIMIT_EDITS,
+  changedLimits,
+  describeChangedUnderneath,
+  hasEdits,
+  isOverride,
+  limitErrors,
+  limitValues,
+  limitsChangedUnderneath,
+  shownLimits,
+} from './users/detail/limitsForm';
 import {
   apiFilters,
   banEnd,
@@ -255,9 +266,37 @@ describe('limits form', () => {
   });
 
   it('sends only the limits that changed, including a reset to the default', () => {
-    const values = { ...limitValues(LIMIT_SUBJECT.limits), max_domains: '6000000' };
-    expect(changedLimits(LIMIT_SUBJECT, values)).toEqual({ max_domains: 6_000_000 });
-    expect(changedLimits(LIMIT_SUBJECT, limitValues(LIMIT_SUBJECT.limits))).toEqual({});
+    const saved = limitValues(LIMIT_SUBJECT.limits);
+    const edits = withEdit(saved, NO_LIMIT_EDITS, 'max_domains', '6000000');
+    expect(changedLimits(LIMIT_SUBJECT, edits)).toEqual({ max_domains: 6_000_000 });
+    expect(changedLimits(LIMIT_SUBJECT, NO_LIMIT_EDITS)).toEqual({});
+    expect(hasEdits(LIMIT_SUBJECT, NO_LIMIT_EDITS)).toBe(false);
+  });
+
+  it('never sends back a limit the admin did not edit after it changes on the server', () => {
+    const saved = limitValues(LIMIT_SUBJECT.limits);
+    const edits = withEdit(saved, NO_LIMIT_EDITS, 'max_source_lists', '80');
+    const approved = {
+      ...LIMIT_SUBJECT,
+      limits: { ...LIMIT_SUBJECT.limits, max_domains: 12_000_000 },
+    };
+    expect(shownLimits(approved, edits).max_domains).toBe('12000000');
+    expect(changedLimits(approved, edits)).toEqual({ max_source_lists: 80 });
+    expect(hasEdits(approved, NO_LIMIT_EDITS)).toBe(false);
+    expect(limitsChangedUnderneath(approved, edits)).toEqual([]);
+  });
+
+  it('says when a limit the admin is editing changed on the server', () => {
+    const saved = limitValues(LIMIT_SUBJECT.limits);
+    const edits = withEdit(saved, NO_LIMIT_EDITS, 'max_domains', '9000000');
+    const approved = {
+      ...LIMIT_SUBJECT,
+      limits: { ...LIMIT_SUBJECT.limits, max_domains: 12_000_000 },
+    };
+    expect(limitsChangedUnderneath(approved, edits)).toEqual(['max_domains']);
+    expect(describeChangedUnderneath(approved, ['max_domains'])).toBe(
+      'Domains across all lists is now 12,000,000 domains on the server.',
+    );
   });
 });
 
