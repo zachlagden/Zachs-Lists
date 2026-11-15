@@ -3,7 +3,7 @@ Job model for MongoDB.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, cast
 from bson import ObjectId
 
 from app.extensions import mongo
@@ -54,19 +54,19 @@ class Job:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         return str(self._id) if self._id else None
 
     @property
     def job_id(self) -> str:
-        return self._data.get("job_id")
+        return cast(str, self._data.get("job_id"))
 
     @property
-    def user_id(self) -> ObjectId:
+    def user_id(self) -> Optional[ObjectId]:
         return self._data.get("user_id")
 
     @property
-    def username(self) -> str:
+    def username(self) -> Optional[str]:
         return self._data.get("username")
 
     @staticmethod
@@ -191,10 +191,10 @@ class Job:
 
     @classmethod
     def get_by_user(
-        cls, user_id: ObjectId, limit: int = 20, status: str = None
+        cls, user_id: ObjectId, limit: int = 20, status: Optional[str] = None
     ) -> List["Job"]:
         """Get jobs for a user."""
-        query = {"user_id": user_id}
+        query: Dict[str, Any] = {"user_id": user_id}
         if status:
             query["status"] = status
 

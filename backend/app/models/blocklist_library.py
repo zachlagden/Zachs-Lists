@@ -37,7 +37,7 @@ class BlocklistLibrary:
         self._id = data.get("_id")
 
     @property
-    def id(self) -> str:
+    def id(self) -> Optional[str]:
         """Get entry ID as string."""
         return str(self._id) if self._id else None
 
@@ -135,7 +135,7 @@ class BlocklistLibrary:
     def get_grouped_by_category(cls) -> Dict[str, List["BlocklistLibrary"]]:
         """Get all entries grouped by category."""
         entries = cls.get_all()
-        grouped = {}
+        grouped: Dict[str, List["BlocklistLibrary"]] = {}
         for entry in entries:
             if entry.category not in grouped:
                 grouped[entry.category] = []
@@ -185,7 +185,7 @@ class BlocklistLibrary:
         domain_count: Optional[int] = None,
     ) -> bool:
         """Update library entry."""
-        update_data = {"updated_at": datetime.utcnow()}
+        update_data: Dict[str, Any] = {"updated_at": datetime.utcnow()}
 
         if url is not None:
             update_data["url"] = url
@@ -226,7 +226,7 @@ class BlocklistLibrary:
     @classmethod
     def url_exists(cls, url: str, exclude_id: Optional[str] = None) -> bool:
         """Check if URL already exists in library."""
-        query = {"url": url}
+        query: Dict[str, Any] = {"url": url}
         if exclude_id:
             try:
                 query["_id"] = {"$ne": ObjectId(exclude_id)}

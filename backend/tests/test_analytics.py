@@ -554,7 +554,7 @@ def test_public_report_is_cached_for_each_clamped_period(
     assert len(aggregations) == first_run
     assert first["totals"]["requests"] == 1
 
-    over_the_maximum = client.get("/api/analytics/default?days=5000").json
+    over_the_maximum: Any = client.get("/api/analytics/default?days=5000").json
     after_clamped_run = len(aggregations)
     assert after_clamped_run > first_run
     assert over_the_maximum["period_days"] == Analytics.RETENTION_DAYS
