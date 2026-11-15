@@ -1,10 +1,13 @@
 import { io, Socket } from 'socket.io-client';
-import { authApi } from '../api/client';
-import { useAuthStore, useConnectionStore, useJobsStore, useUserDataStore } from '../store';
+import { fetchCurrentUser } from '../api/auth';
+import { toApiError } from '../api/errors';
+import { useAuthStore, useConnectionStore } from '../store';
 import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
+import { expireSession, onSessionEnd } from '../session';
+import { isDeadSessionStatus } from '../sessionExpiry';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || '';
-export let socket: Socket | null = null;
+let socket: Socket | null = null;
 let sessionCheckSocket: Socket | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
@@ -19,7 +22,7 @@ export function hasReconnected(): boolean {
   return connections > 1;
 }
 
-export function disconnectSocket(): void {
+function disconnectSocket(): void {
   clearRetry();
   socket?.disconnect();
   socket = null;
@@ -27,13 +30,6 @@ export function disconnectSocket(): void {
   failures = 0;
   connections = 0;
   useConnectionStore.getState().setState('connecting');
-}
-
-function endSession(): void {
-  disconnectSocket();
-  useAuthStore.getState().setUser(null);
-  useUserDataStore.getState().reset();
-  useJobsStore.getState().reset();
 }
 
 function scheduleReconnect(current: Socket): void {
@@ -51,15 +47,14 @@ async function reconnectIfSignedIn(current: Socket, immediately: boolean): Promi
   if (!useAuthStore.getState().isAuthenticated) return;
   sessionCheckSocket = current;
   try {
-    const user = await authApi.getMe();
+    const user = await fetchCurrentUser();
     if (socket !== current) return;
     useAuthStore.getState().setUser(user);
     if (immediately) current.connect();
     else scheduleReconnect(current);
   } catch (error: unknown) {
     if (socket !== current) return;
-    const status = (error as { response?: { status?: number } }).response?.status;
-    if (status === 401 || status === 403) endSession();
+    if (isDeadSessionStatus(toApiError(error).status)) expireSession();
     else scheduleReconnect(current);
   } finally {
     if (sessionCheckSocket === current) sessionCheckSocket = null;
@@ -88,6 +83,7 @@ export function getSocket(): Socket {
       reconnection: false,
     });
     socket = current;
+    onSessionEnd(disconnectSocket);
     current.on('connect', () => {
       clearRetry();
       failures = 0;

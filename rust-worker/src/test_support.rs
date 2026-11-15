@@ -19,7 +19,7 @@ pub fn test_config(db: &Database, data_dir: &Path, worker_id: &str) -> Config {
         worker_id: worker_id.into(),
         heartbeat_interval_secs: 10,
         max_concurrent_downloads: 2,
-        http_timeout_secs: 2,
+        http_timeout_secs: 30,
         cache_ttl_days: 7,
         source_fresh_secs: 0,
         mongo_connect_timeout_secs: 2,

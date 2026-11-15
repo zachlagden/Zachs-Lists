@@ -202,6 +202,16 @@ class User:
     def lists(self) -> List[Dict[str, Any]]:
         return self._data.get("lists", [])
 
+    def serialized_lists(self) -> List[Dict[str, Any]]:
+        return [
+            (
+                {**entry, "last_updated": utc_iso(entry["last_updated"])}
+                if isinstance(entry.get("last_updated"), datetime)
+                else entry
+            )
+            for entry in self.lists
+        ]
+
     @property
     def published_generation(self) -> Optional[str]:
         return self._data.get("published_generation")
@@ -723,7 +733,7 @@ class User:
                 "last_build_at": utc_iso(self.stats.get("last_build_at")),
                 "week_reset_at": utc_iso(self.stats.get("week_reset_at")),
             },
-            "lists": self.lists,
+            "lists": self.serialized_lists(),
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
             "limit_review": self.serialized_limit_review(),
@@ -854,9 +864,13 @@ class User:
         show_enabled: bool = True,
         show_disabled: bool = True,
         exclude_user_id: ObjectId = None,
+        banned_only: bool = False,
     ) -> Tuple[List["User"], int]:
         """Get users with filtering, sorting, and pagination."""
         conditions: List[Dict[str, Any]] = []
+
+        if banned_only:
+            conditions.append({"banned_until": {"$gt": datetime.utcnow()}})
 
         if exclude_user_id:
             conditions.append({"_id": {"$ne": exclude_user_id}})

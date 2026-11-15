@@ -17,12 +17,14 @@ from conftest import Api
 CONFIG_FILE = Path(extensions.__file__).with_name("config.py")
 ROUTE_LIMITS = [
     ("GET", "/api/auth/me", "RATELIMIT_AUTH_ME"),
+    ("GET", "/api/auth/session", "RATELIMIT_AUTH_ME"),
     ("GET", "/api/user/jobs", "RATELIMIT_JOBS"),
     ("GET", "/api/user/jobs/example", "RATELIMIT_JOBS"),
     ("POST", "/api/user/jobs/mark-read", "RATELIMIT_JOBS"),
     ("POST", "/api/user/config/url-metadata", "RATELIMIT_URL_METADATA"),
     ("GET", "/api/admin/jobs", "RATELIMIT_JOBS"),
     ("GET", "/api/admin/jobs/example", "RATELIMIT_JOBS"),
+    ("GET", "/api/admin/users/example/jobs", "RATELIMIT_JOBS"),
     ("GET", "/api/admin/stats", "RATELIMIT_ADMIN_STATS"),
 ]
 

@@ -3,11 +3,12 @@ use bson::{doc, Bson, Document};
 use std::time::Duration;
 
 use crate::db::job::Claim;
-use crate::db::progress::JobStage;
+use crate::db::progress::{JobStage, SourceStatus};
 use crate::source_cache_test_server::{Reply, TestServer};
 use crate::test_support::{insert_job, queued_job, stored_job, test_config, test_database};
 
 const WORKER_ID: &str = "worker-a";
+const BLOCKED_STAGE_WAIT: Duration = Duration::from_secs(30);
 
 pub(super) struct Harness {
     pub(super) db: Database,
@@ -320,7 +321,7 @@ async fn expected_failures_carry_their_code_and_write_nothing_themselves() {
 #[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
 async fn cancellation_stops_between_sources_and_writes_nothing_more() {
     let server = TestServer::start(vec![
-        Reply::new(200, b"first.example\n").delayed(Duration::from_millis(400)),
+        Reply::new(200, b"first.example\n").stalled_after(0),
         Reply::new(200, b"second.example\n"),
     ])
     .await;
@@ -355,12 +356,16 @@ async fn cancellation_stops_between_sources_and_writes_nothing_more() {
             .unwrap(),
         "downloading"
     );
-    let cancelled_at = std::time::Instant::now();
     cancellation.cancel();
 
     let stopped = build.await.unwrap().unwrap_err();
     assert!(matches!(stopped.error, BuildError::Cancelled));
-    assert!(cancelled_at.elapsed() < Duration::from_millis(300));
+    let stopped_progress = stopped.progress.expect("the build was downloading");
+    assert_eq!(
+        stopped_progress.sources[0].status,
+        SourceStatus::Downloading
+    );
+    assert!(stopped_progress.sources[0].completed_at.is_none());
     let after_stop = stored_job(&db, &job_id).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(server.recorded_requests().len(), 1);
@@ -542,6 +547,13 @@ async fn completed_build_writes_the_whole_schema_and_nothing_after_the_terminal_
     );
     assert_eq!(progress["stage"], "completed");
     assert_eq!(progress["processed_sources"], 3);
+    let categories: Vec<&serde_json::Value> = progress["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|source| &source["category"])
+        .collect();
+    assert_eq!(categories, ["tracking", "advertising", "malicious"]);
     assert_eq!(progress["whitelist"]["domains_before"], 4);
     assert_eq!(progress["whitelist"]["domains_after"], 3);
     assert_eq!(progress["whitelist"]["domains_checked"], 4);
@@ -645,7 +657,7 @@ async fn domain_change_compares_with_the_count_stored_by_the_previous_build() {
 #[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
 async fn lost_lease_stops_the_build_during_a_download_without_writing() {
     let server = TestServer::start(vec![
-        Reply::new(200, &hosts_body(20_000)).dripped(40, Duration::from_millis(50))
+        Reply::new(200, &hosts_body(20_000)).dripped(600, Duration::from_millis(50))
     ])
     .await;
     let mut harness = harness(&server).await;
@@ -686,7 +698,6 @@ async fn lost_lease_stops_the_build_during_a_download_without_writing() {
         )
         .await
         .unwrap();
-    let taken_at = std::time::Instant::now();
     let held_by_other = stored_job(&db, &job_id).await;
 
     let stopped = build.await.unwrap().unwrap_err();
@@ -694,7 +705,11 @@ async fn lost_lease_stops_the_build_during_a_download_without_writing() {
         stopped.error,
         BuildError::Cancelled | BuildError::LeaseLost
     ));
-    assert!(taken_at.elapsed() < Duration::from_secs(1));
+    let stopped_progress = stopped.progress.expect("the build was downloading");
+    assert_eq!(
+        stopped_progress.sources[0].status,
+        SourceStatus::Downloading
+    );
     assert!(cancellation.is_cancelled());
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(stored_job(&db, &job_id).await, held_by_other);
@@ -710,7 +725,10 @@ async fn heartbeat_keeps_writing_during_blocking_work_and_leaves_the_revision_al
     let before = stored_job(&harness.db, &job.id).await;
     let jobs = harness.jobs.clone();
     let job_id = job.id;
+    let (stage_blocked, blocked) = tokio::sync::oneshot::channel();
+    let (fifth_heartbeat, heartbeats) = std::sync::mpsc::channel();
     let heartbeat = tokio::spawn(async move {
+        blocked.await.unwrap();
         let mut written = 0;
         let mut ticker = tokio::time::interval(Duration::from_millis(20));
         loop {
@@ -719,15 +737,18 @@ async fn heartbeat_keeps_writing_during_blocking_work_and_leaves_the_revision_al
                 written += 1;
             }
             if written == 5 {
-                return std::time::Instant::now();
+                return fifth_heartbeat.send(()).is_ok();
             }
         }
     });
 
-    let blocked_until = harness
+    let fifth_heartbeat_came_while_blocked = harness
         .processor
         .stage_thread
-        .run(|| {
+        .run(move || {
+            stage_blocked
+                .send(())
+                .expect("the heartbeat task is waiting");
             let extractor = DomainExtractor::new();
             let mut domains = CategoryDomains::default();
             extract_source(
@@ -742,14 +763,13 @@ async fn heartbeat_keeps_writing_during_blocking_work_and_leaves_the_revision_al
                 &Cancellation::default(),
                 &|_| {},
             )?;
-            std::thread::sleep(Duration::from_millis(600));
-            Ok(std::time::Instant::now())
+            Ok(heartbeats.recv_timeout(BLOCKED_STAGE_WAIT).is_ok())
         })
         .await
         .unwrap();
 
-    let fifth_heartbeat_at = heartbeat.await.unwrap();
-    assert!(fifth_heartbeat_at < blocked_until);
+    assert!(fifth_heartbeat_came_while_blocked);
+    assert!(heartbeat.await.unwrap());
     let after = stored_job(&harness.db, &job.id).await;
     assert!(
         after.get_datetime("heartbeat_at").unwrap() > before.get_datetime("heartbeat_at").unwrap()

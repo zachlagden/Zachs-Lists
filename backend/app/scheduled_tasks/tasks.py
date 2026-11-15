@@ -17,16 +17,14 @@ from app.services.default_refresh import (
     DEFAULT_REBUILD_HOUR,
     DEFAULT_REBUILD_MINUTE,
     HOURLY_SYNC_MINUTE,
-    USER_REBUILD_HOUR,
-    USER_REBUILD_MINUTE,
     hourly_check,
     weekly_rebuild,
 )
+from app.utils.weekly_schedule import SCHEDULE_TIMEZONE, USER_REBUILD
 
 logger = logging.getLogger(__name__)
 
 JOB_HISTORY_DAYS = 30
-SCHEDULE_TIMEZONE = "UTC"
 
 
 def delete_finished_jobs_before(cutoff: datetime) -> int:
@@ -83,9 +81,9 @@ def register_scheduled_tasks(app, scheduler):
 
     @scheduler.scheduled_job(
         CronTrigger(
-            day_of_week="sun",
-            hour=USER_REBUILD_HOUR,
-            minute=USER_REBUILD_MINUTE,
+            day_of_week=USER_REBUILD.cron_day,
+            hour=USER_REBUILD.hour,
+            minute=USER_REBUILD.minute,
             timezone=SCHEDULE_TIMEZONE,
         ),
         id="weekly_user_rebuild",

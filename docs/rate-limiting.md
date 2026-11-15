@@ -6,12 +6,12 @@ Flask-Limiter counts requests per route and per client. A route without its own 
 
 These routes are called repeatedly by one open browser session, so each has its own limit, set in `backend/app/config.py`:
 
-| Route                                                                                                                               | Config key               | Limit          |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | -------------- |
-| `GET /api/auth/me`                                                                                                                  | `RATELIMIT_AUTH_ME`      | 60 per minute  |
-| `GET /api/user/jobs`, `GET /api/user/jobs/<id>`, `POST /api/user/jobs/mark-read`, `GET /api/admin/jobs`, `GET /api/admin/jobs/<id>` | `RATELIMIT_JOBS`         | 120 per minute |
-| `POST /api/user/config/url-metadata`                                                                                                | `RATELIMIT_URL_METADATA` | 60 per minute  |
-| `GET /api/admin/stats`                                                                                                              | `RATELIMIT_ADMIN_STATS`  | 60 per minute  |
+| Route                                                                                                                                                                 | Config key               | Limit          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | -------------- |
+| `GET /api/auth/me`                                                                                                                                                    | `RATELIMIT_AUTH_ME`      | 60 per minute  |
+| `GET /api/user/jobs`, `GET /api/user/jobs/<id>`, `POST /api/user/jobs/mark-read`, `GET /api/admin/jobs`, `GET /api/admin/jobs/<id>`, `GET /api/admin/users/<id>/jobs` | `RATELIMIT_JOBS`         | 120 per minute |
+| `POST /api/user/config/url-metadata`                                                                                                                                  | `RATELIMIT_URL_METADATA` | 60 per minute  |
+| `GET /api/admin/stats`                                                                                                                                                | `RATELIMIT_ADMIN_STATS`  | 60 per minute  |
 
 `POST /api/admin/default/sync` is limited to 6 per hour by `RATELIMIT_DEFAULT_SYNC`, because each run calls the GitHub API.
 

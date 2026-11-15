@@ -1,21 +1,8 @@
-import { AxiosError, AxiosHeaders } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
-import { apiErrorMessage } from '../api/apiError';
 import { localInputToUtcIso, utcIsoToLocalInput } from './datetimeLocal';
 import { loginErrorMessage } from './loginErrors';
 
 vi.stubEnv('TZ', 'America/New_York');
-
-function refusal(status: number, data: unknown): AxiosError {
-  const config = { headers: new AxiosHeaders() };
-  return new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, null, {
-    status,
-    statusText: '',
-    headers: {},
-    config,
-    data,
-  });
-}
 
 describe('announcement expiry conversion', () => {
   it('runs in a zone that is not UTC', () => {
@@ -73,32 +60,16 @@ describe('login error messages', () => {
     }
   });
 
-  it('includes the end of a timed ban in local time', () => {
+  it('includes the end of a timed ban in the given zone', () => {
     const until = '2026-01-15T14:30:00.000Z';
-    const message = loginErrorMessage('account_banned', until);
-    expect(message).toContain(new Date(until).toLocaleString());
-    expect(loginErrorMessage('account_banned')).not.toContain('until');
-    expect(loginErrorMessage('account_banned', 'garbage')).not.toContain('until');
-  });
-});
-
-describe('API error messages', () => {
-  it('uses the server message and its details', () => {
-    expect(apiErrorMessage(refusal(400, { error: 'Over the limit' }), 'Failed')).toBe(
-      'Over the limit',
+    const options = { timeZone: 'Europe/London', now: new Date('2026-01-10T09:00:00.000Z') };
+    expect(loginErrorMessage('account_banned', until, options)).toBe(
+      'Your account is banned until 15 Jan, 14:30. You cannot sign in until then.',
     );
     expect(
-      apiErrorMessage(
-        refusal(400, { error: 'Invalid whitelist', details: ['Line 1: bad', 'Line 4: bad'] }),
-        'Failed',
-      ),
-    ).toBe('Invalid whitelist: Line 1: bad, Line 4: bad');
-  });
-
-  it('falls back when the server gave no message', () => {
-    expect(apiErrorMessage(refusal(500, '<html>'), 'Failed')).toBe('Failed');
-    expect(apiErrorMessage(refusal(400, { error: 5 }), 'Failed')).toBe('Failed');
-    expect(apiErrorMessage(new Error('offline'), 'Failed')).toBe('Failed');
-    expect(apiErrorMessage(undefined, 'Failed')).toBe('Failed');
+      loginErrorMessage('account_banned', until, { ...options, timeZone: 'Asia/Tokyo' }),
+    ).toContain('15 Jan, 23:30');
+    expect(loginErrorMessage('account_banned')).not.toContain('until');
+    expect(loginErrorMessage('account_banned', 'garbage')).not.toContain('until');
   });
 });

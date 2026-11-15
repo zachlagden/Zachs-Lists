@@ -124,3 +124,23 @@ def test_bad_config_never_gets_a_save_token(
     assert response.get_json()["has_errors"]
     assert response.get_json()["validation_token"] is None
     assert mongo.db.validation_tokens.count_documents({}) == 0
+
+
+def test_validation_reports_the_revision_its_token_is_bound_to(
+    config_clients: tuple[FlaskClient, FlaskClient],
+) -> None:
+    sam, _ = config_clients
+    first = "https://example.com/source|Example|tracking"
+
+    def validated_revision(content: str) -> int:
+        response = sam.post("/api/user/config/validate", json={"config": content})
+        return response.get_json()["revision"]
+
+    assert validated_revision(first) == 0
+    assert save(sam, first, validate(sam, first)) == 200
+    assert validated_revision(first + "\n# edit") == 1
+    rejected = sam.post(
+        "/api/user/config/validate", json={"config": "http://127.0.0.1/private"}
+    ).get_json()
+    assert rejected["validation_token"] is None
+    assert rejected["revision"] == 1

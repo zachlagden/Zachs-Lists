@@ -630,6 +630,36 @@ def test_user_lists_api_reports_the_published_generation(
     assert {"stats", "limits", "remaining_updates"} <= set(payload)
 
 
+def test_list_dates_are_sent_as_utc_timestamps(api: Api, sam: User) -> None:
+    api.db.users.update_one(
+        {"username": "sam"},
+        {
+            "$set": {
+                "lists": [
+                    {
+                        "name": "all_domains",
+                        "domain_count": 1,
+                        "last_updated": datetime(2026, 1, 2, 3, 4, 5),
+                    },
+                    {"name": "tracking", "domain_count": 1},
+                ]
+            }
+        },
+    )
+    expected = [
+        {
+            "name": "all_domains",
+            "domain_count": 1,
+            "last_updated": "2026-01-02T03:04:05.000Z",
+        },
+        {"name": "tracking", "domain_count": 1},
+    ]
+    client = api.client(sam)
+
+    assert client.get("/api/user/lists").get_json()["lists"] == expected
+    assert client.get("/api/auth/me").get_json()["lists"] == expected
+
+
 def test_user_lists_api_has_null_publication_fields_before_the_first_build(
     api: Api, sam: User
 ) -> None:

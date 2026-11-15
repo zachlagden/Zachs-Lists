@@ -26,6 +26,7 @@ fn downloading_progress() -> JobProgress {
         "a".repeat(64),
         "first_list".into(),
         "https://lists.example.com/first.txt".into(),
+        Some("advertising".into()),
     )])
 }
 

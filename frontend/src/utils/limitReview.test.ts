@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LimitReview } from '../types';
-import {
-  limitConsequence,
-  limitReviewMethodLabel,
-  limitReviewSummary,
-  openLimitReview,
-} from './limitReview';
+import { limitConsequence, limitReviewSummary, openLimitReview } from './limitReview';
 
 const review: LimitReview = {
   actual_domains: 5200000,
@@ -43,12 +38,5 @@ describe('limit review', () => {
     expect(limitConsequence(false)).toBe(
       'Builds over the limit will start to fail once the limit is enforced. Your current lists stay published.',
     );
-  });
-
-  it('names each measurement method and passes an unknown one through', () => {
-    expect(limitReviewMethodLabel('exact')).toBe('Counted from files');
-    expect(limitReviewMethodLabel('build')).toBe('Counted by a build');
-    expect(limitReviewMethodLabel('stored')).toBe('Estimated from stored counts');
-    expect(limitReviewMethodLabel('other')).toBe('other');
   });
 });

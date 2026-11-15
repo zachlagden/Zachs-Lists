@@ -1,3 +1,5 @@
+import re
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -10,6 +12,7 @@ from app.models.system_config import SystemConfig
 from app.models.user import User
 from app.services.build_admission import DEFAULT_TARGET, admit_build
 from app.utils.validators import WhitelistValidationUnavailable
+from app.utils.weekly_schedule import USER_REBUILD
 from conftest import VALID_SOURCES, Api
 
 TWO_SOURCES = f"{VALID_SOURCES}\nhttps://example.org/hosts.txt|Second|advertising"
@@ -288,3 +291,80 @@ def test_community_listing_route_is_gone(api: Api, client: FlaskClient) -> None:
     assert api.client().get("/api/browse/community").status_code == 404
     assert client.get("/api/browse/community").status_code == 404
     assert api.client().get("/api/browse/featured").status_code == 200
+
+
+EXISTING_LISTS_KEYS = {
+    "lists",
+    "published_at",
+    "generation_id",
+    "stats",
+    "limits",
+    "remaining_updates",
+    "enforce_domain_limit",
+}
+
+
+def ended_job(owner: User, name: str, status: str, completed_at: Any) -> dict[str, Any]:
+    return {
+        "job_id": name,
+        "user_id": ObjectId(owner.id),
+        "username": owner.username,
+        "type": "scheduled",
+        "status": status,
+        "created_at": datetime(2026, 1, 1),
+        "completed_at": completed_at,
+    }
+
+
+def test_lists_report_the_next_rebuild_and_no_check_before_any_build(
+    client: FlaskClient,
+) -> None:
+    before = USER_REBUILD.next_after(datetime.utcnow())
+    body = client.get("/api/user/lists").get_json()
+    after = USER_REBUILD.next_after(datetime.utcnow())
+
+    assert set(body) == EXISTING_LISTS_KEYS | {"next_rebuild_at", "last_checked_at"}
+    assert body["last_checked_at"] is None
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T07:30:00\.000Z", body["next_rebuild_at"])
+    next_rebuild = datetime.strptime(body["next_rebuild_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+    assert next_rebuild in (before, after)
+    assert next_rebuild.weekday() == 6
+    assert next_rebuild > datetime.utcnow()
+
+
+def test_lists_report_when_the_sources_were_last_checked(
+    api: Api, client: FlaskClient, sam: User
+) -> None:
+    alex = api.account(4002, "alex")
+    api.db.jobs.insert_many(
+        [
+            ended_job(sam, "built", "completed", datetime(2026, 1, 2, 3, 4, 5)),
+            ended_job(sam, "broken", "failed", datetime(2026, 1, 9, 3, 4, 5)),
+            ended_job(sam, "running", "processing", None),
+            ended_job(alex, "other", "completed", datetime(2026, 1, 8, 3, 4, 5)),
+        ]
+    )
+
+    assert (
+        client.get("/api/user/lists").get_json()["last_checked_at"]
+        == "2026-01-02T03:04:05.000Z"
+    )
+
+    api.db.jobs.insert_one(
+        ended_job(sam, "unchanged", "skipped", datetime(2026, 1, 5, 6, 7, 8, 912000))
+    )
+
+    assert (
+        client.get("/api/user/lists").get_json()["last_checked_at"]
+        == "2026-01-05T06:07:08.912Z"
+    )
+
+
+def test_only_failed_builds_leave_the_last_check_empty(
+    api: Api, client: FlaskClient, sam: User
+) -> None:
+    api.db.jobs.insert_one(
+        ended_job(sam, "broken", "failed", datetime(2026, 1, 9, 3, 4, 5))
+    )
+
+    assert client.get("/api/user/lists").get_json()["last_checked_at"] is None

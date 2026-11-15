@@ -4,6 +4,8 @@ Authentication blueprint - GitHub OAuth.
 
 import secrets
 import re
+from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlencode
 from functools import wraps
 from flask import (
@@ -26,38 +28,71 @@ from app.utils.time import utc_iso
 auth_bp = Blueprint("auth", __name__)
 
 
+SessionRefusal = Literal["signed_out", "unknown_user", "stale", "disabled", "banned"]
+
+
+@dataclass(frozen=True)
+class SessionCheck:
+    user: User | None
+    refusal: SessionRefusal | None
+    refused_account: User | None = None
+
+
+def _session_refusal(user: User | None) -> SessionRefusal | None:
+    if user is None:
+        return "unknown_user"
+    if session.get("auth_version", 0) != user.auth_version:
+        return "stale"
+    if not user.is_enabled:
+        return "disabled"
+    if user.is_banned:
+        return "banned"
+    return None
+
+
+def check_session() -> SessionCheck:
+    user_id = session.get("user_id")
+    if not user_id:
+        return SessionCheck(None, "signed_out")
+    user = User.get_by_id(user_id)
+    refusal = _session_refusal(user)
+    if refusal is None:
+        return SessionCheck(user, None)
+    session.clear()
+    return SessionCheck(None, refusal, user)
+
+
+def session_user() -> User | None:
+    return check_session().user
+
+
+def _refusal_response(check: SessionCheck) -> tuple[Response, int]:
+    if check.refusal == "signed_out":
+        return jsonify({"error": "Authentication required"}), 401
+    if check.refusal == "unknown_user":
+        return jsonify({"error": "User not found"}), 401
+    if check.refusal == "stale":
+        return jsonify({"error": "Session expired; sign in again"}), 401
+    if check.refusal == "disabled":
+        return jsonify({"error": "Account disabled"}), 403
+    ban_info: dict[str, str | None] = {"error": "Account banned"}
+    account = check.refused_account
+    if account is not None and account.ban_reason:
+        ban_info["reason"] = account.ban_reason
+    if account is not None and account.banned_until:
+        ban_info["until"] = utc_iso(account.banned_until)
+    return jsonify(ban_info), 403
+
+
 def login_required(f):
     """Decorator to require authentication."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
-        user_id = session.get("user_id")
-        if not user_id:
-            return jsonify({"error": "Authentication required"}), 401
-
-        user = User.get_by_id(user_id)
-        if not user:
-            session.clear()
-            return jsonify({"error": "User not found"}), 401
-
-        if session.get("auth_version", 0) != user.auth_version:
-            session.clear()
-            return jsonify({"error": "Session expired; sign in again"}), 401
-
-        if not user.is_enabled:
-            session.clear()
-            return jsonify({"error": "Account disabled"}), 403
-
-        if user.is_banned:
-            session.clear()
-            ban_info = {"error": "Account banned"}
-            if user.ban_reason:
-                ban_info["reason"] = user.ban_reason
-            if user.banned_until:
-                ban_info["until"] = utc_iso(user.banned_until)
-            return jsonify(ban_info), 403
-
-        return f(user, *args, **kwargs)
+        check = check_session()
+        if check.user is None:
+            return _refusal_response(check)
+        return f(check.user, *args, **kwargs)
 
     return decorated
 
@@ -253,6 +288,18 @@ def logout():
             user.revoke_sessions()
     session.clear()
     return jsonify({"success": True})
+
+
+@auth_bp.route("/session")
+@limiter.limit(configured_limit("RATELIMIT_AUTH_ME"))
+def get_session() -> Response:
+    user = session_user()
+    if user is None:
+        return jsonify({"user": None})
+    ip = get_client_ip()
+    if ip != "unknown":
+        user.log_ip_access(ip)
+    return jsonify({"user": user.to_dict()})
 
 
 @auth_bp.route("/me")

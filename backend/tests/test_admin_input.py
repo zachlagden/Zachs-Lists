@@ -302,6 +302,37 @@ def test_user_listing_clamps_pagination(
     assert body["total"] == 1
 
 
+def test_banned_only_lists_accounts_with_a_ban_still_running(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    now = datetime.utcnow()
+    api.account(3010, "banned-now", banned_until=now + timedelta(days=1))
+    api.account(3011, "ban-ended", banned_until=now - timedelta(days=1))
+
+    def names(**query: str) -> list[str]:
+        response = admin_client.get("/api/admin/users", query_string=query)
+        assert response.status_code == 200
+        return [user["username"] for user in response.get_json()["users"]]
+
+    assert names() == ["ban-ended", "banned-now", "sam"]
+    assert names(banned_only="true") == ["banned-now"]
+
+
+def test_admin_stats_count_the_workers_with_a_recent_heartbeat(
+    api: Api, admin_client: FlaskClient
+) -> None:
+    now = datetime.utcnow()
+    api.db.workers.insert_many(
+        [
+            {"worker_id": "recent", "last_seen_at": now},
+            {"worker_id": "silent", "last_seen_at": now - timedelta(hours=1)},
+        ]
+    )
+    response = admin_client.get("/api/admin/stats")
+    assert response.status_code == 200
+    assert response.get_json()["workers"] == {"alive": 1}
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -721,3 +752,203 @@ def test_valid_default_config_is_saved_in_one_document(
         "",
         "robin",
     )
+
+
+def user_job(owner: User, number: int, status: str = "completed") -> dict[str, Any]:
+    return {
+        "job_id": f"{owner.username}-{number}",
+        "user_id": ObjectId(owner.id),
+        "username": owner.username,
+        "type": "manual",
+        "status": status,
+        "created_at": datetime(2026, 1, 1) + timedelta(hours=number),
+    }
+
+
+def test_user_jobs_listing_pages_one_users_jobs_newest_first(
+    api: Api, admin: User, admin_client: FlaskClient, sam: User
+) -> None:
+    api.db.jobs.insert_many(
+        [user_job(sam, number) for number in range(1, 4)]
+        + [user_job(sam, 4, "queued"), user_job(admin, 9)]
+    )
+
+    first = admin_client.get(f"/api/admin/users/{sam.id}/jobs?per_page=3")
+
+    assert first.status_code == 200
+    body = first.get_json()
+    assert set(body) == {"jobs", "page", "per_page", "total", "pages"}
+    assert (body["page"], body["per_page"], body["total"], body["pages"]) == (
+        1,
+        3,
+        4,
+        2,
+    )
+    assert [job["job_id"] for job in body["jobs"]] == ["sam-4", "sam-3", "sam-2"]
+    all_jobs = admin_client.get("/api/admin/jobs").get_json()["jobs"]
+    assert body["jobs"] == [job for job in all_jobs if job["username"] == "sam"][:3]
+    assert body["jobs"][0]["queue_info"]["position"] == 1
+    assert body["jobs"][1]["created_at"] == "2026-01-01T03:00:00.000Z"
+
+    second = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?per_page=3&page=2"
+    ).get_json()
+    assert [job["job_id"] for job in second["jobs"]] == ["sam-1"]
+    beyond = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?per_page=3&page=9"
+    ).get_json()
+    assert (beyond["jobs"], beyond["page"], beyond["total"]) == ([], 9, 4)
+
+
+def test_user_jobs_listing_clamps_pagination_to_its_bounds(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    api.db.jobs.insert_one(user_job(sam, 1))
+
+    default = admin_client.get(f"/api/admin/users/{sam.id}/jobs").get_json()
+    assert (default["page"], default["per_page"]) == (1, 25)
+    low = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?page=0&per_page=0"
+    ).get_json()
+    assert (low["page"], low["per_page"]) == (1, 1)
+    high = admin_client.get(
+        f"/api/admin/users/{sam.id}/jobs?page=abc&per_page=5000"
+    ).get_json()
+    assert (high["page"], high["per_page"]) == (1, 100)
+    assert len(high["jobs"]) == 1
+
+
+def test_user_jobs_listing_is_empty_for_a_user_without_jobs(
+    admin_client: FlaskClient, sam: User
+) -> None:
+    assert admin_client.get(f"/api/admin/users/{sam.id}/jobs").get_json() == {
+        "jobs": [],
+        "page": 1,
+        "per_page": 25,
+        "total": 0,
+        "pages": 1,
+    }
+
+
+def test_user_jobs_listing_refuses_unknown_users_and_non_admins(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    for user_id in (str(ObjectId()), "undefined"):
+        missing = admin_client.get(f"/api/admin/users/{user_id}/jobs")
+        assert missing.status_code == 404
+        assert missing.get_json() == {"error": "User not found"}
+
+    assert api.client(sam).get(f"/api/admin/users/{sam.id}/jobs").status_code == 403
+    assert api.client().get(f"/api/admin/users/{sam.id}/jobs").status_code == 401
+
+
+def featured_entries(api: Api, sam: User, names: tuple[str, ...]) -> list[str]:
+    api.db.users.update_one(
+        {"username": "sam"},
+        {"$set": {"lists": [{"name": name, "domain_count": 1} for name in names]}},
+    )
+    stored = api.db.featured_lists.insert_many(
+        [
+            {"username": "sam", "list_name": name, "order": position}
+            for position, name in enumerate(names, start=1)
+        ]
+    )
+    return [str(entry_id) for entry_id in stored.inserted_ids]
+
+
+def featured_names(client: FlaskClient) -> list[str]:
+    listing = client.get("/api/admin/featured").get_json()["featured"]
+    return [entry["list_name"] for entry in listing]
+
+
+def test_featured_order_update_returns_the_item_and_moves_it(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    first, second, third = featured_entries(api, sam, ("first", "second", "third"))
+
+    moved = admin_client.put(f"/api/admin/featured/{third}", json={"order": 2})
+
+    assert moved.status_code == 200
+    assert moved.get_json() == {
+        "success": True,
+        "featured": {
+            "id": third,
+            "username": "sam",
+            "list_name": "third",
+            "description": "",
+            "order": 2,
+        },
+    }
+    assert (
+        admin_client.put(f"/api/admin/featured/{second}", json={"order": 3}).status_code
+        == 200
+    )
+    assert featured_names(admin_client) == ["first", "third", "second"]
+    public = api.client().get("/api/browse/featured").get_json()
+    assert [entry["list_name"] for entry in public] == ["first", "third", "second"]
+    assert first in {
+        entry["id"]
+        for entry in admin_client.get("/api/admin/featured").get_json()["featured"]
+    }
+
+
+def test_featured_lists_with_equal_order_sort_oldest_first(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    first, second, third = featured_entries(api, sam, ("first", "second", "third"))
+
+    tied = admin_client.put(f"/api/admin/featured/{third}", json={"order": 1})
+
+    assert tied.status_code == 200
+    assert featured_names(admin_client) == ["first", "third", "second"]
+    assert (
+        admin_client.put(f"/api/admin/featured/{second}", json={"order": 0}).status_code
+        == 200
+    )
+    assert featured_names(admin_client) == ["second", "first", "third"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"order": None},
+        {"order": "2"},
+        {"order": 1.5},
+        {"order": True},
+        {"order": -1},
+        {"order": 1_000_001},
+        {"order": [2]},
+    ],
+)
+def test_featured_order_update_refuses_an_invalid_order(
+    api: Api, admin_client: FlaskClient, sam: User, body: dict[str, Any]
+) -> None:
+    (entry,) = featured_entries(api, sam, ("first",))
+
+    refusal(admin_client.put(f"/api/admin/featured/{entry}", json=body), "order")
+
+    assert api.db.featured_lists.find_one({})["order"] == 1
+
+
+def test_featured_order_update_refuses_bad_ids_and_non_admins(
+    api: Api, admin_client: FlaskClient, sam: User
+) -> None:
+    (entry,) = featured_entries(api, sam, ("first",))
+
+    refusal(
+        admin_client.put("/api/admin/featured/undefined", json={"order": 2}),
+        "featured_id",
+    )
+    not_an_object = admin_client.put(f"/api/admin/featured/{entry}", json=[2])
+    assert not_an_object.status_code == 400
+    missing = admin_client.put(f"/api/admin/featured/{ObjectId()}", json={"order": 2})
+    assert missing.status_code == 404
+    assert missing.get_json() == {"error": "Featured list not found"}
+    assert api.db.featured_lists.count_documents({}) == 1
+
+    blocked = api.client(sam).put(f"/api/admin/featured/{entry}", json={"order": 2})
+    assert blocked.status_code == 403
+    signed_out = api.client().put(f"/api/admin/featured/{entry}", json={"order": 2})
+    assert signed_out.status_code == 401
+    assert api.db.featured_lists.find_one({})["order"] == 1

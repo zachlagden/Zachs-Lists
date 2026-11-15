@@ -204,6 +204,21 @@ class Job:
         return [cls(data) for data in cursor]
 
     @classmethod
+    def page_for_user(
+        cls, user_id: ObjectId, page: int, per_page: int
+    ) -> Tuple[List["Job"], int]:
+        query: Dict[str, Any] = {"user_id": user_id}
+        total = mongo.db[cls.COLLECTION].count_documents(query)
+        cursor = (
+            mongo.db[cls.COLLECTION]
+            .find(query)
+            .sort([("created_at", -1), ("_id", -1)])
+            .skip((page - 1) * per_page)
+            .limit(per_page)
+        )
+        return [cls(data) for data in cursor], total
+
+    @classmethod
     def get_recent(cls, limit: int = 50) -> List["Job"]:
         """Get recent jobs."""
         cursor = mongo.db[cls.COLLECTION].find().sort("created_at", -1).limit(limit)
@@ -363,6 +378,19 @@ class Job:
             query["type"] = job_type
 
         return mongo.db[cls.COLLECTION].count_documents(query) > 0
+
+    @classmethod
+    def last_ended_at(cls, user_id: ObjectId) -> Optional[datetime]:
+        last_ended = mongo.db[cls.COLLECTION].find_one(
+            {
+                "user_id": user_id,
+                "status": {"$in": list(cls.COOLDOWN_STATUSES)},
+                "completed_at": {"$type": "date"},
+            },
+            {"completed_at": 1},
+            sort=[("completed_at", -1)],
+        )
+        return last_ended["completed_at"] if last_ended else None
 
     @classmethod
     def get_cooldown_remaining(

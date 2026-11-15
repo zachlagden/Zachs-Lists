@@ -19,8 +19,10 @@ from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
 from app.models.featured_list import FeaturedList
 from app.models.limit_request import LimitRequest
+from app.models.worker import Worker
 from app.services.admin_forms import (
     MAX_DESCRIPTION_LENGTH,
+    MAX_FEATURED_ORDER,
     DefaultConfigCheckUnavailable,
     announcement_fields,
     approved_limit,
@@ -46,6 +48,7 @@ from app.utils.request_fields import (
     register_field_errors,
     required_bool,
     required_choice,
+    required_int,
     required_string,
 )
 from app.utils.time import utc_iso
@@ -78,6 +81,7 @@ def list_users(user: User):
     show_regular = query_flag("show_regular", True)
     show_enabled = query_flag("show_enabled", True)
     show_disabled = query_flag("show_disabled", True)
+    banned_only = query_flag("banned_only", False)
 
     # Get filtered users (exclude current user)
     users, total = User.get_all_filtered(
@@ -89,6 +93,7 @@ def list_users(user: User):
         show_enabled=show_enabled,
         show_disabled=show_disabled,
         exclude_user_id=ObjectId(user.id),
+        banned_only=banned_only,
     )
 
     return jsonify(
@@ -283,6 +288,29 @@ def get_user_ips(admin: User, user_id: str):
     )
 
 
+@admin_bp.route("/users/<user_id>/jobs", methods=["GET"])
+@limiter.limit(configured_limit("RATELIMIT_JOBS"))
+@admin_required
+def list_user_jobs(admin: User, user_id: str):
+    """List one user's build jobs, newest first."""
+    target_user = User.get_by_id(user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    page, per_page = pagination()
+    jobs, total = Job.page_for_user(ObjectId(target_user.id), page, per_page)
+
+    return jsonify(
+        {
+            "jobs": job_payloads(jobs),
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+    )
+
+
 @admin_bp.route("/rebuild/<user_id>", methods=["POST"])
 @admin_required
 def trigger_rebuild(admin: User, user_id: str):
@@ -394,6 +422,11 @@ def get_stats(admin: User):
                 "total_mb": round(disk_usage / (1024 * 1024), 2),
             },
             "analytics": analytics,
+            "workers": {
+                "alive": Worker.count_alive(
+                    current_app.config.get("WORKER_STALE_AFTER_SECONDS", 60)
+                ),
+            },
             "limits": {
                 "enforce_domain_limit": limit_review.enforcing_domain_limit(),
             },
@@ -601,6 +634,24 @@ def add_featured_list(admin: User):
 
     featured = entry.to_dict()
     return jsonify({"success": True, "id": featured["id"], "featured": featured})
+
+
+@admin_bp.route("/featured/<featured_id>", methods=["PUT"])
+@admin_required
+def reorder_featured_list(admin: User, featured_id: str):
+    """Set a featured list's position."""
+    entry_id = object_id(featured_id, "featured_id")
+    order = required_int(json_object(), "order", 0, MAX_FEATURED_ORDER)
+
+    entry = FeaturedList.set_order(entry_id, order)
+    if entry is None:
+        return jsonify({"error": "Featured list not found"}), 404
+
+    current_app.logger.info(
+        f"Admin {admin.username} set featured list {featured_id} to order {order}"
+    )
+
+    return jsonify({"success": True, "featured": entry.to_dict()})
 
 
 @admin_bp.route("/featured/<featured_id>", methods=["DELETE"])
