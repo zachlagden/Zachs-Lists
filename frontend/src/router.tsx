@@ -51,7 +51,8 @@ export const routes: RouteObject[] = [
                   },
                   { path: 'config', lazy: page(() => import('./pages/config/ConfigPage')) },
                   { path: 'lists', lazy: page(() => import('./pages/lists/ListsPage')) },
-                  { path: 'jobs', lazy: page(() => import('./pages/JobsPage')) },
+                  { path: 'jobs', lazy: page(() => import('./pages/builds/BuildHistoryPage')) },
+                  { path: 'jobs/:jobId', lazy: page(() => import('./pages/builds/BuildPage')) },
                   {
                     element: <RequireAdmin />,
                     children: [
@@ -66,7 +67,7 @@ export const routes: RouteObject[] = [
                           },
                           {
                             path: 'jobs/:jobId',
-                            lazy: page(() => import('./pages/AdminJobDetailPage')),
+                            lazy: page(() => import('./pages/builds/AdminBuildPage')),
                           },
                         ],
                       },

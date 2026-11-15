@@ -6,9 +6,7 @@ import tseslint from 'typescript-eslint';
 
 const pagesAwaitingRebuild = [
   'src/pages/AdminPage.tsx',
-  'src/pages/AdminJobDetailPage.tsx',
   'src/pages/AdminUserDetailPage.tsx',
-  'src/pages/JobsPage.tsx',
   'src/components/jobs/**',
 ];
 
