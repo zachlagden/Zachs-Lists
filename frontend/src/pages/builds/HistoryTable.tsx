@@ -11,10 +11,10 @@ import {
 import { cn } from '../../lib/cn';
 import { formatDateTime, formatInteger, formatSignedChange } from '../../lib/format';
 import type { Job } from '../../types';
-import { domainChange, domainsAfter } from '../dashboard/dashboardFacts';
-import { attemptSeconds, requestedBy } from './buildFacts';
+import { attemptSeconds, domainChange, domainsAfter } from '../../lib/builds';
+import { requestedBy } from './buildFacts';
 import { isUnreadFailure } from './historyFacts';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 
 function DomainsCell({ jobs, job }: { jobs: Job[]; job: Job }) {
   if (job.status === 'failed') {

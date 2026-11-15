@@ -4,17 +4,11 @@ import { CopyButton } from '../../components/ui/CopyButton';
 import { KeyValueList, type KeyValueItem } from '../../components/ui/Layout';
 import { formatDate, formatDateTime, formatInteger, pluralise } from '../../lib/format';
 import type { Job } from '../../types';
-import {
-  attemptStartedAt,
-  buildSources,
-  isDefaultListsBuild,
-  queueWaitSeconds,
-  requestedBy,
-  type Viewer,
-} from './buildFacts';
+import { attemptStartedAt, isDefaultListsBuild } from '../../lib/builds';
+import { buildSources, queueWaitSeconds, requestedBy, type Viewer } from './buildFacts';
 import { ClockTime, Duration, LiveDuration } from './Durations';
 import { sourceTally } from './sourceFacts';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 
 function Moment({ at }: { at: string }) {
   const today = formatDateTime(at).startsWith('Today');

@@ -1,11 +1,12 @@
 import { io, Socket } from 'socket.io-client';
-import { authApi } from '../api/client';
+import { fetchCurrentUser } from '../api/auth';
+import { toApiError } from '../api/errors';
 import { queryClient } from '../api/queryClient';
-import { useAuthStore, useConnectionStore, useJobsStore, useUserDataStore } from '../store';
+import { useAuthStore, useConnectionStore } from '../store';
 import { reconnectDelay, stateAfterFailures } from '../realtime/backoff';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || '';
-export let socket: Socket | null = null;
+let socket: Socket | null = null;
 let sessionCheckSocket: Socket | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
@@ -20,7 +21,7 @@ export function hasReconnected(): boolean {
   return connections > 1;
 }
 
-export function disconnectSocket(): void {
+function disconnectSocket(): void {
   clearRetry();
   socket?.disconnect();
   socket = null;
@@ -33,8 +34,6 @@ export function disconnectSocket(): void {
 export function endSession(): void {
   disconnectSocket();
   useAuthStore.getState().setUser(null);
-  useUserDataStore.getState().reset();
-  useJobsStore.getState().reset();
   queryClient.clear();
 }
 
@@ -53,14 +52,14 @@ async function reconnectIfSignedIn(current: Socket, immediately: boolean): Promi
   if (!useAuthStore.getState().isAuthenticated) return;
   sessionCheckSocket = current;
   try {
-    const user = await authApi.getMe();
+    const user = await fetchCurrentUser();
     if (socket !== current) return;
     useAuthStore.getState().setUser(user);
     if (immediately) current.connect();
     else scheduleReconnect(current);
   } catch (error: unknown) {
     if (socket !== current) return;
-    const status = (error as { response?: { status?: number } }).response?.status;
+    const status = toApiError(error).status;
     if (status === 401 || status === 403) endSession();
     else scheduleReconnect(current);
   } finally {

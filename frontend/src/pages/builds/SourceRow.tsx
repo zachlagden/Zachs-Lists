@@ -7,7 +7,7 @@ import { cn } from '../../lib/cn';
 import { formatBytes, formatInteger, formatSignedChange } from '../../lib/format';
 import type { SourceProgress } from '../../types';
 import { downloadRatio, nameParts, sourceHost, sourceNote } from './sourceFacts';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 
 function downloadText(source: SourceProgress, outcome: SourceOutcome): string {
   switch (outcome) {

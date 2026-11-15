@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { AdminUserDetail } from '../../../api/admin';
 import { Skeleton } from '../../../components/ui/Layout';
-import { StatusPill } from '../../../components/ui/StatusPill';
+import { DescribedPill } from '../../../components/ui/StatusPill';
 import {
   Table,
   TableBody,
@@ -11,21 +11,7 @@ import {
   TableRow,
 } from '../../../components/ui/Table';
 import { formatDate, formatInteger, formatRelativeTime } from '../../../lib/format';
-import {
-  avatarInitial,
-  lastSeen,
-  roleDescription,
-  stateDescription,
-  type PillDescription,
-} from './userFacts';
-
-function Pill({ description }: { description: PillDescription }) {
-  return (
-    <StatusPill tone={description.tone} icon={description.icon}>
-      {description.label}
-    </StatusPill>
-  );
-}
+import { avatarInitial, lastSeen, roleDescription, stateDescription } from './userFacts';
 
 export function Avatar({ username, large = false }: { username: string; large?: boolean }) {
   return (
@@ -83,10 +69,10 @@ export function UsersTable({ users, now }: { users: AdminUserDetail[]; now: Date
                 </span>
               </TableCell>
               <TableCell hideOnNarrow>
-                <Pill description={roleDescription(user)} />
+                <DescribedPill description={roleDescription(user)} />
               </TableCell>
               <TableCell>
-                <Pill description={stateDescription(user)} />
+                <DescribedPill description={stateDescription(user)} />
               </TableCell>
               <TableCell align="right" hideOnNarrow>
                 {formatInteger(user.lists.length)}

@@ -48,7 +48,7 @@ export function StatusPill({
   );
 }
 
-function DescribedPill({
+export function DescribedPill({
   description,
   className,
 }: {

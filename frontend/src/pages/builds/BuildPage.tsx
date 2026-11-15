@@ -6,7 +6,8 @@ import { configQuery } from '../../api/config';
 import { toApiError } from '../../api/errors';
 import { jobQuery, jobsKeys, type JobsResponse } from '../../api/jobs';
 import { userListsQuery } from '../../api/lists';
-import { parseConfig } from '../../components/config/types';
+import { parseDraft } from '../../components/config/lineDraft';
+import { analyseSources } from '../../components/config/sourceLines';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { BuildProblem } from './BuildProblem';
 import { BuildView, BuildViewSkeleton } from './BuildView';
@@ -16,8 +17,8 @@ import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
 function categoriesByUrl(config: string | undefined): ReadonlyMap<string, string> | null {
   if (!config) return null;
   const categories = new Map<string, string>();
-  for (const line of parseConfig(config)) {
-    if (!line.isComment && line.url && line.category) categories.set(line.url, line.category);
+  for (const { parsed } of analyseSources(parseDraft(config), [])) {
+    if (parsed.kind === 'source' && parsed.category) categories.set(parsed.url, parsed.category);
   }
   return categories;
 }
@@ -31,9 +32,7 @@ export default function BuildPage() {
   const build = useQuery({
     ...jobQuery(jobId),
     initialData: () =>
-      client
-        .getQueryData<JobsResponse>(jobsKeys.list())
-        ?.jobs.find((job) => job.job_id === jobId),
+      client.getQueryData<JobsResponse>(jobsKeys.list())?.jobs.find((job) => job.job_id === jobId),
     initialDataUpdatedAt: () => client.getQueryState(jobsKeys.list())?.dataUpdatedAt,
   });
   const job = build.data;

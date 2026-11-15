@@ -15,15 +15,14 @@ import {
   pluralise,
 } from '../../lib/format';
 import type { Job } from '../../types';
+import { domainChange, sourceProblemCause } from '../../lib/builds';
 import {
   describeAttention,
   describeManualBuilds,
-  domainChange,
   lastFinishedJob,
   lastSourceCheck,
   nextScheduledRebuild,
   publishedJob,
-  sourceFailureCause,
   sourceSummary,
   type PublicationState,
 } from './dashboardFacts';
@@ -116,7 +115,7 @@ function summarySentence({
   if (state === 'published-last-failed') {
     const failed = lastFinishedJob(jobs);
     sentences.push(
-      `${sourceFailureCause(failed?.result?.errors[0])} Your earlier list is still being served.`,
+      `${sourceProblemCause(failed?.result?.errors[0]) || 'The last build failed.'} Your earlier list is still being served.`,
     );
   }
   const attention = describeAttention(sourceSummary(sources));

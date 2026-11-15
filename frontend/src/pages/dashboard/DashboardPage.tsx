@@ -6,17 +6,18 @@ import { configQuery } from '../../api/config';
 import { toApiError } from '../../api/errors';
 import { jobsKeys, jobsQuery, startBuild } from '../../api/jobs';
 import { listsKeys, userListsQuery, type UserListsResponse } from '../../api/lists';
-import { parseConfig } from '../../components/config/types';
+import { countSourcesInText } from '../../components/config/sourceLines';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { LoadingRegion, PageHeader, Stack } from '../../components/ui/Layout';
 import { ErrorState } from '../../components/ui/States';
+import { describeBuildRefusal } from '../../lib/builds';
 import { useNow } from '../../lib/useNow';
 import { useAuthStore } from '../../store';
 import { openLimitReview } from '../../utils/limitReview';
-import { activeJob, describeBuildRefusal, publicationState, publishedJob } from './dashboardFacts';
+import { activeJob, publicationState, publishedJob } from './dashboardFacts';
 import { Figures, FiguresSkeleton } from './Figures';
 import { ListAddress } from './ListAddress';
 import { NeedsAttention } from './NeedsAttention';
@@ -25,11 +26,6 @@ import { PublishedState, PublishedStateSkeleton } from './PublishedState';
 import { RecentBuilds } from './RecentBuilds';
 
 const OVER_LIMIT_NOTIFICATION = 'domain_limit_exceeded';
-
-function countSources(config: string | undefined): number {
-  if (!config) return 0;
-  return parseConfig(config).filter((line) => !line.isComment && line.url).length;
-}
 
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
@@ -63,7 +59,7 @@ export default function DashboardPage() {
   if (!user) return null;
 
   const jobList = jobs.data?.jobs ?? [];
-  const configSourceCount = countSources(config.data?.config);
+  const configSourceCount = countSourcesInText(config.data?.config ?? '');
   const review = user.is_admin ? null : openLimitReview(user.limit_review);
   const running = activeJob(jobList);
   const core = lists.data && jobs.data && config.data ? lists.data : null;

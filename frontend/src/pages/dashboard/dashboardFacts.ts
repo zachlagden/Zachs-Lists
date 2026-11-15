@@ -1,13 +1,11 @@
-import type { ApiError } from '../../api/errors';
-import { buildRefusal } from '../../api/jobs';
 import type { UserListsResponse } from '../../api/lists';
 import { sourceOutcome } from '../../components/ui/status';
-import { durationBetween, formatDateTime, formatDuration, parseApiDate } from '../../lib/format';
+import { sourceProblemCause } from '../../lib/builds';
+import { formatDateTime } from '../../lib/format';
+import { ADULT_CONTENT_LIST, COMBINED_LIST } from '../../lib/listCatalogue';
 import { isActive } from '../../realtime/jobMerge';
-import type { Job, LimitReview, ListFormat, SourceProgress, UserList } from '../../types';
+import type { Job, LimitReview, SourceProgress, UserList } from '../../types';
 
-export const COMBINED_LIST = 'all_domains';
-export const CATEGORY_LEFT_OUT_OF_COMBINED_LIST = 'nsfw';
 export const RECENT_BUILDS_SHOWN = 5;
 
 const USER_REBUILD_WEEKDAY_UTC = 0;
@@ -69,31 +67,6 @@ export function lastSourceCheck(jobs: Job[]): SourceCheck | null {
   return { at: job.completed_at, changed: job.status === 'completed' };
 }
 
-function previousCompleted(jobs: Job[], job: Job): Job | null {
-  const index = jobs.findIndex((candidate) => candidate.job_id === job.job_id);
-  if (index === -1) return null;
-  return jobs.slice(index + 1).find((candidate) => candidate.status === 'completed') ?? null;
-}
-
-export function domainsAfter(jobs: Job[], job: Job): number | null {
-  if (job.status === 'completed') return job.result?.unique_domains ?? null;
-  if (job.status === 'skipped') return previousCompleted(jobs, job)?.result?.unique_domains ?? null;
-  return null;
-}
-
-export function domainChange(jobs: Job[], job: Job): number | null {
-  if (job.status === 'skipped') return 0;
-  if (job.status !== 'completed' || !job.result) return null;
-  const before = previousCompleted(jobs, job)?.result?.unique_domains;
-  return before === undefined ? null : job.result.unique_domains - before;
-}
-
-export function buildDurationSeconds(job: Job, now: Date): number | null {
-  const started = job.started_at ?? job.attempt_started_at;
-  if (!started) return null;
-  return durationBetween(started, job.completed_at ?? now);
-}
-
 export type PublicationState =
   | 'no-config'
   | 'never-built'
@@ -131,7 +104,7 @@ export function domainUsage(
 ): DomainUsage {
   const limit = lists.limits.max_domains;
   const measured = publishedJob(jobs, lists.generation_id)?.result?.limit?.actual_domains;
-  const leftOut = listCount(lists.lists, CATEGORY_LEFT_OUT_OF_COMBINED_LIST);
+  const leftOut = listCount(lists.lists, ADULT_CONTENT_LIST);
   const combined = listCount(lists.lists, COMBINED_LIST) || lists.stats.total_domains;
   let domains = combined + leftOut;
   let exact = leftOut === 0;
@@ -185,23 +158,10 @@ export interface AttentionItem {
   detail: string;
 }
 
-function sentence(text: string | null): string {
-  const trimmed = (text ?? '').trim();
-  if (!trimmed) return '';
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-}
-
-export function sourceFailureCause(report: string | null | undefined): string {
-  const text = (report ?? '').trim();
-  if (!text) return 'The download failed.';
-  const bracketed = /\(([^)]+)\)/.exec(text);
-  return sentence(bracketed ? bracketed[1] : text.split(';')[0]);
-}
-
 export function attentionItems(sources: SourceProgress[]): AttentionItem[] {
   return sources.flatMap((source): AttentionItem[] => {
     const outcome = sourceOutcome(source);
-    const reason = sourceFailureCause(source.error ?? source.warnings[0]);
+    const reason = sourceProblemCause(source.error ?? source.warnings[0]) || 'The download failed.';
     if (outcome === 'failed') {
       return [
         {
@@ -242,28 +202,8 @@ export function describeAttention(summary: SourceSummary): string {
   return `${subject}: ${parts.join(' and ')}.`;
 }
 
-export function compressedSize(
-  job: Job | null,
-  listName: string,
-  format: ListFormat,
-): number | null {
-  const file = job?.result?.output_files.find(
-    (candidate) => candidate.format === format && candidate.name === `${listName}_${format}.txt.gz`,
-  );
-  return file ? file.size_bytes : null;
-}
-
 export function categoryLists(lists: UserList[]): UserList[] {
   return lists.filter((list) => list.name !== COMBINED_LIST);
-}
-
-export function listAddress(
-  siteUrl: string,
-  username: string,
-  name: string,
-  format: ListFormat,
-): string {
-  return `${siteUrl}/u/${username}/${name}.txt?format=${format}`;
 }
 
 export function describeManualBuilds(
@@ -277,35 +217,4 @@ export function describeManualBuilds(
     return `No manual builds left this week. More on ${formatDateTime(nextManualBuildReset(now), { now })}`;
   }
   return `${remaining} of ${perWeek} manual builds left this week`;
-}
-
-export function describeBuildRefusal(error: ApiError, now: Date = new Date()): string {
-  const refusal = buildRefusal(error);
-  if (!refusal) {
-    return error.kind === 'http'
-      ? 'The build could not be started. Try again in a moment.'
-      : `${error.message} The build was not started.`;
-  }
-  switch (refusal.code) {
-    case 'cooldown':
-      return typeof refusal.cooldown_remaining === 'number'
-        ? `A build finished recently. You can start another in ${formatDuration(refusal.cooldown_remaining)}.`
-        : sentence(refusal.error);
-    case 'weekly_limit': {
-      const resets = parseApiDate(refusal.resets_at);
-      return resets
-        ? `You have used all of this week's manual builds. More on ${formatDateTime(resets, { now })}.`
-        : sentence(refusal.error);
-    }
-    case 'build_active':
-      return 'A build is already running. It appears under recent builds.';
-    case 'no_config':
-      return 'There are no sources to build from yet. Add some on the Configuration page first.';
-    case 'invalid_config': {
-      const problems = (refusal.errors ?? []).slice(0, 3).join('; ');
-      return `Your sources have a problem, so the build was not started${problems ? `: ${problems}` : ''}. Fix it on the Configuration page, then build again.`;
-    }
-    default:
-      return sentence(refusal.error);
-  }
 }

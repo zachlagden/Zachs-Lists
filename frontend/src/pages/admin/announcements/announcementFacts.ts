@@ -1,7 +1,5 @@
 import type { AnnouncementSubmission, AnnouncementType } from '../../../api/admin';
-import type { AlertTone } from '../../../components/ui/Alert';
-import type { IconName } from '../../../components/ui/icons';
-import type { StatusTone } from '../../../components/ui/status';
+import type { StatusDescription } from '../../../components/ui/status';
 import { parseApiDate } from '../../../lib/format';
 import type { Announcement } from '../../../types';
 import { localInputToUtcIso, utcIsoToLocalInput } from '../../../utils/datetimeLocal';
@@ -15,25 +13,13 @@ export const ANNOUNCEMENT_TYPES: ReadonlyArray<{ value: AnnouncementType; label:
   { value: 'critical', label: 'Critical' },
 ];
 
-export const ANNOUNCEMENT_TONES: Record<AnnouncementType, AlertTone> = {
-  info: 'info',
-  warning: 'warn',
-  critical: 'fail',
-};
-
-export interface PillDescription {
-  tone: StatusTone;
-  icon: IconName;
-  label: string;
-}
-
-const TYPE_PILLS: Record<AnnouncementType, PillDescription> = {
+const TYPE_PILLS: Record<AnnouncementType, StatusDescription> = {
   info: { tone: 'info', icon: 'info', label: 'Information' },
   warning: { tone: 'warn', icon: 'warn', label: 'Warning' },
   critical: { tone: 'fail', icon: 'fail', label: 'Critical' },
 };
 
-export function typePill(type: AnnouncementType): PillDescription {
+export function typePill(type: AnnouncementType): StatusDescription {
   return TYPE_PILLS[type] ?? TYPE_PILLS.info;
 }
 
@@ -48,13 +34,13 @@ export function announcementState(
   return expires && expires.getTime() <= now.getTime() ? 'expired' : 'showing';
 }
 
-const STATE_PILLS: Record<AnnouncementState, PillDescription> = {
+const STATE_PILLS: Record<AnnouncementState, StatusDescription> = {
   showing: { tone: 'ok', icon: 'check', label: 'Showing' },
   off: { tone: 'neutral', icon: 'dash', label: 'Turned off' },
   expired: { tone: 'neutral', icon: 'clock', label: 'Expired' },
 };
 
-export function statePill(state: AnnouncementState): PillDescription {
+export function statePill(state: AnnouncementState): StatusDescription {
   return STATE_PILLS[state];
 }
 

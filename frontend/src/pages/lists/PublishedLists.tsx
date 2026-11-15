@@ -17,7 +17,7 @@ import {
   userListAddress,
 } from '../../lib/listCatalogue';
 import type { Job, ListFormat } from '../../types';
-import { compressedSize } from '../dashboard/dashboardFacts';
+import { compressedSize } from '../../lib/builds';
 import { describeList, isPublicList } from './listsFacts';
 
 export interface PublishedListsProps {

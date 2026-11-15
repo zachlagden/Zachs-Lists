@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import { FormatSwitch } from '../../components/lists/FormatSwitch';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { CopyButton } from '../../components/ui/CopyButton';
-import { SegmentedControl, type SegmentOption } from '../../components/ui/SegmentedControl';
 import { EmptyState } from '../../components/ui/States';
 import {
   Table,
@@ -15,19 +15,14 @@ import { UrlField } from '../../components/ui/UrlField';
 import { SITE_URL } from '../../config/site';
 import { formatBytes, formatInteger } from '../../lib/format';
 import type { Job, ListFormat, UserList } from '../../types';
-import { COMBINED_LIST, categoryLists, compressedSize, listAddress } from './dashboardFacts';
-
-const FORMAT_OPTIONS: ReadonlyArray<SegmentOption<ListFormat>> = [
-  { value: 'hosts', label: 'Hosts' },
-  { value: 'plain', label: 'Plain' },
-  { value: 'adblock', label: 'Adblock' },
-];
-
-const FORMAT_NOTES: Record<ListFormat, string> = {
-  hosts: 'Pi-hole and AdGuard Home read the hosts format.',
-  plain: 'The plain format has one domain on each line.',
-  adblock: 'The Adblock format suits AdGuard Home and browser content blockers.',
-};
+import { compressedSize } from '../../lib/builds';
+import {
+  COMBINED_LIST,
+  FORMAT_USES,
+  SERVER_DEFAULT_FORMAT,
+  userListAddress,
+} from '../../lib/listCatalogue';
+import { categoryLists } from './dashboardFacts';
 
 export interface ListAddressProps {
   username: string;
@@ -36,7 +31,7 @@ export interface ListAddressProps {
 }
 
 export function ListAddress({ username, lists, publishedBuild }: ListAddressProps) {
-  const [format, setFormat] = useState<ListFormat>('hosts');
+  const [format, setFormat] = useState<ListFormat>(SERVER_DEFAULT_FORMAT);
   const combined = lists.find((list) => list.name === COMBINED_LIST) ?? lists[0];
   const categories = categoryLists(lists);
   const size = combined ? compressedSize(publishedBuild, combined.name, format) : null;
@@ -45,25 +40,16 @@ export function ListAddress({ username, lists, publishedBuild }: ListAddressProp
       <CardHeader
         title="List address"
         titleId="list-address"
-        actions={
-          combined ? (
-            <SegmentedControl
-              label="Format"
-              options={FORMAT_OPTIONS}
-              value={format}
-              onChange={setFormat}
-            />
-          ) : null
-        }
+        actions={combined ? <FormatSwitch value={format} onChange={setFormat} /> : null}
       />
       {combined ? (
         <CardBody className="grid gap-4">
           <UrlField
             label="List address"
-            url={listAddress(SITE_URL, username, combined.name, format)}
+            url={userListAddress(SITE_URL, username, combined.name, format)}
           />
           <p className="text-[13px] text-text-secondary">
-            The address never changes. {FORMAT_NOTES[format]}
+            The address never changes. {FORMAT_USES[format]}
             {size === null ? '' : ` ${formatBytes(size)} compressed.`}
           </p>
           {categories.length > 0 ? (
@@ -85,7 +71,7 @@ export function ListAddress({ username, lists, publishedBuild }: ListAddressProp
                     <TableCell align="right">
                       <CopyButton
                         variant="ghost"
-                        text={listAddress(SITE_URL, username, list.name, format)}
+                        text={userListAddress(SITE_URL, username, list.name, format)}
                         subject={`the ${list.name} list address`}
                       />
                     </TableCell>

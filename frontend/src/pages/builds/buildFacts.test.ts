@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import fixture from '../../../../tests/fixtures/job-progress.json';
 import type { EnhancedJobProgress, Job, JobResult, JobStatus, SourceProgress } from '../../types';
+import { attemptSeconds, sourceProblemCause } from '../../lib/builds';
 import {
-  attemptSeconds,
   buildPhase,
   buildSources,
   buildSteps,
@@ -28,10 +28,9 @@ import {
   nameParts,
   sortSources,
   sourceNote,
-  sourceProblemCause,
   sourceTally,
 } from './sourceFacts';
-import { describeSeconds } from './text';
+import { describeSeconds } from '../../lib/text';
 
 type FixtureName = keyof typeof fixture;
 
@@ -319,7 +318,9 @@ describe('build times', () => {
     const now = new Date('2026-03-04T05:06:36.500Z');
     expect(attemptSeconds(midDownload, now)).toBe(30);
     expect(attemptSeconds(completed, now)).toBeCloseTo(3.9);
-    expect(attemptSeconds(job('queued', { attempt_started_at: '2026-03-04T05:06:06.500Z' }), now)).toBeNull();
+    expect(
+      attemptSeconds(job('queued', { attempt_started_at: '2026-03-04T05:06:06.500Z' }), now),
+    ).toBeNull();
   });
 
   it('reads timestamps as UTC instants', () => {
@@ -455,9 +456,7 @@ describe('who asked for the build', () => {
   it('names the account only to an admin', () => {
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'owner')).toBe('Manual');
     expect(requestedBy({ type: 'manual', username: 'alex' }, 'admin')).toBe('Manual, by alex');
-    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe(
-      'Scheduled rebuild',
-    );
+    expect(requestedBy({ type: 'scheduled', username: 'alex' }, 'admin')).toBe('Scheduled rebuild');
     expect(requestedBy({ type: 'admin', username: '__default__' }, 'admin')).toBe(
       'Started by an admin',
     );

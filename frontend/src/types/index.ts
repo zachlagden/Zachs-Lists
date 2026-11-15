@@ -80,13 +80,6 @@ export interface Job {
 
 export type JobType = 'manual' | 'scheduled' | 'admin';
 
-export interface JobProgress {
-  current_step: string;
-  total_sources: number;
-  processed_sources: number;
-  current_source?: string;
-}
-
 export interface FormatBreakdown {
   hosts: number;
   plain: number;
@@ -256,23 +249,11 @@ export interface AnalyticsReport extends PublicAnalyticsReport {
   top_referrers: AnalyticsReferrer[];
 }
 
-export interface ListAnalyticsReport extends AnalyticsReport {
-  list_name: string;
-}
-
 export interface AdminAnalytics {
   period_days: number;
   overall: AnalyticsReport;
   default_lists: AnalyticsReport;
   user_lists: AnalyticsReport;
-}
-
-export interface PublicStats {
-  total_domains: number;
-  total_requests: number;
-  total_bandwidth_bytes: number;
-  user_count: number;
-  period_days: number;
 }
 
 export interface DefaultList {

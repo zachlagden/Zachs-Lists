@@ -11,6 +11,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '../../components/ui/Table';
+import { attemptSeconds, domainChange, domainsAfter } from '../../lib/builds';
 import { cn } from '../../lib/cn';
 import {
   formatDateTime,
@@ -20,12 +21,7 @@ import {
 } from '../../lib/format';
 import { isActive } from '../../realtime/jobMerge';
 import type { Job, JobType } from '../../types';
-import {
-  RECENT_BUILDS_SHOWN,
-  buildDurationSeconds,
-  domainChange,
-  domainsAfter,
-} from './dashboardFacts';
+import { RECENT_BUILDS_SHOWN } from './dashboardFacts';
 
 const TYPE_LABELS: Record<JobType, string> = {
   manual: 'Manual',
@@ -92,7 +88,7 @@ export function RecentBuilds({ jobs, now }: { jobs: Job[]; now: Date }) {
           </TableHead>
           <TableBody>
             {recent.map((job) => {
-              const seconds = buildDurationSeconds(job, now);
+              const seconds = attemptSeconds(job, now);
               return (
                 <TableRow key={job.job_id}>
                   <TableCell>

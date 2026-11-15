@@ -26,6 +26,10 @@ export function formatInteger(value: number): string {
   return integerFormat.format(Math.round(value)).replace(/^-/, MINUS_SIGN);
 }
 
+export function formatDecimal(value: number): string {
+  return upToOneDecimalFormat.format(value).replace(/^-/, MINUS_SIGN);
+}
+
 export function formatRoundedCount(value: number): string {
   const magnitude = Math.abs(value);
   if (magnitude >= 1_000_000_000) {

@@ -1,4 +1,11 @@
-import { appendLine, insertLine, replaceLine, type DraftLine, type LineDraft } from './lineDraft';
+import {
+  appendLine,
+  insertLine,
+  parseDraft,
+  replaceLine,
+  type DraftLine,
+  type LineDraft,
+} from './lineDraft';
 
 export const ABP_FLAG = 'abp';
 export const MAX_SOURCE_NAME_LENGTH = 100;
@@ -152,6 +159,10 @@ function countsAsSource(entry: SourceEntry): boolean {
 
 export function countSources(entries: SourceEntry[]): number {
   return entries.filter(countsAsSource).length;
+}
+
+export function countSourcesInText(text: string): number {
+  return countSources(analyseSources(parseDraft(text), []));
 }
 
 export interface SourceGroup {

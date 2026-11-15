@@ -10,7 +10,7 @@ import {
 import { Button } from '../../../components/ui/Button';
 import { Card, CardHeader } from '../../../components/ui/Card';
 import { LoadingRegion, Skeleton } from '../../../components/ui/Layout';
-import { StatusPill } from '../../../components/ui/StatusPill';
+import { DescribedPill } from '../../../components/ui/StatusPill';
 import { EmptyState, ErrorState } from '../../../components/ui/States';
 import {
   Table,
@@ -29,9 +29,7 @@ function DecisionCell({ request, now }: { request: LimitRequest; now: Date }) {
   const status = requestStatus(request.status);
   return (
     <div className="grid justify-items-start gap-1">
-      <StatusPill tone={status.tone} icon={status.icon}>
-        {status.label}
-      </StatusPill>
+      <DescribedPill description={status} />
       {request.status === 'approved' && typeof request.approved_limit === 'number' ? (
         <span className="num text-xs text-text-secondary">
           Raised to {formatInteger(request.approved_limit)}

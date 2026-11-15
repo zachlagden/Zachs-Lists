@@ -1,5 +1,5 @@
 import type { Job } from '../../types';
-import { sentence } from './text';
+import { sentence } from '../../lib/text';
 
 export const ERROR_CODES = [
   'invalid_config',

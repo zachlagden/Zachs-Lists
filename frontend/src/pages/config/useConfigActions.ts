@@ -17,13 +17,9 @@ import { listsKeys, type UserListsResponse } from '../../api/lists';
 import type { AlertTone } from '../../components/ui/Alert';
 import { showToast } from '../../components/ui/toasts';
 import { useValidationSocket } from '../../hooks/useSocket';
+import { describeBuildRefusal, runningBuildId } from '../../lib/builds';
 import { pluralise } from '../../lib/format';
-import {
-  buildRefusalNotice,
-  sourceCheckFrom,
-  type LineIssue,
-  type SourceCheck,
-} from './configFacts';
+import { sourceCheckFrom, type LineIssue, type SourceCheck } from './configFacts';
 import type { EditorTab, ServerConfig } from './editorState';
 import { saveDraft, type SaveApi, type SaveResult } from './saveFlow';
 import type { CheckProgress } from './SidePanel';
@@ -163,12 +159,11 @@ export function useConfigActions(
   };
 
   const refuseBuild = (error: ApiError, saved: boolean) => {
-    const refusal = buildRefusalNotice(error, new Date());
     setNotice({
       tone: 'warn',
       title: saved ? 'Saved, but the build was not started' : 'The build was not started',
-      message: refusal.message,
-      buildJobId: refusal.runningJobId,
+      message: describeBuildRefusal(error),
+      buildJobId: runningBuildId(error),
     });
   };
 

@@ -4,6 +4,7 @@ import {
   addSource,
   analyseSources,
   countSources,
+  countSourcesInText,
   describeNameProblem,
   describeUrlProblem,
   groupSources,
@@ -16,7 +17,6 @@ import {
   writtenNames,
 } from './sourceLines';
 import { AWKWARD_TEXTS, generatedTexts } from './testTexts';
-import { parseConfig } from './types';
 
 const CATEGORIES = ['advertising', 'comprehensive', 'malicious', 'nsfw', 'suspicious', 'tracking'];
 
@@ -150,7 +150,7 @@ describe('the whole file', () => {
 
   it('counts the lines the server counts as sources', () => {
     expect(countSources(analyseSources(parseDraft(MIXED), CATEGORIES))).toBe(7);
-    expect(parseConfig(MIXED).filter((line) => !line.isComment && line.url)).toHaveLength(7);
+    expect(countSourcesInText(MIXED)).toBe(7);
     expect(countSources(analyseSources(parseDraft('# nothing\n\n'), CATEGORIES))).toBe(0);
   });
 });

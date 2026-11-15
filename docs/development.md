@@ -250,7 +250,6 @@ pnpm --dir frontend build
 | -------------------------------- | ----------------------------------------------------------------------- |
 | `frontend/src/styles/tokens.css` | The colour tokens for the dark and light themes                         |
 | `frontend/src/styles/index.css`  | The Tailwind theme built from the tokens, and the base styles           |
-| `frontend/src/styles/legacy.css` | The old class names mapped onto the tokens, for pages not yet rebuilt   |
 | `frontend/src/components/ui/`    | The shared components                                                   |
 | `frontend/src/components/shell/` | The signed-in shell, the public shell and the navigation                |
 | `frontend/src/router.tsx`        | Every route, loaded lazily                                              |
@@ -278,9 +277,6 @@ state in both themes. The route exists only in development builds.
 5. Build the page from the components in `frontend/src/components/ui/` and the Tailwind theme
    colours such as `bg-surface`, `text-text-secondary` and `border-border`. Use the `narrow:`
    variant for 820 px and below and `compact:` for 1080 px and below.
-6. When a page no longer uses the old class names, remove it from `pagesAwaitingRebuild` in
-   `frontend/eslint.config.js`. When no page uses them, delete `frontend/src/styles/legacy.css`,
-   `frontend/src/api/client.ts` and the user data and jobs stores in `frontend/src/store/index.ts`.
 
 ### Checking a page in a headless browser
 

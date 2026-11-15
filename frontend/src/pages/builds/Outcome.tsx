@@ -7,7 +7,7 @@ import type { Job } from '../../types';
 import { buildSources, type Viewer } from './buildFacts';
 import type { BuildFailure } from './failureFacts';
 import { largestSources } from './sourceFacts';
-import { sentence } from './text';
+import { sentence } from '../../lib/text';
 
 const LARGEST_SOURCES_SHOWN = 5;
 

@@ -1,4 +1,4 @@
-import { formatDuration } from '../../lib/format';
+import { formatDuration } from './format';
 
 export function sentence(text: string | null | undefined): string {
   const trimmed = (text ?? '').trim();

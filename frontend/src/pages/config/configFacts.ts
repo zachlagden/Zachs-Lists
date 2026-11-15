@@ -1,6 +1,4 @@
 import type { LibraryEntry, UrlMetadataResponse, ValidationResponse } from '../../api/config';
-import type { ApiError } from '../../api/errors';
-import { buildRefusal } from '../../api/jobs';
 import {
   lineAtReportedNumber,
   parseDraft,
@@ -16,7 +14,6 @@ import { whitelistEntries } from '../../components/config/whitelistLines';
 import { sourceOutcome } from '../../components/ui/status';
 import { pluralise } from '../../lib/format';
 import type { Job } from '../../types';
-import { describeBuildRefusal } from '../dashboard/dashboardFacts';
 
 export const TOKEN_LIFETIME_MS = 9 * 60 * 1000;
 
@@ -281,35 +278,6 @@ export function describeSourceLimit(count: number, limit: number): string | null
   return count === limit
     ? `You have ${count} of ${limit} sources, which is your limit. Remove one to add another.`
     : `You have ${count} sources and your limit is ${limit}. Remove ${count - limit} before saving.`;
-}
-
-export interface BuildRefusalNotice {
-  message: string;
-  runningJobId: string | null;
-}
-
-export function buildRefusalNotice(error: ApiError, now: Date): BuildRefusalNotice {
-  const refusal = buildRefusal(error);
-  if (refusal?.code === 'build_active') {
-    return {
-      message: 'A build is already running, so a new one was not started.',
-      runningJobId: refusal.job_id ?? null,
-    };
-  }
-  if (refusal?.code === 'no_config') {
-    return {
-      message: 'There are no sources to build from yet. Add one first.',
-      runningJobId: null,
-    };
-  }
-  if (refusal?.code === 'invalid_config') {
-    const problems = (refusal.errors ?? []).slice(0, 3).join('; ');
-    return {
-      message: `Your saved sources have a problem, so the build was not started${problems ? `: ${problems}` : ''}.`,
-      runningJobId: null,
-    };
-  }
-  return { message: describeBuildRefusal(error, now), runningJobId: null };
 }
 
 export function filterLibrary(

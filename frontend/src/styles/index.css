@@ -1,6 +1,5 @@
 @import 'tailwindcss';
 @import './tokens.css';
-@import './legacy.css';
 
 @custom-variant narrow (@media (max-width: 820px));
 @custom-variant compact (@media (max-width: 1080px));

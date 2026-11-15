@@ -12,14 +12,9 @@ import { describeApiError } from '../../api/errors';
 import { Alert, type AlertTone } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { showToast } from '../../components/ui/toasts';
-import type { Announcement, LimitReview, Notification } from '../../types';
+import { ANNOUNCEMENT_TONES } from '../../lib/notices';
+import type { LimitReview, Notification } from '../../types';
 import { limitConsequence, limitReviewSummary } from '../../utils/limitReview';
-
-const ANNOUNCEMENT_TONES: Record<Announcement['type'], AlertTone> = {
-  info: 'info',
-  warning: 'warn',
-  critical: 'fail',
-};
 
 const NOTIFICATION_TONES: Record<string, AlertTone> = {
   limit_request_approved: 'ok',

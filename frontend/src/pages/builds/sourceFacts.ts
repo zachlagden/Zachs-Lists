@@ -1,6 +1,7 @@
 import { sourceOutcome, type SourceOutcome } from '../../components/ui/status';
 import type { SourceProgress } from '../../types';
-import { sentence } from './text';
+import { sourceProblemCause } from '../../lib/builds';
+import { sentence } from '../../lib/text';
 
 export interface SourceTally {
   total: number;
@@ -58,13 +59,6 @@ export function sortSources(sources: SourceProgress[]): SourceProgress[] {
     .map((source, index) => ({ source, index, group: SOURCE_GROUP[sourceOutcome(source)] }))
     .sort((a, b) => a.group - b.group || a.index - b.index)
     .map((entry) => entry.source);
-}
-
-export function sourceProblemCause(report: string | null | undefined): string {
-  const text = (report ?? '').trim();
-  if (!text) return '';
-  const bracketed = /\(([^)]+)\)/.exec(text);
-  return sentence(bracketed ? bracketed[1] : text.split(';')[0]);
 }
 
 export interface SourceNote {

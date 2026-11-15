@@ -11,7 +11,7 @@ import { describeApiError } from '../../../api/errors';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { LoadingRegion, PageHeader, Skeleton } from '../../../components/ui/Layout';
-import { StatusPill } from '../../../components/ui/StatusPill';
+import { DescribedPill } from '../../../components/ui/StatusPill';
 import { EmptyState, ErrorState } from '../../../components/ui/States';
 import {
   Table,
@@ -27,15 +27,7 @@ import { useNow } from '../../../lib/useNow';
 import type { Announcement } from '../../../types';
 import { ActionDialog } from '../shared/ActionDialog';
 import { AnnouncementDialog } from './AnnouncementDialog';
-import { announcementState, statePill, typePill, type PillDescription } from './announcementFacts';
-
-function Pill({ description }: { description: PillDescription }) {
-  return (
-    <StatusPill tone={description.tone} icon={description.icon}>
-      {description.label}
-    </StatusPill>
-  );
-}
+import { announcementState, statePill, typePill } from './announcementFacts';
 
 function DeleteAnnouncementDialog({
   announcement,
@@ -175,10 +167,12 @@ export default function AnnouncementsPage() {
                         <span className="mt-2 hidden flex-wrap gap-2 narrow:flex">{actions}</span>
                       </TableCell>
                       <TableCell hideOnNarrow className="align-top">
-                        <Pill description={typePill(announcement.type)} />
+                        <DescribedPill description={typePill(announcement.type)} />
                       </TableCell>
                       <TableCell className="align-top">
-                        <Pill description={statePill(announcementState(announcement, now))} />
+                        <DescribedPill
+                          description={statePill(announcementState(announcement, now))}
+                        />
                       </TableCell>
                       <TableCell
                         hideOnNarrow
