@@ -42,6 +42,7 @@ from app.utils.request_fields import (
     required_text,
 )
 from app.utils.time import utc_iso
+from app.utils.weekly_schedule import USER_REBUILD
 
 user_bp = Blueprint("user", __name__)
 register_field_errors(user_bp)
@@ -355,6 +356,8 @@ def update_whitelist(user: User):
 @login_required
 def get_lists(user: User):
     """Get user's output lists with stats."""
+    from bson import ObjectId
+
     refreshed = User.get_by_id(user.id)
     if refreshed is None:
         return jsonify({"error": "Account no longer exists"}), 401
@@ -373,6 +376,8 @@ def get_lists(user: User):
             "limits": user.limits,
             "remaining_updates": user.get_remaining_manual_updates(),
             "enforce_domain_limit": enforcing_domain_limit(),
+            "next_rebuild_at": utc_iso(USER_REBUILD.next_after(datetime.utcnow())),
+            "last_checked_at": utc_iso(Job.last_ended_at(ObjectId(user.id))),
         }
     )
 
