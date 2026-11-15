@@ -37,17 +37,17 @@ export const fixtureMatchesTheTypes = {
   result: fixture.completed.result satisfies JsonShape<JobResult>,
 };
 
-const completed = fixture.completed.progress;
+type Completed = typeof fixture.completed.progress;
 
 export const typesDeclareExactlyTheWrittenKeys: {
   queued: SameKeys<EnhancedJobProgress, typeof initialProgress>;
-  progress: SameKeys<EnhancedJobProgress, typeof completed>;
-  source: SameKeys<SourceProgress, (typeof completed.sources)[number]>;
-  whitelist: SameKeys<WhitelistProgress, typeof completed.whitelist>;
-  pattern: SameKeys<WhitelistPatternProgress, (typeof completed.whitelist.patterns)[number]>;
-  generation: SameKeys<GenerationProgress, typeof completed.generation>;
-  format: SameKeys<FormatProgress, (typeof completed.generation.formats)[number]>;
-  stages: SameKeys<StageTimings, typeof completed.stages>;
+  progress: SameKeys<EnhancedJobProgress, Completed>;
+  source: SameKeys<SourceProgress, Completed['sources'][number]>;
+  whitelist: SameKeys<WhitelistProgress, Completed['whitelist']>;
+  pattern: SameKeys<WhitelistPatternProgress, Completed['whitelist']['patterns'][number]>;
+  generation: SameKeys<GenerationProgress, Completed['generation']>;
+  format: SameKeys<FormatProgress, Completed['generation']['formats'][number]>;
+  stages: SameKeys<StageTimings, Completed['stages']>;
   result: SameKeys<JobResult, typeof fixture.completed.result>;
 } = {
   queued: true,

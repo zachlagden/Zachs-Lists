@@ -25,7 +25,7 @@ export default function AddUrlForm({
   // Auto-generate name from URL
   useEffect(() => {
     if (autoName && url) {
-      let generatedName = extractNameFromUrl(url);
+      const generatedName = extractNameFromUrl(url);
 
       // Make name unique if it already exists
       let uniqueName = generatedName;
