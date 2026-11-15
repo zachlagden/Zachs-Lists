@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::build_stamp::{generator_host_matches, should_skip_unchanged_build};
 use crate::config::Config;
 use crate::db::job::{Job, JobRepository, JobType};
 use crate::db::progress::{
@@ -270,37 +271,62 @@ impl JobProcessor {
 
         info!("Found {} sources to process", sources.len());
 
-        // Check for "no changes" optimization
-        // Skip if: config hash unchanged AND all sources would be cache hits
+        // Manual and admin jobs skip when the last build already wrote these
+        // list files: same config hash, same hostname, and every source cached.
+        // Scheduled jobs and force rebuilds always run. The hostname is
+        // `config.generator_host`, the same value the generator stamps.
         if job.job_type != JobType::Scheduled && !job.force_rebuild {
-            if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
-                if stored_hash == current_config_hash {
-                    // Config unchanged, check if all sources are cached
-                    let all_cached = self.downloader.check_all_cached(&sources).await;
-                    if all_cached {
-                        info!(
-                            "Skipping job {} - no changes detected (config hash matches, all sources cached)",
-                            job.job_id
-                        );
-                        self.job_repo
-                            .skip(
-                                &job.id,
-                                "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
-                            )
-                            .await?;
-                        return Ok(());
-                    }
-                }
+            let stored_stamp = self
+                .user_repo
+                .get_build_stamp(&job.username)
+                .await
+                .unwrap_or_default();
+            // Ask the cache only after the stamp matches. The skip decision
+            // itself is `should_skip_unchanged_build`.
+            let all_cached = if stored_stamp.matches(&current_config_hash, &self.config.generator_host)
+            {
+                self.downloader.check_all_cached(&sources).await
+            } else {
+                false
+            };
+            if should_skip_unchanged_build(
+                job.job_type == JobType::Scheduled,
+                job.force_rebuild,
+                all_cached,
+                &stored_stamp,
+                &current_config_hash,
+                &self.config.generator_host,
+            ) {
+                info!(
+                    "Skipping job {} - no changes detected (config hash and list hostname match, all sources cached)",
+                    job.job_id
+                );
+                self.job_repo
+                    .skip(
+                        &job.id,
+                        "No changes detected since last build. All sources are cached, and the configuration and list hostname are unchanged.".to_string(),
+                    )
+                    .await?;
+                return Ok(());
             }
         }
 
-        // Check for matching config fingerprint in other users (copy-on-match optimization)
+        // Copy files only when they were stamped with this process's hostname.
         if job.job_type != JobType::Scheduled && !job.force_rebuild {
         if let Ok(Some(matched)) = self
             .user_repo
             .find_user_by_fingerprint(&config_fingerprint, &job.username)
             .await
         {
+            if !generator_host_matches(
+                matched.generator_host.as_deref(),
+                &self.config.generator_host,
+            ) {
+                info!(
+                    "Config matches '{}' but the list hostname differs - rebuilding",
+                    matched.username
+                );
+            } else {
             info!(
                 "Config matches user '{}' - copying output files instead of rebuilding",
                 matched.username
@@ -445,6 +471,7 @@ impl JobProcessor {
                             total_output_size,
                             current_config_hash.clone(),
                             config_fingerprint.clone(),
+                            &self.config.generator_host,
                         )
                         .await
                     {
@@ -472,6 +499,7 @@ impl JobProcessor {
                         matched.username, e
                     );
                 }
+            }
             }
         }
         }
@@ -660,6 +688,7 @@ impl JobProcessor {
             total_output_size,
             current_config_hash,
             config_fingerprint,
+            &self.config.generator_host,
         ).await {
             warn!("Failed to update user document for {}: {}", job.username, e);
             // Don't fail the job for this - it's not critical
