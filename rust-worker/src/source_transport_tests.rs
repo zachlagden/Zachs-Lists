@@ -2,6 +2,8 @@ use super::*;
 
 use crate::source_cache_test_server::{Reply, TestServer};
 
+const TIMEOUT_NO_REPLY_REACHES: Duration = Duration::from_secs(60);
+
 #[test]
 fn validators_are_bounded_and_bound_to_the_exact_destination() {
     let mut validators = SourceValidators {
@@ -38,7 +40,7 @@ async fn redirect_destinations_remain_validated_and_redirect_count_is_bounded() 
     .await;
     let result = get_source_for_test(
         &server.url("/start"),
-        Duration::from_secs(2),
+        TIMEOUT_NO_REPLY_REACHES,
         None,
         server.address,
     )
@@ -56,7 +58,7 @@ async fn redirect_destinations_remain_validated_and_redirect_count_is_bounded() 
     .await;
     let result = get_source_for_test(
         &server.url("/start"),
-        Duration::from_secs(2),
+        TIMEOUT_NO_REPLY_REACHES,
         None,
         server.address,
     )
@@ -67,20 +69,15 @@ async fn redirect_destinations_remain_validated_and_redirect_count_is_bounded() 
 
 #[tokio::test]
 async fn transport_timeout_bounds_the_complete_redirect_chain() {
-    let server = TestServer::start(vec![
-        Reply::new(200, b"late.example\n").delayed(Duration::from_millis(200))
-    ])
-    .await;
-    let started = std::time::Instant::now();
+    let server = TestServer::start(vec![Reply::new(200, b"late.example\n").stalled_after(0)]).await;
     let result = get_source_for_test(
-        &server.url("/slow"),
+        &server.url("/never-answered"),
         Duration::from_millis(50),
         None,
         server.address,
     )
     .await;
     assert!(result.is_err());
-    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]

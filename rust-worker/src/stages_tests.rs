@@ -1,48 +1,50 @@
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::db::progress::{FormatStatus, GenerationProgress};
 use crate::downloader::Source;
 use crate::generation::{generations_dir, read_manifest, MANIFEST_NAME};
 use crate::progress_tracker::ProgressTracker;
 
-const STOP_BOUND: Duration = Duration::from_secs(1);
+const STAGE_POOL_THREADS: usize = 2;
+const TICKS_WHILE_BLOCKED: usize = 15;
+const BLOCKED_STAGE_WAIT: Duration = Duration::from_secs(30);
 
 struct CancelOnFirstReport {
     cancellation: Cancellation,
-    cancelled_at: Mutex<Option<Instant>>,
-    reports_after_cancel: AtomicU64,
+    chunks_reported: AtomicU64,
 }
 
 impl CancelOnFirstReport {
     fn new() -> Self {
         Self {
             cancellation: Cancellation::default(),
-            cancelled_at: Mutex::new(None),
-            reports_after_cancel: AtomicU64::new(0),
+            chunks_reported: AtomicU64::new(0),
         }
     }
 
     fn reported(&self) {
-        let mut cancelled_at = self.cancelled_at.lock().unwrap();
-        if cancelled_at.is_some() {
-            self.reports_after_cancel.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
+        self.chunks_reported.fetch_add(1, Ordering::SeqCst);
         self.cancellation.cancel();
-        *cancelled_at = Some(Instant::now());
     }
 
-    fn assert_stopped_promptly(&self) {
-        let cancelled_at = self.cancelled_at.lock().unwrap().expect("work reported");
+    fn assert_stopped_within_one_chunk_per_thread(&self) {
+        let chunks_reported = self.chunks_reported.load(Ordering::SeqCst);
         assert!(
-            cancelled_at.elapsed() < STOP_BOUND,
-            "stopped {:?} after cancellation",
-            cancelled_at.elapsed()
+            (1..=STAGE_POOL_THREADS as u64).contains(&chunks_reported),
+            "{chunks_reported} chunks were reported on {STAGE_POOL_THREADS} threads"
         );
     }
+}
+
+fn on_stage_pool<T: Send>(work: impl FnOnce() -> T + Send) -> T {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(STAGE_POOL_THREADS)
+        .build()
+        .unwrap()
+        .install(work)
 }
 
 fn hosts_body(domains: usize) -> Vec<u8> {
@@ -149,21 +151,23 @@ fn extraction_counts_domains_and_keeps_the_rule_of_the_later_source() {
 }
 
 #[test]
-fn cancellation_during_extraction_stops_within_the_bound() {
+fn cancellation_during_extraction_stops_within_one_chunk_per_thread() {
     let extractor = DomainExtractor::new();
     let mut domains = CategoryDomains::default();
     let stop = CancelOnFirstReport::new();
 
-    let outcome = extract_source(
-        &extractor,
-        body(0, None, hosts_body(40 * WORK_GRAIN)),
-        &mut domains,
-        &stop.cancellation,
-        &|_| stop.reported(),
-    );
+    let outcome = on_stage_pool(|| {
+        extract_source(
+            &extractor,
+            body(0, None, hosts_body(40 * WORK_GRAIN)),
+            &mut domains,
+            &stop.cancellation,
+            &|_| stop.reported(),
+        )
+    });
 
     assert!(outcome.is_err());
-    stop.assert_stopped_promptly();
+    stop.assert_stopped_within_one_chunk_per_thread();
     assert!(domains.is_empty());
 }
 
@@ -279,15 +283,15 @@ fn cancellation_during_the_measurement_stops_before_the_whitelist_is_parsed() {
 }
 
 #[test]
-fn cancellation_during_the_whitelist_pass_stops_within_the_bound() {
+fn cancellation_during_the_whitelist_pass_stops_within_one_chunk_per_thread() {
     let domains = extracted(vec![body(0, None, hosts_body(40 * WORK_GRAIN))]);
     let stop = CancelOnFirstReport::new();
     let plan = plan_whitelist("*.blocked.example\n", domains, &stop.cancellation).unwrap();
 
-    let outcome = apply_whitelist(plan, &stop.cancellation, &|_| stop.reported());
+    let outcome = on_stage_pool(|| apply_whitelist(plan, &stop.cancellation, &|_| stop.reported()));
 
     assert!(outcome.is_err());
-    stop.assert_stopped_promptly();
+    stop.assert_stopped_within_one_chunk_per_thread();
 }
 
 #[test]
@@ -541,7 +545,7 @@ fn wildcard_line_of_a_source_without_the_abp_flag_is_still_dropped() {
 }
 
 #[test]
-fn cancellation_during_generation_stops_within_the_bound_and_leaves_no_generation() {
+fn cancellation_during_generation_stops_within_one_chunk_per_thread_and_leaves_no_generation() {
     let output_dir = tempfile::tempdir().unwrap();
     let published = output_dir.path().join("all_domains_hosts.txt.gz");
     std::fs::write(&published, b"previous build").unwrap();
@@ -551,21 +555,23 @@ fn cancellation_during_generation_stops_within_the_bound_and_leaves_no_generatio
     );
     let stop = CancelOnFirstReport::new();
 
-    let outcome = generate_outputs(
-        output_dir.path().to_path_buf(),
-        identity(),
-        filtered.domains,
-        &stop.cancellation,
-        &|event| {
-            if matches!(event, GenerationEvent::DomainsWritten(..)) {
-                stop.reported();
-            }
-        },
-    );
+    let outcome = on_stage_pool(|| {
+        generate_outputs(
+            output_dir.path().to_path_buf(),
+            identity(),
+            filtered.domains,
+            &stop.cancellation,
+            &|event| {
+                if matches!(event, GenerationEvent::DomainsWritten(..)) {
+                    stop.reported();
+                }
+            },
+        )
+    });
 
     let error = outcome.err().expect("generation was cancelled");
     assert!(error.downcast_ref::<Cancelled>().is_some());
-    stop.assert_stopped_promptly();
+    stop.assert_stopped_within_one_chunk_per_thread();
     assert_eq!(std::fs::read(&published).unwrap(), b"previous build");
     assert_eq!(generation_names(output_dir.path()), Vec::<String>::new());
 }
@@ -594,21 +600,21 @@ fn unusable_category_name_fails_before_a_generation_directory_exists() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn heartbeat_ticks_keep_running_while_extraction_blocks_one_runtime_thread() {
-    let ticks = Arc::new(AtomicU64::new(0));
-    let counted = Arc::clone(&ticks);
+    let (tick, ticks) = std::sync::mpsc::channel();
     let heartbeat = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_millis(10));
         loop {
             ticker.tick().await;
-            counted.fetch_add(1, Ordering::Relaxed);
+            if tick.send(()).is_err() {
+                return;
+            }
         }
     });
-    let ticks_before = ticks.load(Ordering::Relaxed);
-    let started = Instant::now();
 
     let stage_thread = StageThread::start().unwrap();
-    let extraction = stage_thread
-        .run(|| {
+    let (extracted, ticks_while_blocked) = stage_thread
+        .run(move || {
+            ticks.try_iter().for_each(drop);
             let extractor = DomainExtractor::new();
             let mut domains = CategoryDomains::default();
             let extraction = extract_source(
@@ -618,19 +624,15 @@ async fn heartbeat_ticks_keep_running_while_extraction_blocks_one_runtime_thread
                 &Cancellation::default(),
                 &|_| {},
             )?;
-            std::thread::sleep(Duration::from_millis(300));
-            Ok(extraction.domain_count)
+            let ticks_while_blocked = (0..TICKS_WHILE_BLOCKED)
+                .map_while(|_| ticks.recv_timeout(BLOCKED_STAGE_WAIT).ok())
+                .count();
+            Ok((extraction.domain_count, ticks_while_blocked))
         })
         .await
         .unwrap();
 
-    let blocked_for = started.elapsed();
-    let ticks_during = ticks.load(Ordering::Relaxed) - ticks_before;
     heartbeat.abort();
-    assert_eq!(extraction, 30 * WORK_GRAIN as u64);
-    assert!(blocked_for >= Duration::from_millis(300));
-    assert!(
-        ticks_during >= 15,
-        "{ticks_during} ticks in {blocked_for:?}"
-    );
+    assert_eq!(extracted, 30 * WORK_GRAIN as u64);
+    assert_eq!(ticks_while_blocked, TICKS_WHILE_BLOCKED);
 }

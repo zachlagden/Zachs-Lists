@@ -10,10 +10,10 @@ pub struct Reply {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
-    pub delay: Duration,
     pub pieces: usize,
     pub pause_between_pieces: Duration,
     pub declares_length: bool,
+    pub stalls_after_pieces: Option<usize>,
 }
 
 impl Reply {
@@ -22,10 +22,10 @@ impl Reply {
             status,
             headers: Vec::new(),
             body: body.to_vec(),
-            delay: Duration::ZERO,
             pieces: 1,
             pause_between_pieces: Duration::ZERO,
             declares_length: true,
+            stalls_after_pieces: None,
         }
     }
 
@@ -34,14 +34,14 @@ impl Reply {
         self
     }
 
-    pub fn delayed(mut self, delay: Duration) -> Self {
-        self.delay = delay;
-        self
-    }
-
     pub fn dripped(mut self, pieces: usize, pause_between_pieces: Duration) -> Self {
         self.pieces = pieces.max(1);
         self.pause_between_pieces = pause_between_pieces;
+        self
+    }
+
+    pub fn stalled_after(mut self, pieces: usize) -> Self {
+        self.stalls_after_pieces = Some(pieces);
         self
     }
 
@@ -98,7 +98,10 @@ impl TestServer {
                         .unwrap()
                         .pop_front()
                         .unwrap_or_else(|| Reply::new(500, b""));
-                    tokio::time::sleep(reply.delay).await;
+                    let stalls_after_pieces = reply.stalls_after_pieces;
+                    if stalls_after_pieces == Some(0) {
+                        std::future::pending::<()>().await;
+                    }
                     let mut response =
                         format!("HTTP/1.1 {} Fixture\r\nConnection: close\r\n", reply.status);
                     if reply.declares_length
@@ -115,7 +118,10 @@ impl TestServer {
                     response.push_str("\r\n");
                     let _ = connection.write_all(response.as_bytes()).await;
                     let piece_size = reply.body.len().div_ceil(reply.pieces).max(1);
-                    for piece in reply.body.chunks(piece_size) {
+                    for (sent, piece) in reply.body.chunks(piece_size).enumerate() {
+                        if stalls_after_pieces == Some(sent) {
+                            std::future::pending::<()>().await;
+                        }
                         let _ = connection.write_all(piece).await;
                         let _ = connection.flush().await;
                         tokio::time::sleep(reply.pause_between_pieces).await;

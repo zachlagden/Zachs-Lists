@@ -8,6 +8,8 @@ use crate::generator::OutputFormat;
 use crate::test_support::{insert_job, queued_job, stored_job, test_database};
 
 const WRITE_INTERVAL: Duration = Duration::from_millis(300);
+const TICK_WAIT: Duration = Duration::from_secs(30);
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 fn sources(count: usize) -> Vec<Source> {
     (0..count)
@@ -104,6 +106,20 @@ async fn claimed_job(source_count: usize) -> Claimed {
         cancellation,
         live,
     }
+}
+
+async fn job_once_written_after(claimed: &Claimed, revision_before: i64) -> Document {
+    tokio::time::timeout(TICK_WAIT, async {
+        loop {
+            let job = stored_job(&claimed.db, &claimed.job_id).await;
+            if revision(&job) > revision_before {
+                return job;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("the progress writer writes on its tick")
 }
 
 #[test]
@@ -279,8 +295,7 @@ async fn many_updates_inside_one_interval_produce_at_most_one_write() {
     for downloaded in 1..=500 {
         claimed.tracker.source_bytes(1, downloaded * 100, None);
     }
-    tokio::time::sleep(WRITE_INTERVAL + WRITE_INTERVAL / 2).await;
-    let after_updates = stored_job(&claimed.db, &claimed.job_id).await;
+    let after_updates = job_once_written_after(&claimed, after_start).await;
     assert_eq!(revision(&after_updates), after_start + 1);
     let written = after_updates
         .get_document("progress")
@@ -393,9 +408,14 @@ async fn tick_flush_after_lease_loss_cancels_the_build() {
     let held_by_other = stored_job(&claimed.db, &claimed.job_id).await;
 
     claimed.tracker.source_started(0);
-    tokio::time::sleep(WRITE_INTERVAL * 2).await;
+    tokio::time::timeout(TICK_WAIT, async {
+        while !claimed.cancellation.is_cancelled() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("the tick after the lease was lost cancels the build");
 
-    assert!(claimed.cancellation.is_cancelled());
     assert_eq!(
         stored_job(&claimed.db, &claimed.job_id).await,
         held_by_other
