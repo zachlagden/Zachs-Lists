@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +10,9 @@ from unittest.mock import Mock
 
 import pytest
 import requests
+import tzlocal
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from flask.testing import FlaskClient
 
 from app.config import TestingConfig
@@ -634,6 +638,38 @@ def test_schedule_registers_the_sync_check_and_the_later_rebuild_times(
         "cron[day_of_week='sun', hour='7', minute='30']"
     )
     assert str(scheduler.timezone) == "UTC"
+
+
+@pytest.fixture
+def london_process_zone(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    with monkeypatch.context() as zone:
+        zone.setenv("TZ", "Europe/London")
+        time.tzset()
+        tzlocal.reload_localzone()
+        yield
+    time.tzset()
+    tzlocal.reload_localzone()
+
+
+def test_cron_triggers_are_utc_when_the_process_zone_is_not(
+    api: Api, london_process_zone: None
+) -> None:
+    assert str(tzlocal.get_localzone()) == "Europe/London"
+    scheduler = BackgroundScheduler(timezone="UTC")
+    register_scheduled_tasks(api.app, scheduler)
+    cron_zones = {
+        job.id: str(job.trigger.timezone)
+        for job in scheduler.get_jobs()
+        if isinstance(job.trigger, CronTrigger)
+    }
+
+    assert cron_zones == {
+        "hourly_default_sync": "UTC",
+        "weekly_default_rebuild": "UTC",
+        "weekly_user_rebuild": "UTC",
+        "daily_cache_cleanup": "UTC",
+        "daily_job_cleanup": "UTC",
+    }
 
 
 def test_hourly_check_builds_a_changed_config_on_a_weekday(
