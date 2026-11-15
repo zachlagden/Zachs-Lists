@@ -1,13 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { limitRequestsQuery } from '../../api/account';
-import { configQuery } from '../../api/config';
 import { toApiError } from '../../api/errors';
 import { jobQuery, jobsKeys, type JobsResponse } from '../../api/jobs';
 import { userListsQuery } from '../../api/lists';
-import { parseDraft } from '../../components/config/lineDraft';
-import { analyseSources } from '../../components/config/sourceLines';
 import LimitRequestModal from '../../components/LimitRequestModal';
 import { BuildProblem } from './BuildProblem';
 import { BuildView, BuildViewSkeleton } from './BuildView';
@@ -15,15 +12,6 @@ import { useMarkFailuresRead, useUpdatesPaused } from './useBuildPageState';
 import { isUnreadFailure } from '../../lib/builds';
 import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 import { buildSummary } from './buildFacts';
-
-function categoriesByUrl(config: string | undefined): ReadonlyMap<string, string> | null {
-  if (!config) return null;
-  const categories = new Map<string, string>();
-  for (const { parsed } of analyseSources(parseDraft(config), [])) {
-    if (parsed.kind === 'source' && parsed.category) categories.set(parsed.url, parsed.category);
-  }
-  return categories;
-}
 
 export default function BuildPage() {
   const { jobId = '' } = useParams<{ jobId: string }>();
@@ -39,10 +27,8 @@ export default function BuildPage() {
   });
   const job = build.data;
   const overLimit = job?.result?.error_code === 'domain_limit_exceeded';
-  const config = useQuery(configQuery());
   const limitRequests = useQuery({ ...limitRequestsQuery(), enabled: overLimit });
   const lists = useQuery({ ...userListsQuery(), enabled: overLimit });
-  const categories = useMemo(() => categoriesByUrl(config.data?.config), [config.data?.config]);
 
   useMarkFailuresRead(job !== undefined && isUnreadFailure(job), jobId);
   const notFound = build.isError && toApiError(build.error).status === 404;
@@ -75,7 +61,6 @@ export default function BuildPage() {
         paused={paused}
         backTo="/jobs"
         backLabel="All builds"
-        categories={categories}
         limitRequest={
           overLimit && limitRequests.data
             ? {

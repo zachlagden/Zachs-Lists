@@ -20,8 +20,7 @@ import {
   describeAttention,
   describeManualBuilds,
   lastFinishedJob,
-  lastSourceCheck,
-  nextScheduledRebuild,
+  lastCheckFoundChanges,
   publishedJob,
   sourceSummary,
   type PublicationState,
@@ -126,9 +125,9 @@ function summarySentence({
 export function PublishedState(props: PublishedStateProps) {
   const { state, lists, jobs, isAdmin, now } = props;
   const headline = HEADLINES[state];
-  const nextRebuild = nextScheduledRebuild(now);
+  const nextRebuild = lists.next_rebuild_at;
   const published = publishedJob(jobs, lists.generation_id);
-  const check = lastSourceCheck(jobs);
+  const checkFoundChanges = lastCheckFoundChanges(jobs, lists.last_checked_at);
   const change = published ? domainChange(jobs, published) : null;
   const isPublished = lists.lists.length > 0;
   return (
@@ -179,9 +178,15 @@ export function PublishedState(props: PublishedStateProps) {
           />
           <Fact
             label="Sources last checked"
-            value={check ? formatDateTime(check.at, { now }) : 'Not yet'}
+            value={
+              lists.last_checked_at ? formatDateTime(lists.last_checked_at, { now }) : 'Not yet'
+            }
             detail={
-              check ? (check.changed ? 'A new version was published' : 'Nothing had changed') : null
+              checkFoundChanges === null
+                ? null
+                : checkFoundChanges
+                  ? 'A new version was published'
+                  : 'Nothing had changed'
             }
           />
           <Fact

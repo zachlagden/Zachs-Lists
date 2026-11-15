@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ADMIN_JOBS_LIMIT, adminJobsQuery, type AdminUserDetail } from '../../../../api/admin';
+import { adminUserJobsQuery, type AdminUserDetail } from '../../../../api/admin';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../../components/ui/Card';
 import { KeyValueList, LoadingRegion } from '../../../../components/ui/Layout';
@@ -15,10 +15,10 @@ import {
   TableRow,
 } from '../../../../components/ui/Table';
 import { formatDateTime, formatInteger, formatPercent } from '../../../../lib/format';
-import { buildsOfUser } from '../../builds/buildFacts';
 import { BuildsTable, BuildsTableSkeleton } from '../../builds/BuildsTable';
 import { methodLabel } from '../../limits/limitFacts';
 import { ResolveReviewDialog } from '../../limits/ResolveReviewDialog';
+import { Pagination } from '../../shared/Pagination';
 
 export function ReviewCard({ user, now }: { user: AdminUserDetail; now: Date }) {
   const [resolving, setResolving] = useState(false);
@@ -72,31 +72,44 @@ export function ReviewCard({ user, now }: { user: AdminUserDetail; now: Date }) 
 }
 
 export function UserBuilds({ user, now }: { user: AdminUserDetail; now: Date }) {
-  const jobs = useQuery(adminJobsQuery());
-  const builds = jobs.data ? buildsOfUser(jobs.data.jobs, user.id) : [];
+  const [page, setPage] = useState(1);
+  const builds = useQuery(adminUserJobsQuery(user.id, page));
   return (
     <Card as="section" aria-labelledby="user-builds">
-      <CardHeader title="Recent builds" titleId="user-builds" />
-      {jobs.data ? (
-        builds.length === 0 ? (
-          <EmptyState title="No recent build for this account">
-            Only the {formatInteger(ADMIN_JOBS_LIMIT)} most recent builds across all accounts are
-            searched, so an older build is not shown.
+      <CardHeader title="Builds" titleId="user-builds" />
+      {builds.data ? (
+        builds.data.total === 0 ? (
+          <EmptyState title="No builds for this account">
+            Builds appear here once the account starts one or the weekly rebuild runs. Finished
+            builds are deleted after 30 days.
           </EmptyState>
         ) : (
-          <BuildsTable
-            jobs={builds}
-            now={now}
-            caption={`Recent builds for ${user.username}`}
-            showOwner={false}
-          />
+          <div aria-busy={builds.isPlaceholderData || undefined}>
+            <BuildsTable
+              jobs={builds.data.jobs}
+              now={now}
+              caption={`Builds for ${user.username}, newest first`}
+              showOwner={false}
+            />
+            {builds.data.pages > 1 ? (
+              <Pagination
+                label={`Pages of builds for ${user.username}`}
+                page={builds.data.page}
+                pages={builds.data.pages}
+                perPage={builds.data.per_page}
+                total={builds.data.total}
+                noun="builds"
+                onPageChange={setPage}
+              />
+            ) : null}
+          </div>
         )
-      ) : jobs.isError ? (
+      ) : builds.isError ? (
         <ErrorState
           title="Builds could not be loaded"
-          error={jobs.error}
-          onRetry={() => void jobs.refetch()}
-          retrying={jobs.isFetching}
+          error={builds.error}
+          onRetry={() => void builds.refetch()}
+          retrying={builds.isFetching}
         />
       ) : (
         <LoadingRegion label="Loading builds…">

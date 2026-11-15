@@ -10,6 +10,8 @@ export interface UserListsResponse {
   limits: UserLimits;
   remaining_updates: number;
   enforce_domain_limit: boolean;
+  next_rebuild_at: string;
+  last_checked_at: string | null;
 }
 
 export interface FeaturedListSummary extends FeaturedList {

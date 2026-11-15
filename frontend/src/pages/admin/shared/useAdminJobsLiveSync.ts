@@ -40,6 +40,7 @@ export function useAdminJobsLiveSync(): void {
       createSpacedRunner(() => {
         void client.invalidateQueries({ queryKey: adminKeys.stats() });
         void client.invalidateQueries({ queryKey: adminKeys.limitReviews() });
+        void client.invalidateQueries({ queryKey: adminKeys.userJobs() });
       }, ADMIN_STATS_FRESH_MS),
     [client],
   );

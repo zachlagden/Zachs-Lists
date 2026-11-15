@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import {
   addFeaturedList,
+  moveFeaturedList,
   adminFeaturedListsQuery,
   adminKeys,
   removeFeaturedList,
@@ -33,10 +34,14 @@ import {
   MAX_FEATURED_NAME_LENGTH,
   addFeaturedFailure,
   draftErrors,
+  planFeaturedMove,
   type FeaturedDraft,
+  type MoveDirection,
 } from './featuredFacts';
 import { useDocumentMeta } from '../../../hooks/useDocumentMeta';
 import { adminTitle } from '../shared/sections';
+import { IconButton } from '../../../components/ui/IconButton';
+import { describeApiError } from '../../../api/errors';
 
 const EMPTY_DRAFT: FeaturedDraft = { username: '', listName: '', description: '' };
 
@@ -80,7 +85,7 @@ function AddFeaturedDialog({ onClose }: { onClose: () => void }) {
       open
       onClose={onClose}
       title="Feature a list"
-      description="Featured lists are shown on the public browse page, in the order they were added."
+      description="Featured lists are shown on the public browse page. A new one goes last, and you can move it afterwards."
       dismissible={!add.isPending}
       footer={
         <>
@@ -173,6 +178,22 @@ export default function FeaturedPage() {
   const featured = useQuery(adminFeaturedListsQuery());
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<FeaturedList | null>(null);
+  const client = useQueryClient();
+  const move = useMutation({
+    mutationFn: async ({ index, direction }: { index: number; direction: MoveDirection }) => {
+      const changes = planFeaturedMove(featured.data?.featured ?? [], index, direction);
+      for (const change of changes) await moveFeaturedList(change.id, change.order);
+    },
+    onError: (error) => {
+      showToast('fail', describeApiError(error, 'The list could not be moved. Try again.'));
+    },
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: adminKeys.featured() }),
+        client.invalidateQueries({ queryKey: listsKeys.featured() }),
+      ]),
+  });
+  const count = featured.data?.featured.length ?? 0;
 
   return (
     <>
@@ -204,7 +225,9 @@ export default function FeaturedPage() {
               <caption className="sr-only">Featured lists in the order they are shown</caption>
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell align="right">Position</TableHeaderCell>
+                  <TableHeaderCell align="right" hideOnNarrow>
+                    Position
+                  </TableHeaderCell>
                   <TableHeaderCell>Account</TableHeaderCell>
                   <TableHeaderCell>List</TableHeaderCell>
                   <TableHeaderCell hideOnNarrow>Description</TableHeaderCell>
@@ -216,7 +239,7 @@ export default function FeaturedPage() {
               <TableBody>
                 {featured.data.featured.map((entry, index) => (
                   <TableRow key={entry.id}>
-                    <TableCell align="right" className="w-px">
+                    <TableCell align="right" hideOnNarrow className="w-px">
                       {formatInteger(index + 1)}
                     </TableCell>
                     <TableCell className="break-all">{entry.username}</TableCell>
@@ -229,14 +252,30 @@ export default function FeaturedPage() {
                       </span>
                     </TableCell>
                     <TableCell align="right">
-                      <Button
-                        size="sm"
-                        icon="trash"
-                        onClick={() => setRemoving(entry)}
-                        aria-label={`Remove ${entry.username}/${entry.list_name} from featured`}
-                      >
-                        Remove
-                      </Button>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        <IconButton
+                          size="sm"
+                          icon="arrow-up"
+                          label={`Move ${entry.username}/${entry.list_name} up`}
+                          disabled={index === 0 || move.isPending}
+                          onClick={() => move.mutate({ index, direction: 'up' })}
+                        />
+                        <IconButton
+                          size="sm"
+                          icon="arrow-down"
+                          label={`Move ${entry.username}/${entry.list_name} down`}
+                          disabled={index === count - 1 || move.isPending}
+                          onClick={() => move.mutate({ index, direction: 'down' })}
+                        />
+                        <Button
+                          size="sm"
+                          icon="trash"
+                          onClick={() => setRemoving(entry)}
+                          aria-label={`Remove ${entry.username}/${entry.list_name} from featured`}
+                        >
+                          Remove
+                        </Button>
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))}

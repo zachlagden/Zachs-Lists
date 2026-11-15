@@ -26,7 +26,6 @@ export interface BuildViewProps {
   paused: boolean;
   backTo: string;
   backLabel: string;
-  categories?: ReadonlyMap<string, string> | null;
   limitRequest?: LimitRequestOption | null;
 }
 
@@ -36,7 +35,6 @@ export function BuildView({
   paused,
   backTo,
   backLabel,
-  categories = null,
   limitRequest = null,
 }: BuildViewProps) {
   const phase = buildPhase(job);
@@ -92,7 +90,6 @@ export function BuildView({
           {showSources ? (
             <SourcesTable
               sources={sources}
-              categories={categories}
               emptyMessage={
                 phase === 'queued'
                   ? 'Sources are listed here with their progress once a build worker starts this build.'

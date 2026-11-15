@@ -3,14 +3,12 @@ import type { AdminSystemStats, LibraryEntry } from '../../api/admin';
 import { ApiError } from '../../api/errors';
 import type { Job, LimitRequest } from '../../types';
 import { announcementState, draftSubmission } from './announcements/announcementFacts';
+import { activeFirst, filterBuilds, ownerLabel, progressSummary } from './builds/buildFacts';
 import {
-  activeFirst,
-  buildsOfUser,
-  filterBuilds,
-  ownerLabel,
-  progressSummary,
-} from './builds/buildFacts';
-import { addFeaturedFailure, draftErrors as featuredDraftErrors } from './featured/featuredFacts';
+  addFeaturedFailure,
+  draftErrors as featuredDraftErrors,
+  planFeaturedMove,
+} from './featured/featuredFacts';
 import {
   draftErrors as libraryDraftErrors,
   entryDraft,
@@ -154,7 +152,6 @@ describe('build facts', () => {
     expect(filterBuilds(jobs, { ...all, search: ' JO ' })[0].job_id).toBe('queued');
     expect(filterBuilds(jobs, { ...all, search: 'default' })[0].job_id).toBe('default');
     expect(ownerLabel(jobs[2])).toBe('Default lists');
-    expect(buildsOfUser(jobs, 'u2')).toHaveLength(1);
   });
 
   it('summarises progress for each state', () => {
@@ -506,5 +503,46 @@ describe('featured facts', () => {
     expect(
       Object.keys(featuredDraftErrors({ username: ' ', listName: '', description: '' })),
     ).toEqual(['username', 'list_name']);
+  });
+});
+
+describe('reordering featured lists', () => {
+  const featured = [
+    { id: 'a', order: 1 },
+    { id: 'b', order: 2 },
+    { id: 'c', order: 5 },
+  ];
+
+  it('swaps the order of the two lists that change places', () => {
+    expect(planFeaturedMove(featured, 1, 'up')).toEqual([
+      { id: 'b', order: 1 },
+      { id: 'a', order: 2 },
+    ]);
+    expect(planFeaturedMove(featured, 1, 'down')).toEqual([
+      { id: 'b', order: 5 },
+      { id: 'c', order: 2 },
+    ]);
+  });
+
+  it('does nothing at either end', () => {
+    expect(planFeaturedMove(featured, 0, 'up')).toEqual([]);
+    expect(planFeaturedMove(featured, 2, 'down')).toEqual([]);
+    expect(planFeaturedMove(featured, 9, 'up')).toEqual([]);
+  });
+
+  it('renumbers the whole sequence when the two lists share an order', () => {
+    const tied = [
+      { id: 'a', order: 0 },
+      { id: 'b', order: 0 },
+      { id: 'c', order: 3 },
+    ];
+    expect(planFeaturedMove(tied, 1, 'up')).toEqual([
+      { id: 'b', order: 1 },
+      { id: 'a', order: 2 },
+    ]);
+    expect(planFeaturedMove(tied, 0, 'down')).toEqual([
+      { id: 'b', order: 1 },
+      { id: 'a', order: 2 },
+    ]);
   });
 });

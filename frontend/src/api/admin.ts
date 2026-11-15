@@ -18,6 +18,7 @@ import { del, get, post, put } from './http';
 
 export const ADMIN_USERS_PAGE_SIZE = 25;
 export const ADMIN_JOBS_LIMIT = 100;
+export const ADMIN_USER_JOBS_PAGE_SIZE = 10;
 export const ADMIN_LIMIT_REVIEWS_PAGE_SIZE = 25;
 export const ADMIN_STATS_FRESH_MS = 30_000;
 export const ADMIN_ANNOUNCEMENTS_LIMIT = 50;
@@ -81,6 +82,14 @@ export interface AdminBuildStarted {
 
 export interface AdminJobsResponse {
   jobs: Job[];
+}
+
+export interface AdminUserJobsPage {
+  jobs: Job[];
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
 }
 
 export interface AdminSystemStats extends AdminStats {
@@ -216,6 +225,8 @@ export const adminKeys = {
   jobs: () => [...adminKeys.all, 'jobs'] as const,
   jobList: (limit: number) => [...adminKeys.jobs(), 'list', limit] as const,
   job: (jobId: string) => [...adminKeys.jobs(), 'detail', jobId] as const,
+  userJobs: () => [...adminKeys.jobs(), 'user'] as const,
+  userJobPage: (userId: string, page: number) => [...adminKeys.userJobs(), userId, page] as const,
   stats: () => [...adminKeys.all, 'stats'] as const,
   jobsPerDay: (days: number) => [...adminKeys.all, 'jobs-per-day', days] as const,
   defaultConfig: () => [...adminKeys.all, 'default-config'] as const,
@@ -295,6 +306,17 @@ export function fetchAdminJob(jobId: string): Promise<Job> {
   return get<Job>(`/api/admin/jobs/${encodeURIComponent(jobId)}`);
 }
 
+export function fetchAdminUserJobs(
+  userId: string,
+  page: number = 1,
+  perPage: number = ADMIN_USER_JOBS_PAGE_SIZE,
+): Promise<AdminUserJobsPage> {
+  return get<AdminUserJobsPage>(`/api/admin/users/${encodeURIComponent(userId)}/jobs`, {
+    page,
+    per_page: perPage,
+  });
+}
+
 export function fetchAdminStats(): Promise<AdminSystemStats> {
   return get<AdminSystemStats>('/api/admin/stats');
 }
@@ -328,6 +350,12 @@ export function addFeaturedList(submission: FeaturedListSubmission): Promise<Fea
     username: submission.username,
     list_name: submission.listName,
     description: submission.description ?? '',
+  });
+}
+
+export function moveFeaturedList(featuredId: string, order: number): Promise<FeaturedListAdded> {
+  return put<FeaturedListAdded>(`/api/admin/featured/${encodeURIComponent(featuredId)}`, {
+    order,
   });
 }
 
@@ -439,6 +467,13 @@ export const adminJobsQuery = () =>
       if (!stored) return fetched;
       return { jobs: mergeFetchedList(stored.jobs, fetched.jobs).slice(0, ADMIN_JOBS_LIMIT) };
     },
+  });
+
+export const adminUserJobsQuery = (userId: string, page: number = 1) =>
+  queryOptions({
+    queryKey: adminKeys.userJobPage(userId, page),
+    queryFn: () => fetchAdminUserJobs(userId, page),
+    placeholderData: keepPreviousData,
   });
 
 export const adminStatsQuery = () =>

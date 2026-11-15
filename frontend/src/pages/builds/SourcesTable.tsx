@@ -2,13 +2,7 @@ import { useMemo } from 'react';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { StatusPill } from '../../components/ui/StatusPill';
 import { EmptyState } from '../../components/ui/States';
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
-} from '../../components/ui/Table';
+import { Table, TableBody, TableHead, TableHeaderCell, TableRow } from '../../components/ui/Table';
 import type { SourceProgress } from '../../types';
 import { sortSources, sourceTally } from './sourceFacts';
 import { SourceRow } from './SourceRow';
@@ -30,20 +24,17 @@ function Tally({ sources }: { sources: SourceProgress[] }) {
           {tally.active} active
         </StatusPill>
       ) : null}
-      {tally.waiting > 0 ? (
-        <StatusPill icon="clock">{tally.waiting} waiting</StatusPill>
-      ) : null}
+      {tally.waiting > 0 ? <StatusPill icon="clock">{tally.waiting} waiting</StatusPill> : null}
     </div>
   );
 }
 
 export interface SourcesTableProps {
   sources: SourceProgress[];
-  categories: ReadonlyMap<string, string> | null;
   emptyMessage: string;
 }
 
-export function SourcesTable({ sources, categories, emptyMessage }: SourcesTableProps) {
+export function SourcesTable({ sources, emptyMessage }: SourcesTableProps) {
   const sorted = useMemo(() => sortSources(sources), [sources]);
   return (
     <Card as="section" aria-labelledby="build-sources">
@@ -69,11 +60,7 @@ export function SourcesTable({ sources, categories, emptyMessage }: SourcesTable
           </TableHead>
           <TableBody>
             {sorted.map((source) => (
-              <SourceRow
-                key={source.id}
-                source={source}
-                category={categories?.get(source.url) ?? null}
-              />
+              <SourceRow key={source.id} source={source} />
             ))}
           </TableBody>
         </Table>

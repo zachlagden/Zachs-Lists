@@ -17,9 +17,8 @@ import {
   describeManualBuilds,
   describeSourceSummary,
   domainUsage,
-  lastSourceCheck,
+  lastCheckFoundChanges,
   nextManualBuildReset,
-  nextScheduledRebuild,
   publicationState,
   publishedJob,
   sourceSummary,
@@ -74,6 +73,8 @@ function listsResponse(overrides: Partial<UserListsResponse> = {}): UserListsRes
     },
     remaining_updates: 2,
     enforce_domain_limit: false,
+    next_rebuild_at: '2026-11-15T07:30:00.000Z',
+    last_checked_at: '2026-11-08T06:41:48.000Z',
     ...overrides,
   };
 }
@@ -101,18 +102,6 @@ const running = job({
 });
 
 describe('schedule', () => {
-  it('finds the next Sunday 07:30 UTC rebuild', () => {
-    expect(nextScheduledRebuild(new Date('2026-11-14T20:41:00Z')).toISOString()).toBe(
-      '2026-11-15T07:30:00.000Z',
-    );
-    expect(nextScheduledRebuild(new Date('2026-11-15T07:29:59Z')).toISOString()).toBe(
-      '2026-11-15T07:30:00.000Z',
-    );
-    expect(nextScheduledRebuild(new Date('2026-11-15T07:30:00Z')).toISOString()).toBe(
-      '2026-11-22T07:30:00.000Z',
-    );
-  });
-
   it('resets manual builds at the start of Sunday UTC', () => {
     expect(nextManualBuildReset(new Date('2026-11-14T20:41:00Z')).toISOString()).toBe(
       '2026-11-15T00:00:00.000Z',
@@ -132,13 +121,11 @@ describe('build history', () => {
     expect(publishedJob(jobs, null)).toBeNull();
   });
 
-  it('reports when the sources were last checked and whether anything changed', () => {
-    expect(lastSourceCheck(jobs)).toEqual({ at: '2026-11-12T19:20:09.000Z', changed: false });
-    expect(lastSourceCheck([failed, published])).toEqual({
-      at: '2026-11-08T06:41:48.000Z',
-      changed: true,
-    });
-    expect(lastSourceCheck([failed])).toBeNull();
+  it('says whether the last check of the sources found anything new', () => {
+    expect(lastCheckFoundChanges(jobs, '2026-11-12T19:20:09.000Z')).toBe(false);
+    expect(lastCheckFoundChanges([failed, published], '2026-11-08T06:41:48.000Z')).toBe(true);
+    expect(lastCheckFoundChanges(jobs, '2026-10-01T00:00:00.000Z')).toBeNull();
+    expect(lastCheckFoundChanges(jobs, null)).toBeNull();
   });
 
   it('works out the change against the previous completed build', () => {

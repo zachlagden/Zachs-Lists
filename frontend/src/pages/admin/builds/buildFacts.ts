@@ -46,10 +46,6 @@ export function activeFirst(jobs: Job[]): Job[] {
     .map(({ job }) => job);
 }
 
-export function buildsOfUser(jobs: Job[], userId: string): Job[] {
-  return jobs.filter((job) => job.user_id === userId);
-}
-
 const STAGE_LABELS: Record<JobStage, string> = {
   queue: 'Waiting to start',
   downloading: 'Downloading sources',

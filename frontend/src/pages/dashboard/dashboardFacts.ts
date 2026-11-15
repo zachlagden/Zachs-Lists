@@ -8,27 +8,6 @@ import type { Job, LimitReview, SourceProgress, UserList } from '../../types';
 
 export const RECENT_BUILDS_SHOWN = 5;
 
-const USER_REBUILD_WEEKDAY_UTC = 0;
-const USER_REBUILD_HOUR_UTC = 7;
-const USER_REBUILD_MINUTE_UTC = 30;
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-export function nextScheduledRebuild(now: Date): Date {
-  const candidate = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      USER_REBUILD_HOUR_UTC,
-      USER_REBUILD_MINUTE_UTC,
-    ),
-  );
-  const daysAhead = (USER_REBUILD_WEEKDAY_UTC - candidate.getUTCDay() + 7) % 7;
-  candidate.setUTCDate(candidate.getUTCDate() + daysAhead);
-  if (candidate.getTime() <= now.getTime()) candidate.setTime(candidate.getTime() + WEEK_MS);
-  return candidate;
-}
-
 export function nextManualBuildReset(now: Date): Date {
   const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const daysAhead = 7 - midnight.getUTCDay();
@@ -52,19 +31,14 @@ export function lastFinishedJob(jobs: Job[]): Job | null {
   return jobs.find((job) => !isActive(job)) ?? null;
 }
 
-export interface SourceCheck {
-  at: string;
-  changed: boolean;
-}
-
-export function lastSourceCheck(jobs: Job[]): SourceCheck | null {
-  const job = jobs.find(
-    (candidate) =>
-      (candidate.status === 'completed' || candidate.status === 'skipped') &&
-      candidate.completed_at,
+export function lastCheckFoundChanges(jobs: Job[], lastCheckedAt: string | null): boolean | null {
+  if (!lastCheckedAt) return null;
+  const check = jobs.find(
+    (job) =>
+      (job.status === 'completed' || job.status === 'skipped') &&
+      job.completed_at === lastCheckedAt,
   );
-  if (!job?.completed_at) return null;
-  return { at: job.completed_at, changed: job.status === 'completed' };
+  return check ? check.status === 'completed' : null;
 }
 
 export type PublicationState =

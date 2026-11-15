@@ -83,14 +83,6 @@ export function sourceNote(source: SourceProgress): SourceNote | null {
   return null;
 }
 
-export function sourceHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
 const NAME_BREAKS = /(?<=[_\-./])/;
 
 export function nameParts(name: string): string[] {
