@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import mongomock
 import pytest
-from flask import Flask, Response
+from flask import Flask
 from flask.testing import FlaskClient
 
 from app.blueprints import lists
@@ -18,8 +18,9 @@ from app.config import TestingConfig
 from app.db_indexes import ensure_indexes
 from app.extensions import limiter, mongo
 from app.models.analytics import Analytics
+from app.models.system_config import SystemConfig
 from app.models.user import User
-from app.services import download_recorder, site_stats
+from app.services import download_recorder, published_lists, site_stats
 from app.socketio import init_socketio
 from app.utils import client_ip, validators
 from app.utils.api_input import register_input_checks
@@ -56,12 +57,22 @@ def app(
     def example_api() -> dict[str, str]:
         return {"status": "ok"}
 
-    monkeypatch.setattr(lists, "list_file_exists", Mock(return_value=True))
-    monkeypatch.setattr(lists, "get_list_file_size", Mock(return_value=12))
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "all_domains_hosts.txt").write_text("example.com\n")
     monkeypatch.setattr(
-        lists, "serve_list_file", Mock(side_effect=lambda _: Response("example.com\n"))
+        SystemConfig,
+        "get_default_publication",
+        Mock(
+            return_value={
+                "generation_id": None,
+                "published_at": None,
+                "total_domains": None,
+            }
+        ),
     )
     monkeypatch.setattr(Analytics, "record_download", Mock())
+    published_lists.clear_caches()
     download_recorder.failures.reset()
     download_recorder.database_pause.reset()
     site_stats.clear_caches()
@@ -73,7 +84,7 @@ def app(
 
 
 @pytest.fixture
-def user(monkeypatch: pytest.MonkeyPatch) -> Mock:
+def user(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Mock:
     account = Mock(spec=User)
     account.id = "000000000000000000000001"
     account.username = "sam"
@@ -82,7 +93,8 @@ def user(monkeypatch: pytest.MonkeyPatch) -> Mock:
     account.is_banned = False
     account.to_dict.return_value = {"id": account.id, "username": account.username}
     account.get_list.return_value = {"domain_count": 1}
-    account.get_output_path.return_value = "/example/all_domains_hosts.txt"
+    account.published_generation = None
+    account.get_output_dir.return_value = str(tmp_path / "output")
     monkeypatch.setattr(User, "get_by_id", Mock(return_value=account))
     monkeypatch.setattr(User, "get_by_username", Mock(return_value=account))
     return account

@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from bson import ObjectId
-from flask import Response
 
 from app.blueprints import auth, lists
 from app.models.analytics import Analytics
@@ -280,11 +279,9 @@ def test_banned_users_lists_are_not_served(
         {"username": "sam"},
         {"$set": {"lists": [{"name": "all_domains", "domain_count": 1}]}},
     )
-    monkeypatch.setattr(lists, "list_file_exists", Mock(return_value=True))
-    monkeypatch.setattr(lists, "get_list_file_size", Mock(return_value=12))
-    monkeypatch.setattr(
-        lists, "serve_list_file", Mock(side_effect=lambda _: Response("example.com\n"))
-    )
+    output = Path(api.reload(sam).get_output_dir())
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "all_domains_hosts.txt").write_text("example.com\n")
     monkeypatch.setattr(download_recorder, "record_download", Mock())
     monkeypatch.setattr(lists, "record_download", Mock())
     client = api.client()

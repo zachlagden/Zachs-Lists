@@ -26,6 +26,7 @@ pub struct Config {
     pub progress_update_interval_ms: u64,
 }
 
+pub const DEFAULT_TARGET: &str = "__default__";
 pub const DEFAULT_PROGRESS_UPDATE_INTERVAL_MS: u64 = 500;
 pub const MIN_PROGRESS_UPDATE_INTERVAL_MS: u64 = 100;
 
@@ -89,7 +90,7 @@ impl Config {
 
     /// Get output directory for a user (output files still on filesystem for nginx)
     pub fn output_dir(&self, username: &str) -> PathBuf {
-        if username == "__default__" {
+        if username == DEFAULT_TARGET {
             self.default_dir().join("output")
         } else {
             self.user_dir(username).join("output")

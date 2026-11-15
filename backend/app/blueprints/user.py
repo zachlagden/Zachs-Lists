@@ -361,6 +361,8 @@ def get_lists(user: User):
     return jsonify(
         {
             "lists": user.lists,
+            "published_at": utc_iso(user.published_at),
+            "generation_id": user.published_generation,
             "stats": {
                 **user.stats,
                 "last_build_at": utc_iso(user.stats.get("last_build_at")),

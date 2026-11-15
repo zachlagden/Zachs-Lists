@@ -497,7 +497,7 @@ impl WhitelistManager {
 
     #[cfg(test)]
     pub fn partition(&self, domains: HashSet<String>) -> (HashSet<String>, Vec<String>) {
-        self.partition_reporting(domains, &Cancellation::default(), &|_| {})
+        self.partition_reporting(domains, &Cancellation::default(), &|_, _| {})
             .unwrap()
     }
 
@@ -505,7 +505,7 @@ impl WhitelistManager {
         &self,
         domains: HashSet<String>,
         cancellation: &Cancellation,
-        report_removed: &(dyn Fn(&[String]) + Send + Sync),
+        report_checked: &(dyn Fn(usize, &[String]) + Send + Sync),
     ) -> Result<(HashSet<String>, Vec<String>), Cancelled> {
         if self.patterns.is_empty() {
             return Ok((domains, Vec::new()));
@@ -517,10 +517,11 @@ impl WhitelistManager {
             .chunks(WORK_GRAIN)
             .map(|chunk| {
                 cancellation.check()?;
+                let checked = chunk.len();
                 let (removed, remaining): (Vec<String>, Vec<String>) = chunk
                     .into_iter()
                     .partition(|domain| self.is_whitelisted(domain));
-                report_removed(&removed);
+                report_checked(checked, &removed);
                 Ok((remaining, removed))
             })
             .collect::<Result<_, Cancelled>>()?;
@@ -596,6 +597,7 @@ impl WhitelistManager {
         WhitelistProgress {
             domains_before,
             domains_after,
+            domains_checked: domains_before,
             total_removed: domains_before.saturating_sub(domains_after),
             processing: false,
             patterns_total: self.patterns.len() as u64,

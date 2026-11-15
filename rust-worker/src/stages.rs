@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::cancellation::{Cancellation, Cancelled, WORK_GRAIN};
-use crate::db::progress::{OutputFile, WhitelistProgress};
+use crate::db::progress::WhitelistProgress;
 use crate::extractor::{DomainExtractor, FormatBreakdown};
+use crate::generation::{BuildIdentity, UnfinishedGeneration, WrittenGeneration};
 use crate::generator::{
-    GenerationControl, GenerationEvent, OutputFormat, OutputGenerator, UNCATEGORIZED_LIST_NAME,
+    category_list_names, GenerationControl, GenerationEvent, OutputFormat, OutputGenerator,
+    UNCATEGORIZED_LIST_NAME,
 };
 use crate::whitelist::{job_warnings, ParsedWhitelist, WhitelistManager};
 
@@ -197,10 +199,16 @@ pub struct WhitelistOutcome {
     pub generation: GenerationPlan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WhitelistTick {
+    pub checked: u64,
+    pub newly_removed: u64,
+}
+
 pub fn apply_whitelist(
     plan: WhitelistPlan,
     cancellation: &Cancellation,
-    report_removed: &(dyn Fn(u64) + Send + Sync),
+    report: &(dyn Fn(WhitelistTick) + Send + Sync),
 ) -> Result<WhitelistOutcome, Cancelled> {
     let WhitelistPlan {
         domains,
@@ -218,14 +226,15 @@ pub fn apply_whitelist(
     let mut removed_domains: HashSet<String> = HashSet::new();
     for (category, category_domains) in domains.by_category {
         let removed_before = &removed_domains;
-        let report_new_removals = |removed: &[String]| {
+        let report_new_removals = |checked: usize, removed: &[String]| {
             let new = removed
                 .iter()
                 .filter(|domain| !removed_before.contains(*domain))
                 .count();
-            if new > 0 {
-                report_removed(new as u64);
-            }
+            report(WhitelistTick {
+                checked: checked as u64,
+                newly_removed: new as u64,
+            });
         };
         let (remaining, removed) =
             whitelist.partition_reporting(category_domains, cancellation, &report_new_removals)?;
@@ -291,22 +300,24 @@ fn sorted_until_cancelled(
 }
 
 pub struct GeneratedOutput {
-    pub files: Vec<OutputFile>,
+    pub generation: WrittenGeneration,
     pub categories: BTreeMap<String, u64>,
 }
 
 pub fn generate_outputs(
     output_dir: PathBuf,
+    identity: BuildIdentity,
     domains: CategoryDomains,
     cancellation: &Cancellation,
     report: &(dyn Fn(GenerationEvent) + Send + Sync),
 ) -> Result<GeneratedOutput> {
-    let generator = OutputGenerator::new(output_dir);
+    category_list_names(domains.by_category.keys())?;
+    let unfinished = UnfinishedGeneration::create(&output_dir)?;
+    let generator = OutputGenerator::new(unfinished.directory());
     let control = GenerationControl {
         cancellation,
         report,
     };
-    generator.cleanup_old_files()?;
 
     let adblock_rules = domains.adblock_rules;
     let mut sorted_by_category: HashMap<Option<String>, Vec<String>> = HashMap::new();
@@ -345,8 +356,12 @@ pub fn generate_outputs(
     }
     let combined_sorted = sorted_until_cancelled(combined, cancellation)?;
     files.extend(generator.generate_all(&combined_sorted, &adblock_rules, &control)?);
+    cancellation.check()?;
 
-    Ok(GeneratedOutput { files, categories })
+    Ok(GeneratedOutput {
+        generation: unfinished.finish(identity, files)?,
+        categories,
+    })
 }
 
 #[cfg(test)]

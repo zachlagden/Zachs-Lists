@@ -120,11 +120,6 @@ async fn changed_body_is_checked_for_manual_and_scheduled_downloads() {
     );
     assert_ne!(old.content_hash, changed.content_hash);
     assert!(!changed.cache_hit);
-    assert!(
-        !downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
     let forced = downloader.download_source(&source, true).await;
     assert_eq!(
         forced.content.as_deref(),
@@ -422,11 +417,6 @@ async fn cleanup_uses_successful_checks_instead_of_extraction_timestamps() {
         .update_domain_count(&first.url_hash, 42)
         .await
         .unwrap();
-    assert!(!downloader
-        .cache_repo
-        .has_valid_cache(&first.url_hash, &source.url, 3600)
-        .await
-        .unwrap());
     assert_eq!(downloader.cache_repo.cleanup_stale(1).await.unwrap(), 1);
     assert!(downloader
         .cache_repo
@@ -528,11 +518,6 @@ async fn fresh_entry_is_served_without_contacting_the_upstream() {
     let after = metadata(&db, &source).await;
     assert_eq!(before.last_checked_at, after.last_checked_at);
     assert_eq!(before.updated_at, after.updated_at);
-    assert!(
-        downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
     db.drop().await.unwrap();
 }
 
@@ -548,11 +533,6 @@ async fn entry_older_than_the_freshness_window_is_revalidated() {
     let first = downloader.download_source(&source, false).await;
     assert!(first.error.is_none(), "{:?}", first.error);
     let aged = set_checked_seconds_ago(&db, &source, 3601).await;
-    assert!(
-        !downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
     let second = downloader.download_source(&source, false).await;
     assert!(second.error.is_none(), "{:?}", second.error);
     assert!(second.cache_hit && !second.stale_fallback);
@@ -563,11 +543,6 @@ async fn entry_older_than_the_freshness_window_is_revalidated() {
         .to_lowercase()
         .contains("if-none-match: \"aged\""));
     assert!(metadata(&db, &source).await.last_checked_at.unwrap() > aged);
-    assert!(
-        downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
     db.drop().await.unwrap();
 }
 
@@ -633,72 +608,6 @@ async fn fresh_entry_with_an_unusable_body_is_downloaded_again() {
 
 #[tokio::test]
 #[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
-async fn skip_check_reads_metadata_only_and_matches_what_the_downloader_accepts() {
-    let server = TestServer::start(vec![Reply::new(200, b"cached.example\n")]).await;
-    let (db, downloader, source) = fresh_fixture(&server).await;
-    let first = downloader.download_source(&source, false).await;
-    assert!(first.error.is_none(), "{:?}", first.error);
-    let repo = &downloader.cache_repo;
-    let url_hash = first.url_hash.as_str();
-    assert!(repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    assert!(!repo
-        .has_valid_cache(url_hash, &source.url, 0)
-        .await
-        .unwrap());
-    assert!(!repo
-        .has_valid_cache(url_hash, "http://other.example/list", 3600)
-        .await
-        .unwrap());
-    assert!(!repo
-        .has_valid_cache("missing", &source.url, 3600)
-        .await
-        .unwrap());
-    db.collection::<bson::Document>("cache_files.chunks")
-        .drop()
-        .await
-        .unwrap();
-    assert!(repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    set_checked_seconds_ago(&db, &source, 3601).await;
-    assert!(!repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    set_checked_seconds_ago(&db, &source, 0).await;
-    set_metadata(&db, &source, doc! { "content_hash": Bson::Null }).await;
-    assert!(!repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    set_metadata(&db, &source, doc! { "content_hash": &first.content_hash }).await;
-    assert!(repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    db.collection::<bson::Document>("cache_files.files")
-        .delete_many(doc! {})
-        .await
-        .unwrap();
-    assert!(!repo
-        .has_valid_cache(url_hash, &source.url, 3600)
-        .await
-        .unwrap());
-    assert!(
-        !downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
-    assert_eq!(server.requests.lock().unwrap().len(), 1);
-    db.drop().await.unwrap();
-}
-
-#[tokio::test]
-#[ignore = "requires isolated SOURCE_CACHE_TEST_MONGO_URI"]
 async fn entry_without_a_check_time_is_downloaded_unconditionally_and_replaced() {
     let server = TestServer::start(vec![
         Reply::new(200, b"current.example\n").header("ETag", "\"current\"")
@@ -708,11 +617,6 @@ async fn entry_without_a_check_time_is_downloaded_unconditionally_and_replaced()
     insert_entry_without_check_time(&db, &source, b"unchecked.example\n").await;
     let unchecked = metadata(&db, &source).await;
     assert!(unchecked.last_checked_at.is_none() && unchecked.final_url.is_none());
-    assert!(
-        !downloader
-            .check_all_cached(std::slice::from_ref(&source))
-            .await
-    );
     let result = downloader.download_source(&source, false).await;
     assert!(result.error.is_none(), "{:?}", result.error);
     assert!(!result.cache_hit && !result.stale_fallback);

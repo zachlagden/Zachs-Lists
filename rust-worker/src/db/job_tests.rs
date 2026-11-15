@@ -105,7 +105,8 @@ fn results_always_carry_an_error_code_key() {
     let succeeded = bson::to_document(&completed_result()).unwrap();
     assert_eq!(succeeded.get("error_code"), Some(&Bson::Null));
     assert_eq!(succeeded.get("skip_reason"), Some(&Bson::Null));
-    assert_eq!(succeeded.get("copied_from"), Some(&Bson::Null));
+    assert_eq!(succeeded.get("generation_id"), Some(&Bson::Null));
+    assert!(!succeeded.contains_key("copied_from"));
     assert_eq!(succeeded.get_document("categories").unwrap().len(), 0);
     assert_eq!(succeeded.get_array("warnings").unwrap().len(), 0);
     assert_eq!(succeeded.get_i64("sources_stale").unwrap(), 0);

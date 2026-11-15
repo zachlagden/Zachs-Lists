@@ -1,20 +1,20 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::fs::{self, File};
+use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::cancellation::{Cancellation, WORK_GRAIN};
-use crate::db::progress::OutputFile;
+use crate::generation::{
+    create_new_file, is_safe_list_name, CountingWriter, HashingWriter, ManifestFile,
+};
 
 pub const COMBINED_LIST_NAME: &str = "all_domains";
 pub const UNCATEGORIZED_LIST_NAME: &str = "uncategorized";
-const PARTIAL_SUFFIX: &str = ".partial";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GenerationEvent {
@@ -28,42 +28,24 @@ pub struct GenerationControl<'a> {
     pub report: &'a (dyn Fn(GenerationEvent) + Send + Sync),
 }
 
-struct PartialFile {
-    partial_path: PathBuf,
-    final_path: PathBuf,
-    published: bool,
-}
-
-impl PartialFile {
-    fn new(output_dir: &std::path::Path, filename: &str) -> Self {
-        Self {
-            partial_path: output_dir.join(format!(".{filename}{PARTIAL_SUFFIX}")),
-            final_path: output_dir.join(filename),
-            published: false,
-        }
+pub fn category_list_names<'a>(
+    categories: impl Iterator<Item = &'a Option<String>>,
+) -> Result<Vec<&'a str>> {
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for category in categories {
+        let name = category.as_deref().unwrap_or(UNCATEGORIZED_LIST_NAME);
+        ensure!(
+            is_safe_list_name(name) && name != COMBINED_LIST_NAME,
+            "Category name {name:?} cannot be used as a list name"
+        );
+        ensure!(
+            seen.insert(name),
+            "Two categories would write the list {name:?}"
+        );
+        names.push(name);
     }
-
-    fn publish(mut self) -> std::io::Result<u64> {
-        fs::rename(&self.partial_path, &self.final_path)?;
-        self.published = true;
-        Ok(fs::metadata(&self.final_path)?.len())
-    }
-}
-
-impl Drop for PartialFile {
-    fn drop(&mut self) {
-        if self.published {
-            return;
-        }
-        match fs::remove_file(&self.partial_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => warn!(
-                "Could not remove unfinished output {:?}: {}",
-                self.partial_path, error
-            ),
-        }
-    }
+    Ok(names)
 }
 
 /// Output format types
@@ -109,12 +91,12 @@ impl OutputFormat {
 
 /// Output file generator
 pub struct OutputGenerator {
-    output_dir: std::path::PathBuf,
+    output_dir: PathBuf,
 }
 
 impl OutputGenerator {
     /// Create a new output generator
-    pub fn new(output_dir: impl Into<std::path::PathBuf>) -> Self {
+    pub fn new(output_dir: impl Into<PathBuf>) -> Self {
         Self {
             output_dir: output_dir.into(),
         }
@@ -178,16 +160,15 @@ impl OutputGenerator {
         domains: &[String],
         adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
-    ) -> Result<OutputFile> {
+    ) -> Result<ManifestFile> {
         control.cancellation.check()?;
         let total_domains = domains.len() as u64;
         let filename = format!("{}_{}.txt.gz", list_name, format.as_str());
-        let output = PartialFile::new(&self.output_dir, &filename);
         (control.report)(GenerationEvent::FileStarted(format));
 
-        let file = File::create(&output.partial_path)?;
-        let buf_writer = BufWriter::with_capacity(4 * 1024 * 1024, file);
-        let mut encoder = GzEncoder::new(buf_writer, Compression::fast());
+        let file = create_new_file(&self.output_dir.join(&filename))?;
+        let stored = BufWriter::with_capacity(4 * 1024 * 1024, HashingWriter::new(file));
+        let mut encoder = CountingWriter::new(GzEncoder::new(stored, Compression::fast()));
 
         let header = self.generate_header(format, total_domains);
         encoder.write_all(header.as_bytes())?;
@@ -205,11 +186,15 @@ impl OutputGenerator {
             (control.report)(GenerationEvent::DomainsWritten(format, chunk.len() as u64));
         }
 
-        let buf_writer = encoder.finish()?;
-        buf_writer.into_inner()?.sync_all()?;
+        let (compressor, uncompressed_bytes) = encoder.finish();
+        let hashed = compressor
+            .finish()?
+            .into_inner()
+            .map_err(|unflushed| unflushed.into_error())?;
+        let (file, sha256, gz_size) = hashed.finish();
+        file.sync_all()?;
 
         control.cancellation.check()?;
-        let gz_size = output.publish()?;
         (control.report)(GenerationEvent::FileCompleted { format, gz_size });
 
         info!(
@@ -217,11 +202,14 @@ impl OutputGenerator {
             filename, total_domains, gz_size
         );
 
-        Ok(OutputFile {
+        Ok(ManifestFile {
             name: filename,
+            list: list_name.to_string(),
             format: format.as_str().to_string(),
-            size_bytes: gz_size,
             domain_count: total_domains,
+            size_bytes: gz_size,
+            uncompressed_bytes,
+            sha256,
         })
     }
 
@@ -231,9 +219,7 @@ impl OutputGenerator {
         domains: &[String],
         adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
-    ) -> Result<Vec<OutputFile>> {
-        fs::create_dir_all(&self.output_dir)?;
-
+    ) -> Result<Vec<ManifestFile>> {
         OutputFormat::all()
             .par_iter()
             .map(|format| {
@@ -248,9 +234,8 @@ impl OutputGenerator {
         category_domains: &HashMap<Option<String>, Vec<String>>,
         adblock_rules: &HashMap<String, R>,
         control: &GenerationControl,
-    ) -> Result<Vec<OutputFile>> {
-        // Ensure output directory exists before parallel execution
-        fs::create_dir_all(&self.output_dir)?;
+    ) -> Result<Vec<ManifestFile>> {
+        category_list_names(category_domains.keys())?;
 
         // Build task list: (category, format) pairs with domain reference
         let tasks: Vec<(&str, OutputFormat, &[String])> = category_domains
@@ -280,34 +265,13 @@ impl OutputGenerator {
             })
             .collect()
     }
-
-    /// Clean up old output files
-    pub fn cleanup_old_files(&self) -> Result<()> {
-        if !self.output_dir.exists() {
-            return Ok(());
-        }
-
-        // Remove any legacy uncompressed files
-        for entry in fs::read_dir(&self.output_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().map(|e| e == "txt").unwrap_or(false) {
-                // Check if it's not a .gz file (legacy uncompressed)
-                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if !filename.ends_with(".gz") {
-                    info!("Removing legacy uncompressed file: {:?}", path);
-                    fs::remove_file(path)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+    use std::fs::{self, File};
     use tempfile::TempDir;
 
     const NO_RULES: Option<&HashMap<String, String>> = None;
@@ -419,13 +383,18 @@ mod tests {
             ]
         );
         for file in &files {
+            let stored = fs::read(temp_dir.path().join(&file.name)).unwrap();
+            let mut text = String::new();
+            std::io::Read::read_to_string(
+                &mut flate2::read::GzDecoder::new(stored.as_slice()),
+                &mut text,
+            )
+            .unwrap();
+            assert_eq!(file.list, "all_domains");
             assert_eq!(file.domain_count, 2);
-            assert_eq!(
-                file.size_bytes,
-                fs::metadata(temp_dir.path().join(&file.name))
-                    .unwrap()
-                    .len()
-            );
+            assert_eq!(file.size_bytes, stored.len() as u64);
+            assert_eq!(file.uncompressed_bytes, text.len() as u64);
+            assert_eq!(file.sha256, format!("{:x}", Sha256::digest(&stored)));
         }
         let mut adblock = String::new();
         std::io::Read::read_to_string(
@@ -508,37 +477,55 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_generation_keeps_the_published_file_and_leaves_no_partial() {
+    fn existing_file_is_never_overwritten() {
         let temp_dir = TempDir::new().unwrap();
         let generator = OutputGenerator::new(temp_dir.path());
-        let published = temp_dir.path().join("all_domains_hosts.txt.gz");
-        fs::write(&published, b"previous build").unwrap();
-        let domains = numbered_domains(5 * WORK_GRAIN);
+        let existing = temp_dir.path().join("all_domains_hosts.txt.gz");
+        fs::write(&existing, b"already written").unwrap();
         let cancellation = Cancellation::default();
-        let cancel_after_first_chunk = |event| {
-            if matches!(event, GenerationEvent::DomainsWritten(..)) {
-                cancellation.cancel();
-            }
-        };
 
         let outcome = generator.generate_all(
-            &domains,
+            &numbered_domains(3),
             &HashMap::<String, String>::new(),
             &GenerationControl {
                 cancellation: &cancellation,
-                report: &cancel_after_first_chunk,
+                report: &|_| {},
             },
         );
 
-        let error = outcome.unwrap_err();
-        assert!(error
-            .downcast_ref::<crate::cancellation::Cancelled>()
-            .is_some());
-        assert_eq!(fs::read(&published).unwrap(), b"previous build");
-        let left: Vec<String> = fs::read_dir(temp_dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(left, ["all_domains_hosts.txt.gz"]);
+        assert!(outcome.is_err());
+        assert_eq!(fs::read(&existing).unwrap(), b"already written");
+    }
+
+    #[test]
+    fn category_names_that_collide_or_escape_the_directory_are_refused() {
+        let safe = [Some("tracking".to_string()), None];
+        assert_eq!(
+            category_list_names(safe.iter()).unwrap(),
+            ["tracking", "uncategorized"]
+        );
+        for unusable in [
+            vec![Some("all_domains".to_string())],
+            vec![Some("../escape".to_string())],
+            vec![Some(String::new())],
+            vec![Some("uncategorized".to_string()), None],
+        ] {
+            assert!(category_list_names(unusable.iter()).is_err());
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut categories = HashMap::new();
+        categories.insert(Some("all_domains".to_string()), numbered_domains(1));
+        let cancellation = Cancellation::default();
+        let refused = OutputGenerator::new(temp_dir.path()).generate_all_categories(
+            &categories,
+            &HashMap::<String, String>::new(),
+            &GenerationControl {
+                cancellation: &cancellation,
+                report: &|_| {},
+            },
+        );
+        assert!(refused.is_err());
+        assert_eq!(fs::read_dir(temp_dir.path()).unwrap().count(), 0);
     }
 }

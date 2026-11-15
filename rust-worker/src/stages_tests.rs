@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::db::progress::{FormatStatus, GenerationProgress};
 use crate::downloader::Source;
+use crate::generation::{generations_dir, read_manifest, MANIFEST_NAME};
 use crate::progress_tracker::ProgressTracker;
 
 const STOP_BOUND: Duration = Duration::from_secs(1);
@@ -73,6 +74,24 @@ fn extracted(bodies: Vec<SourceBody>) -> CategoryDomains {
         .unwrap();
     }
     domains
+}
+
+fn identity() -> BuildIdentity {
+    BuildIdentity {
+        job_id: "job-1".into(),
+        job_created_at: chrono::Utc::now(),
+        attempt: 1,
+        inputs_digest: "d".repeat(64),
+    }
+}
+
+fn generation_names(output_dir: &std::path::Path) -> Vec<String> {
+    match std::fs::read_dir(generations_dir(output_dir)) {
+        Ok(entries) => entries
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 fn whitelisted(domains: CategoryDomains, whitelist: &str) -> WhitelistOutcome {
@@ -168,13 +187,17 @@ fn whitelist_counts_each_removed_domain_once_across_categories() {
     assert_eq!(plan.domains_before, 7);
     assert_eq!(plan.parsed.whitelist.pattern_count(), 1);
     let reported = AtomicU64::new(0);
+    let checked = AtomicU64::new(0);
 
-    let outcome = apply_whitelist(plan, &cancellation, &|newly_removed| {
-        reported.fetch_add(newly_removed, Ordering::Relaxed);
+    let outcome = apply_whitelist(plan, &cancellation, &|tick| {
+        reported.fetch_add(tick.newly_removed, Ordering::Relaxed);
+        checked.fetch_add(tick.checked, Ordering::Relaxed);
     })
     .unwrap();
 
     assert_eq!(reported.into_inner(), 3);
+    assert_eq!(checked.into_inner(), 9);
+    assert_eq!(outcome.progress.domains_checked, 7);
     assert_eq!(outcome.progress.total_removed, 3);
     assert_eq!(outcome.progress.domains_after, 4);
     assert_eq!(outcome.progress.patterns_total, 1);
@@ -240,6 +263,7 @@ fn generation_progress_counts_every_file_of_every_category() {
 
     let generated = generate_outputs(
         output_dir.path().to_path_buf(),
+        identity(),
         filtered.domains,
         &Cancellation::default(),
         &|event| {
@@ -254,7 +278,8 @@ fn generation_progress_counts_every_file_of_every_category() {
 
     let combined = 3 * WORK_GRAIN as u64 + 2;
     let per_format = (3 * WORK_GRAIN as u64) + 2 + 1 + 1 + combined;
-    assert_eq!(generated.files.len(), 15);
+    let manifest = &generated.generation.manifest;
+    assert_eq!(manifest.files.len(), 15);
     assert_eq!(
         generated.categories,
         BTreeMap::from([
@@ -276,7 +301,7 @@ fn generation_progress_counts_every_file_of_every_category() {
         assert_eq!(
             format.gz_size,
             Some(
-                generated
+                manifest
                     .files
                     .iter()
                     .filter(|file| file.format == format.format)
@@ -297,7 +322,7 @@ fn generation_progress_counts_every_file_of_every_category() {
         .windows(2)
         .all(|pair| pair[0].files_completed <= pair[1].files_completed));
     assert_eq!(
-        generated
+        manifest
             .files
             .iter()
             .find(|file| file.name == "all_domains_plain.txt.gz")
@@ -308,7 +333,77 @@ fn generation_progress_counts_every_file_of_every_category() {
 }
 
 #[test]
-fn cancellation_during_generation_stops_within_the_bound_and_publishes_nothing_more() {
+fn generation_writes_a_manifest_whose_hashes_sizes_and_counts_match_the_files() {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let output_dir = tempfile::tempdir().unwrap();
+    let filtered = whitelisted(
+        extracted(vec![
+            body(0, Some("tracking"), hosts_body(2 * WORK_GRAIN + 5)),
+            body(1, Some("nsfw"), b"adult.example\n".to_vec()),
+        ]),
+        "",
+    );
+    let built = identity();
+
+    let generated = generate_outputs(
+        output_dir.path().to_path_buf(),
+        built.clone(),
+        filtered.domains,
+        &Cancellation::default(),
+        &|_| {},
+    )
+    .unwrap();
+
+    let manifest = generated.generation.manifest;
+    let directory = generations_dir(output_dir.path()).join(&manifest.generation_id);
+    assert_eq!(read_manifest(&directory).unwrap(), Some(manifest.clone()));
+    assert_eq!(manifest.job_id, built.job_id);
+    assert_eq!(manifest.attempt, built.attempt);
+    assert_eq!(manifest.inputs_digest, built.inputs_digest);
+    assert_eq!(
+        manifest.job_created_at.timestamp_millis(),
+        built.job_created_at.timestamp_millis()
+    );
+    let mut on_disk: Vec<String> = std::fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != MANIFEST_NAME)
+        .collect();
+    on_disk.sort();
+    let listed: Vec<&str> = manifest
+        .files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect();
+    assert_eq!(on_disk, listed);
+    assert_eq!(listed.len(), 9);
+    for file in &manifest.files {
+        assert_eq!(file.name, format!("{}_{}.txt.gz", file.list, file.format));
+        let stored = std::fs::read(directory.join(&file.name)).unwrap();
+        assert_eq!(file.size_bytes, stored.len() as u64);
+        assert_eq!(file.sha256, format!("{:x}", Sha256::digest(&stored)));
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(stored.as_slice())
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(file.uncompressed_bytes, text.len() as u64);
+        let domains = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with(['#', '!']))
+            .count() as u64;
+        assert_eq!(file.domain_count, domains);
+        let expected = match file.list.as_str() {
+            "nsfw" => 1,
+            _ => 2 * WORK_GRAIN as u64 + 5,
+        };
+        assert_eq!(file.domain_count, expected, "{}", file.name);
+    }
+}
+
+#[test]
+fn cancellation_during_generation_stops_within_the_bound_and_leaves_no_generation() {
     let output_dir = tempfile::tempdir().unwrap();
     let published = output_dir.path().join("all_domains_hosts.txt.gz");
     std::fs::write(&published, b"previous build").unwrap();
@@ -320,6 +415,7 @@ fn cancellation_during_generation_stops_within_the_bound_and_publishes_nothing_m
 
     let outcome = generate_outputs(
         output_dir.path().to_path_buf(),
+        identity(),
         filtered.domains,
         &stop.cancellation,
         &|event| {
@@ -333,11 +429,29 @@ fn cancellation_during_generation_stops_within_the_bound_and_publishes_nothing_m
     assert!(error.downcast_ref::<Cancelled>().is_some());
     stop.assert_stopped_promptly();
     assert_eq!(std::fs::read(&published).unwrap(), b"previous build");
-    let left: Vec<String> = std::fs::read_dir(output_dir.path())
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(left, ["all_domains_hosts.txt.gz"]);
+    assert_eq!(generation_names(output_dir.path()), Vec::<String>::new());
+}
+
+#[test]
+fn unusable_category_name_fails_before_a_generation_directory_exists() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let mut domains = CategoryDomains::default();
+    domains
+        .by_category
+        .entry(Some("all_domains".to_string()))
+        .or_default()
+        .insert("blocked.example".to_string());
+
+    let outcome = generate_outputs(
+        output_dir.path().to_path_buf(),
+        identity(),
+        domains,
+        &Cancellation::default(),
+        &|_| {},
+    );
+
+    assert!(outcome.is_err());
+    assert!(!generations_dir(output_dir.path()).exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

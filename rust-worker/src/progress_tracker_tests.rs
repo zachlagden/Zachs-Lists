@@ -191,14 +191,15 @@ fn stage_changes_write_everything_and_stage_updates_write_their_own_key() {
     tracker.begin_whitelist(100, 3).unwrap();
     let fields = tracker.take_pending_fields().unwrap().unwrap();
     assert_eq!(field_names(&fields), ["progress"]);
-    tracker.whitelist_removed(4);
-    tracker.whitelist_removed(6);
+    tracker.whitelist_checked(40, 4);
+    tracker.whitelist_checked(70, 6);
     let fields = tracker.take_pending_fields().unwrap().unwrap();
     assert_eq!(field_names(&fields), ["progress.whitelist"]);
     let whitelist = fields.get_document("progress.whitelist").unwrap();
     assert!(whitelist.get_bool("processing").unwrap());
     assert_eq!(whitelist.get_i64("domains_before").unwrap(), 100);
     assert_eq!(whitelist.get_i64("domains_after").unwrap(), 90);
+    assert_eq!(whitelist.get_i64("domains_checked").unwrap(), 100);
     assert_eq!(whitelist.get_i64("total_removed").unwrap(), 10);
     assert_eq!(whitelist.get_i64("patterns_total").unwrap(), 3);
 

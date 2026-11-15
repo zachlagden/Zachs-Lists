@@ -311,33 +311,6 @@ impl CacheRepository {
         }
         Ok(deleted)
     }
-
-    pub async fn has_valid_cache(
-        &self,
-        url_hash: &str,
-        url: &str,
-        fresh_secs: u64,
-    ) -> Result<bool> {
-        let Some(entry) = self.get_entry(url_hash).await? else {
-            return Ok(false);
-        };
-        if entry.url.as_deref() != Some(url)
-            || entry.content_hash.is_none()
-            || !(0..=MAX_SOURCE_SIZE_BYTES as i64).contains(&entry.stats.size_bytes)
-            || !entry.is_fresh_at(BsonDateTime::now(), fresh_secs)
-        {
-            return Ok(false);
-        }
-        let Some(gridfs_id) = entry.gridfs_id else {
-            return Ok(false);
-        };
-        let stored_bodies = self
-            .db
-            .collection::<bson::Document>("cache_files.files")
-            .count_documents(doc! { "_id": gridfs_id, "length": entry.stats.size_bytes })
-            .await?;
-        Ok(stored_bodies == 1)
-    }
 }
 
 #[cfg(test)]

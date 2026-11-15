@@ -30,13 +30,22 @@ export default function WhitelistStage({ whitelist }: WhitelistStageProps) {
   }
 
   if (whitelist.processing) {
+    const checkedPercent =
+      whitelist.domains_before > 0
+        ? Math.min((whitelist.domains_checked / whitelist.domains_before) * 100, 100)
+        : 0;
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <div className="w-8 h-8 border-2 border-pihole-accent border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-pihole-text">Applying whitelist patterns...</p>
         <p className="text-sm text-pihole-text-muted mt-2">
-          {whitelist.domains_before.toLocaleString()} domains to check
+          {whitelist.domains_checked.toLocaleString()} of{' '}
+          {whitelist.domains_before.toLocaleString()} domains checked,{' '}
+          {whitelist.total_removed.toLocaleString()} removed
         </p>
+        <div className="w-full max-w-sm mt-4">
+          <ProgressBar percent={checkedPercent} color="green" size="md" showPercent />
+        </div>
       </div>
     );
   }
