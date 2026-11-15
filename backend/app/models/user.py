@@ -11,6 +11,7 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from flask import current_app
 
+from app.allowlist import is_blocklist_catalog_name
 from app.extensions import mongo
 from app.utils.config_revision import ConfigRevisionConflict
 
@@ -266,6 +267,26 @@ class User:
 
         config = self._data.get("config", {})
         return config.get(field)
+
+    @property
+    def publish_allowlist(self) -> bool:
+        """Whether this user's whitelist is published as a Pi-hole allowlist."""
+        return self.config.get("publish_allowlist") is True
+
+    def set_publish_allowlist(self, enabled: bool) -> None:
+        """Store the allowlist publication opt-in. Defaults to off when unset."""
+        mongo.db[self.COLLECTION].update_one(
+            {"_id": self._id},
+            {
+                "$set": {
+                    "config.publish_allowlist": enabled,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        if not isinstance(self._data.get("config"), dict):
+            self._data["config"] = {}
+        self._data["config"]["publish_allowlist"] = enabled
 
     # List methods
     def get_list(self, name: str) -> Optional[Dict[str, Any]]:
@@ -548,7 +569,13 @@ class User:
                     else None
                 ),
             },
-            "lists": self.lists,
+            "lists": [
+                item
+                for item in self.lists
+                if is_blocklist_catalog_name(
+                    item.get("name") if isinstance(item, dict) else None
+                )
+            ],
             "remaining_updates": self.get_remaining_manual_updates(),
             "notifications": self._serialize_notifications(unread_only=True),
             "created_at": self.created_at.isoformat(),

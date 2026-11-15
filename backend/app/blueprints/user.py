@@ -23,6 +23,8 @@ from app.utils.validators import (
 from app.socketio import emit_validation_progress, emit_validation_complete
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.cache import CacheMetadata
+from app.allowlist import is_blocklist_catalog_name
+from app.services.allowlist_publish import sync_user_allowlist
 from app.utils.config_revision import ConfigRevisionConflict
 
 user_bp = Blueprint("user", __name__)
@@ -270,40 +272,59 @@ def get_library(user: User):
 @user_bp.route("/whitelist", methods=["GET"])
 @login_required
 def get_whitelist(user: User):
-    """Get user's whitelist."""
+    """Get user's whitelist and allowlist publication opt-in."""
     whitelist = user.get_config("whitelist.txt")
-    return jsonify({"whitelist": whitelist or ""})
+    return jsonify(
+        {
+            "whitelist": whitelist or "",
+            "publish_allowlist": user.publish_allowlist,
+        }
+    )
 
 
 @user_bp.route("/whitelist", methods=["PUT"])
 @login_required
 def update_whitelist(user: User):
-    """Update whitelist."""
-    data = request.get_json()
-    whitelist = data.get("whitelist", "")
+    """Update whitelist and, optionally, allowlist publication."""
+    data = request.get_json(silent=True) or {}
+    if "whitelist" not in data and "publish_allowlist" not in data:
+        return jsonify({"error": "No whitelist changes"}), 400
 
-    # Validate size
-    max_size = user.limits["max_config_size_mb"] * 1024 * 1024
-    if len(whitelist.encode("utf-8")) > max_size:
-        return (
-            jsonify(
-                {
-                    "error": f"Whitelist file too large. Maximum size: {user.limits['max_config_size_mb']}MB"
-                }
-            ),
-            400,
+    publish_allowlist = data.get("publish_allowlist", user.publish_allowlist)
+    if not isinstance(publish_allowlist, bool):
+        return jsonify({"error": "publish_allowlist must be a boolean"}), 400
+
+    if "whitelist" in data:
+        whitelist = data.get("whitelist", "")
+        if not isinstance(whitelist, str):
+            return jsonify({"error": "Invalid whitelist"}), 400
+
+        max_size = user.limits["max_config_size_mb"] * 1024 * 1024
+        if len(whitelist.encode("utf-8")) > max_size:
+            return (
+                jsonify(
+                    {
+                        "error": f"Whitelist file too large. Maximum size: {user.limits['max_config_size_mb']}MB"
+                    }
+                ),
+                400,
+            )
+
+        errors = validate_whitelist(whitelist)
+        if errors:
+            return jsonify({"error": "Invalid whitelist", "details": errors}), 400
+
+        user.save_config("whitelist.txt", whitelist)
+        current_app.logger.info(f"User {user.username} updated whitelist")
+
+    if publish_allowlist != user.publish_allowlist:
+        user.set_publish_allowlist(publish_allowlist)
+        current_app.logger.info(
+            f"User {user.username} set publish_allowlist={publish_allowlist}"
         )
 
-    # Validate patterns
-    errors = validate_whitelist(whitelist)
-    if errors:
-        return jsonify({"error": "Invalid whitelist", "details": errors}), 400
-
-    # Save whitelist
-    user.save_config("whitelist.txt", whitelist)
-    current_app.logger.info(f"User {user.username} updated whitelist")
-
-    return jsonify({"success": True})
+    sync_user_allowlist(user)
+    return jsonify({"success": True, "publish_allowlist": user.publish_allowlist})
 
 
 @user_bp.route("/lists", methods=["GET"])
@@ -317,7 +338,12 @@ def get_lists(user: User):
 
     return jsonify(
         {
-            "lists": user.lists,
+            "lists": [
+                item
+                for item in user.lists
+                if is_blocklist_catalog_name(item.get("name"))
+            ],
+            "publish_allowlist": user.publish_allowlist,
             "stats": {
                 **user.stats,
                 "last_build_at": (
@@ -487,10 +513,12 @@ def copy_default_template(user: User):
             409,
         )
 
-    # Save configs
+    # Save configs. Publishing stays opt-in for this user; refresh the file
+    # when they already opted in so it matches the copied whitelist.
     user.save_config("blocklists.conf", config_content)
     if whitelist_content:
         user.save_config("whitelist.txt", whitelist_content)
+    sync_user_allowlist(user)
 
     current_app.logger.info(f"User {user.username} copied default template")
 

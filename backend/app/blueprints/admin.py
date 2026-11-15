@@ -12,6 +12,8 @@ from app.models.job import Job
 from app.models.cache import CacheMetadata
 from app.models.analytics import Analytics
 from app.models.system_config import SystemConfig
+from app.services.allowlist_publish import sync_default_allowlist
+from app.utils.validators import validate_whitelist
 from app.models.blocklist_library import BlocklistLibrary
 from app.models.announcement import Announcement
 
@@ -470,6 +472,7 @@ def get_default_config(admin: User):
         {
             "config": config_data["blocklists"],
             "whitelist": config_data["whitelist"],
+            "publish_allowlist": config_data["publish_allowlist"],
         }
     )
 
@@ -478,7 +481,18 @@ def get_default_config(admin: User):
 @admin_required
 def update_default_config(admin: User):
     """Update default lists configuration in MongoDB."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+
+    publish_allowlist = data.get("publish_allowlist")
+    if "publish_allowlist" in data and not isinstance(publish_allowlist, bool):
+        return jsonify({"error": "publish_allowlist must be a boolean"}), 400
+    if "whitelist" in data:
+        whitelist = data.get("whitelist", "")
+        if not isinstance(whitelist, str):
+            return jsonify({"error": "Invalid whitelist"}), 400
+        errors = validate_whitelist(whitelist)
+        if errors:
+            return jsonify({"error": "Invalid whitelist", "details": errors}), 400
 
     if "config" in data:
         SystemConfig.update_default_blocklists(data["config"], admin.username)
@@ -490,7 +504,18 @@ def update_default_config(admin: User):
         SystemConfig.update_default_whitelist(data["whitelist"], admin.username)
         current_app.logger.info(f"Admin {admin.username} updated default whitelist")
 
-    return jsonify({"success": True})
+    if isinstance(publish_allowlist, bool):
+        SystemConfig.set_publish_allowlist(publish_allowlist, admin.username)
+        current_app.logger.info(
+            f"Admin {admin.username} set default publish_allowlist={publish_allowlist}"
+        )
+
+    if "whitelist" in data or "publish_allowlist" in data:
+        sync_default_allowlist()
+
+    return jsonify(
+        {"success": True, "publish_allowlist": SystemConfig.is_allowlist_published()}
+    )
 
 
 @admin_bp.route("/featured", methods=["GET"])

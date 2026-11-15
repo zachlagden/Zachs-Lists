@@ -81,6 +81,22 @@ https://lists.zachlagden.uk/u/yourname/all_domains.txt?format=plain
 
 That's it. Your blocklist will auto-update weekly.
 
+### Publish a Pi-hole v6 allowlist
+
+On the Config page, opt in to publish the whitelist itself (not only the domains it removes from blocklists). Like your blocklists, that URL is readable by anyone who can reach this instance, and it contains your whitelist entries.
+
+```bash
+# Pi-hole v6 allow-type adlist
+https://lists.zachlagden.uk/u/yourname/allowlist.txt
+```
+
+`?format=plain` is optional and lists exact domains only. It does not honor `@@` or `*.` subdomain semantics. There is no hosts-format allowlist. The default config uses the same opt-in at `/lists/allowlist.txt`.
+
+- `example.com` becomes `example.com`
+- `@@example.com` (apex and subdomains) becomes `@@||example.com^`
+- `*.example.com` (subdomains only) becomes `@@||example.com^`, which also allows the apex
+- `/regex/` is not emitted. Add it locally with `pihole --allow-regex`
+
 ---
 
 ## How It Works
@@ -96,7 +112,7 @@ That's it. Your blocklist will auto-update weekly.
 
 **2. Download** — The Rust worker fetches all sources in parallel (10 concurrent downloads). Smart caching means unchanged sources aren't re-downloaded.
 
-**3. Whitelist** — Your whitelist patterns filter out false positives. Support for exact matches, `*.wildcard.com`, `@@subdomain` matching, and `/regex/` patterns.
+**3. Whitelist** — Your whitelist patterns filter out false positives. Support for exact matches, `*.wildcard.com`, `@@example.com` (apex and subdomains), and `/regex/` patterns. You can opt in to publish that whitelist as a Pi-hole v6 allowlist.
 
 **4. Generate** — Deduplicated domains are output in three formats: hosts file (Pi-hole native), plain text, and Adblock syntax.
 
@@ -147,15 +163,15 @@ That's it. Your blocklist will auto-update weekly.
 
 Works with any DNS blocker or browser extension that accepts blocklists:
 
-| Platform          | Formats               |
-| ----------------- | --------------------- |
-| **Pi-hole**       | hosts, plain          |
-| **AdGuard Home**  | hosts, plain, adblock |
-| **uBlock Origin** | adblock               |
-| **AdBlock Plus**  | adblock               |
-| **Blocky**        | plain                 |
-| **NextDNS**       | plain                 |
-| **ControlD**      | plain                 |
+| Platform          | Formats                    |
+| ----------------- | -------------------------- |
+| **Pi-hole**       | hosts, plain; v6 allowlist |
+| **AdGuard Home**  | hosts, plain, adblock      |
+| **uBlock Origin** | adblock                    |
+| **AdBlock Plus**  | adblock                    |
+| **Blocky**        | plain                      |
+| **NextDNS**       | plain                      |
+| **ControlD**      | plain                      |
 
 If it accepts a URL to a blocklist, it'll work with Zach's Lists.
 
@@ -211,6 +227,10 @@ _Discover community-curated blocklists_
 Want to run your own instance? Full deployment instructions (Docker + manual) are available in the documentation:
 
 **[Self-Hosting Guide →](https://lists.docs.zachlagden.uk/zachs-lists/self-hosting)**
+
+Copy `.env.example` to `.env`. `ROOT_USERNAME` is the root admin's GitHub login. Production also requires `ROOT_GITHUB_ID`, that account's numeric GitHub user id. Find it at `https://api.github.com/users/<username>`. See `.env.example`.
+
+Generated list headers name this instance. The hostname comes from `FRONTEND_URL`, and falls back to `lists.zachlagden.uk` when that URL has no hostname, so the public instance's files stay the same. The container entrypoint passes the resolved host to the worker as `BLOCKLIST_GENERATOR_HOST`. Leave that variable unset unless you need to override it. The worker stores that hostname with the last config hash and skips a manual rebuild only when the hash, the hostname, and the cached sources are all unchanged, so changing the hostname regenerates list files. See `.env.example`.
 
 ---
 

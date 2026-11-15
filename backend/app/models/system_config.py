@@ -37,15 +37,43 @@ class SystemConfig:
             return {
                 "blocklists": doc.get("blocklists", ""),
                 "whitelist": doc.get("whitelist", ""),
+                "publish_allowlist": doc.get("publish_allowlist") is True,
                 "updated_at": doc.get("updated_at"),
                 "updated_by": doc.get("updated_by"),
             }
         return {
             "blocklists": "",
             "whitelist": "",
+            "publish_allowlist": False,
             "updated_at": None,
             "updated_by": None,
         }
+
+    @classmethod
+    def is_allowlist_published(cls) -> bool:
+        """Whether the default whitelist is published as a Pi-hole allowlist."""
+        doc = mongo.db[cls.COLLECTION].find_one(
+            {"_id": cls.DOC_ID}, {"publish_allowlist": 1}
+        )
+        if not doc:
+            return False
+        return doc.get("publish_allowlist") is True
+
+    @classmethod
+    def set_publish_allowlist(cls, enabled: bool, updated_by: str) -> None:
+        """Set the default allowlist publication opt-in."""
+        mongo.db[cls.COLLECTION].update_one(
+            {"_id": cls.DOC_ID},
+            {
+                "$set": {
+                    "publish_allowlist": enabled,
+                    "updated_at": datetime.utcnow(),
+                    "updated_by": updated_by,
+                },
+                "$setOnInsert": {"blocklists": "", "whitelist": ""},
+            },
+            upsert=True,
+        )
 
     @classmethod
     def update_default_blocklists(cls, content: str, updated_by: str) -> None:

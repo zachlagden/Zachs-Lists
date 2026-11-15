@@ -33,6 +33,11 @@ pub struct UserStats {
     pub config_hash: Option<String>,
     /// Normalized config fingerprint for cross-user matching
     pub config_fingerprint: Option<String>,
+    /// List-file hostname used when `config_hash` was stored.
+    ///
+    /// Absent on builds recorded before the hostname was part of the stamp.
+    #[serde(default)]
+    pub generator_host: Option<String>,
 }
 
 /// Result of finding a user with matching config fingerprint
@@ -42,6 +47,9 @@ pub struct MatchedUser {
     pub lists: Vec<ListMetadata>,
     pub total_domains: u64,
     pub total_output_size: u64,
+    /// Hostname stamped on the files being copied. `None` when that build
+    /// did not record one.
+    pub generator_host: Option<String>,
 }
 
 /// Repository for updating user documents after job completion
@@ -67,9 +75,13 @@ impl UserRepository {
     /// - stats.total_output_size_bytes
     /// - stats.last_build_at
     /// - stats.config_hash (for change detection)
+    /// - stats.generator_host (hostname stamped on that build's list files)
     /// - stats.config_fingerprint (for cross-user matching)
     ///
-    /// For username "__default__", updates system_config instead.
+    /// For username "__default__", updates system_config instead. Default
+    /// jobs do not store a config hash, so they always rebuild. The hostname
+    /// is still recorded there so copy-on-match can see which host those
+    /// files use.
     pub async fn update_after_build(
         &self,
         username: &str,
@@ -78,6 +90,7 @@ impl UserRepository {
         total_output_size: u64,
         config_hash: String,
         config_fingerprint: String,
+        generator_host: &str,
     ) -> Result<()> {
         let now = BsonDateTime::from_millis(Utc::now().timestamp_millis());
 
@@ -91,6 +104,7 @@ impl UserRepository {
                     doc! {
                         "$set": {
                             "config_fingerprint": &config_fingerprint,
+                            "generator_host": generator_host,
                             "total_domains": total_domains as i64,
                             "total_output_size_bytes": total_output_size as i64,
                             "last_build_at": now,
@@ -126,6 +140,7 @@ impl UserRepository {
                         "stats.total_output_size_bytes": total_output_size as i64,
                         "stats.last_build_at": now,
                         "stats.config_hash": config_hash,
+                        "stats.generator_host": generator_host,
                         "stats.config_fingerprint": config_fingerprint,
                         "updated_at": now,
                     }
@@ -148,17 +163,28 @@ impl UserRepository {
         Ok(user.and_then(|u| u.lists).unwrap_or_default())
     }
 
-    /// Get stored config hash for change detection
-    pub async fn get_config_hash(&self, username: &str) -> Result<Option<String>> {
+    /// Load the config hash and list-file hostname from the last build.
+    ///
+    /// `__default__` does not store a config hash, so the stamp is empty and
+    /// default jobs always rebuild.
+    pub async fn get_build_stamp(
+        &self,
+        username: &str,
+    ) -> Result<crate::build_stamp::StoredBuildStamp> {
         if username == "__default__" {
-            // For default lists, check system_config collection
-            return Ok(None); // Always rebuild default lists
+            return Ok(crate::build_stamp::StoredBuildStamp::default());
         }
 
         let filter = doc! { "username": username };
         let user = self.collection.find_one(filter).await?;
 
-        Ok(user.and_then(|u| u.stats).and_then(|s| s.config_hash))
+        Ok(user
+            .and_then(|user| user.stats)
+            .map(|stats| crate::build_stamp::StoredBuildStamp {
+                config_hash: stats.config_hash,
+                generator_host: stats.generator_host,
+            })
+            .unwrap_or_default())
     }
 
     /// Find a user with matching config fingerprint who has output files
@@ -191,6 +217,10 @@ impl UserRepository {
                             total_output_size: default_build
                                 .get_i64("total_output_size_bytes")
                                 .unwrap_or(0) as u64,
+                            generator_host: default_build
+                                .get_str("generator_host")
+                                .ok()
+                                .map(str::to_string),
                         }));
                     }
                 }
@@ -220,15 +250,42 @@ impl UserRepository {
                 last_build_at: None,
                 config_hash: None,
                 config_fingerprint: None,
+                generator_host: None,
             });
             return Ok(Some(MatchedUser {
                 username: u.username,
                 lists: u.lists.unwrap_or_default(),
                 total_domains: stats.total_domains.unwrap_or(0),
                 total_output_size: stats.total_output_size_bytes.unwrap_or(0),
+                generator_host: stats.generator_host,
             }));
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UserStats;
+
+    #[test]
+    fn legacy_stats_omit_the_list_hostname() {
+        let document = bson::doc! {
+            "total_domains": 4_i64,
+            "total_output_size_bytes": 128_i64,
+            "last_build_at": bson::DateTime::from_millis(0),
+            "config_hash": "hash-aaa",
+            "config_fingerprint": "fingerprint-aaa",
+        };
+        let stats: UserStats = bson::from_document(document).expect("legacy stats");
+        assert_eq!(stats.config_hash.as_deref(), Some("hash-aaa"));
+        assert_eq!(stats.generator_host, None);
+
+        let stamp = crate::build_stamp::StoredBuildStamp {
+            config_hash: stats.config_hash,
+            generator_host: stats.generator_host,
+        };
+        assert!(!stamp.matches("hash-aaa", "lists.example.test"));
     }
 }

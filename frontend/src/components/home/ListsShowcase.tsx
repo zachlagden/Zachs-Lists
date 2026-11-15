@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Copy, Check, ExternalLink, ArrowRight, Star, Clock, Database } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { getDefaultListUrl } from '../../config/site';
+import { ALLOWLIST_NAME, getDefaultListUrl } from '../../config/site';
 
 interface DefaultList {
   name: string;
@@ -200,7 +200,7 @@ export default function ListsShowcase({ lists, loading }: ListsShowcaseProps) {
     (l) => l.name === 'all_domains' || l.name === 'all_domains_hosts',
   );
   const otherLists = lists.filter(
-    (l) => l.name !== 'all_domains' && l.name !== 'all_domains_hosts',
+    (l) => l.name !== 'all_domains' && l.name !== 'all_domains_hosts' && l.name !== ALLOWLIST_NAME,
   );
 
   return (

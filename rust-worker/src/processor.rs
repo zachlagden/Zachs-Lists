@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::build_stamp::{generator_host_matches, should_skip_unchanged_build};
 use crate::config::Config;
 use crate::db::job::{Job, JobRepository, JobType};
 use crate::db::progress::{
@@ -20,6 +21,9 @@ use crate::db::user_config::UserConfigRepository;
 use crate::downloader::{DownloadResult, Downloader, Source};
 use crate::extractor::DomainExtractor;
 use crate::generator::OutputGenerator;
+use crate::allowlist_files::{
+    is_allowlist_artifact, is_blocklist_artifact, is_blocklist_list_name,
+};
 use crate::whitelist::WhitelistManager;
 
 /// Domains organized by category for per-category output generation
@@ -152,17 +156,24 @@ impl JobProcessor {
         // Ensure target directory exists
         std::fs::create_dir_all(&target_dir)?;
 
-        // Clean up any existing files in target
+        // Clean up generated blocklists in the target. Published allowlists are
+        // written by the API from the whitelist opt-in and are not part of the
+        // blocklist fingerprint, so copy-on-match must leave them in place and
+        // must not copy another user's allowlist over them.
         if let Ok(entries) = std::fs::read_dir(&target_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                let filename_str = entry.file_name().to_string_lossy().to_string();
+                if is_allowlist_artifact(&filename_str) {
+                    continue;
+                }
                 if path.extension().map_or(false, |ext| ext == "gz") {
                     let _ = std::fs::remove_file(&path);
                 }
             }
         }
 
-        // Copy all .gz files from source to target
+        // Copy blocklist .gz files from source to target
         let mut output_files = Vec::new();
         let entries = std::fs::read_dir(&source_dir)?;
 
@@ -170,7 +181,7 @@ impl JobProcessor {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if filename_str.ends_with(".txt.gz") {
+            if is_blocklist_artifact(&filename_str) {
                 let source_path = entry.path();
                 let target_path = target_dir.join(&filename);
 
@@ -260,37 +271,62 @@ impl JobProcessor {
 
         info!("Found {} sources to process", sources.len());
 
-        // Check for "no changes" optimization
-        // Skip if: config hash unchanged AND all sources would be cache hits
+        // Manual and admin jobs skip when the last build already wrote these
+        // list files: same config hash, same hostname, and every source cached.
+        // Scheduled jobs and force rebuilds always run. The hostname is
+        // `config.generator_host`, the same value the generator stamps.
         if job.job_type != JobType::Scheduled && !job.force_rebuild {
-            if let Ok(Some(stored_hash)) = self.user_repo.get_config_hash(&job.username).await {
-                if stored_hash == current_config_hash {
-                    // Config unchanged, check if all sources are cached
-                    let all_cached = self.downloader.check_all_cached(&sources).await;
-                    if all_cached {
-                        info!(
-                            "Skipping job {} - no changes detected (config hash matches, all sources cached)",
-                            job.job_id
-                        );
-                        self.job_repo
-                            .skip(
-                                &job.id,
-                                "No changes detected since last build. All sources are cached and configuration unchanged.".to_string(),
-                            )
-                            .await?;
-                        return Ok(());
-                    }
-                }
+            let stored_stamp = self
+                .user_repo
+                .get_build_stamp(&job.username)
+                .await
+                .unwrap_or_default();
+            // Ask the cache only after the stamp matches. The skip decision
+            // itself is `should_skip_unchanged_build`.
+            let all_cached = if stored_stamp.matches(&current_config_hash, &self.config.generator_host)
+            {
+                self.downloader.check_all_cached(&sources).await
+            } else {
+                false
+            };
+            if should_skip_unchanged_build(
+                job.job_type == JobType::Scheduled,
+                job.force_rebuild,
+                all_cached,
+                &stored_stamp,
+                &current_config_hash,
+                &self.config.generator_host,
+            ) {
+                info!(
+                    "Skipping job {} - no changes detected (config hash and list hostname match, all sources cached)",
+                    job.job_id
+                );
+                self.job_repo
+                    .skip(
+                        &job.id,
+                        "No changes detected since last build. All sources are cached, and the configuration and list hostname are unchanged.".to_string(),
+                    )
+                    .await?;
+                return Ok(());
             }
         }
 
-        // Check for matching config fingerprint in other users (copy-on-match optimization)
+        // Copy files only when they were stamped with this process's hostname.
         if job.job_type != JobType::Scheduled && !job.force_rebuild {
         if let Ok(Some(matched)) = self
             .user_repo
             .find_user_by_fingerprint(&config_fingerprint, &job.username)
             .await
         {
+            if !generator_host_matches(
+                matched.generator_host.as_deref(),
+                &self.config.generator_host,
+            ) {
+                info!(
+                    "Config matches '{}' but the list hostname differs - rebuilding",
+                    matched.username
+                );
+            } else {
             info!(
                 "Config matches user '{}' - copying output files instead of rebuilding",
                 matched.username
@@ -391,6 +427,9 @@ impl JobProcessor {
                     // If we have lists from matched user, use those
                     if !matched.lists.is_empty() {
                         for list in &matched.lists {
+                            if !is_blocklist_list_name(&list.name) {
+                                continue;
+                            }
                             all_lists.push(ListMetadata {
                                 name: list.name.clone(),
                                 is_public: true,
@@ -403,18 +442,22 @@ impl JobProcessor {
                         // Build list metadata from output files
                         let mut seen_names: HashSet<String> = HashSet::new();
                         for file in &output_files {
+                            if is_allowlist_artifact(&file.name) {
+                                continue;
+                            }
                             let base_name = file.name.trim_end_matches(".txt.gz");
                             let name = base_name.rsplitn(2, '_').last().unwrap_or(base_name);
-                            if !seen_names.contains(name) {
-                                seen_names.insert(name.to_string());
-                                all_lists.push(ListMetadata {
-                                    name: name.to_string(),
-                                    is_public: true,
-                                    formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
-                                    domain_count: file.domain_count,
-                                    last_updated: now,
-                                });
+                            if !is_blocklist_list_name(name) || seen_names.contains(name) {
+                                continue;
                             }
+                            seen_names.insert(name.to_string());
+                            all_lists.push(ListMetadata {
+                                name: name.to_string(),
+                                is_public: true,
+                                formats: vec!["hosts".to_string(), "plain".to_string(), "adblock".to_string()],
+                                domain_count: file.domain_count,
+                                last_updated: now,
+                            });
                         }
                     }
 
@@ -428,6 +471,7 @@ impl JobProcessor {
                             total_output_size,
                             current_config_hash.clone(),
                             config_fingerprint.clone(),
+                            &self.config.generator_host,
                         )
                         .await
                     {
@@ -455,6 +499,7 @@ impl JobProcessor {
                         matched.username, e
                     );
                 }
+            }
             }
         }
         }
@@ -584,14 +629,18 @@ impl JobProcessor {
         // or all_domains_{format}.txt.gz for the combined list
         let mut category_domain_counts: HashMap<String, u64> = HashMap::new();
         for file in &output_files {
-            // Skip all_domains files - handled separately below
-            if file.name.starts_with("all_domains") {
+            // all_domains is recorded below. Allowlist files are not blocklists
+            // and must not become a category or part of the combined list.
+            if file.name.starts_with("all_domains") || is_allowlist_artifact(&file.name) {
                 continue;
             }
 
             // Extract category name: e.g., "advertising_hosts.txt.gz" -> "advertising"
             // or "uncategorized_hosts.txt.gz" -> "uncategorized"
             if let Some(category) = file.name.split('_').next() {
+                if !is_blocklist_list_name(category) {
+                    continue;
+                }
                 // Only count hosts format files to get domain count (avoid triple-counting)
                 if file.format == "hosts" {
                     category_domain_counts.insert(category.to_string(), file.domain_count);
@@ -601,6 +650,9 @@ impl JobProcessor {
 
         // Build ListMetadata for each category
         for (category, domain_count) in &category_domain_counts {
+            if !is_blocklist_list_name(category) {
+                continue;
+            }
             let list = ListMetadata {
                 name: category.clone(),
                 is_public: true,  // All lists are always public
@@ -636,6 +688,7 @@ impl JobProcessor {
             total_output_size,
             current_config_hash,
             config_fingerprint,
+            &self.config.generator_host,
         ).await {
             warn!("Failed to update user document for {}: {}", job.username, e);
             // Don't fail the job for this - it's not critical
@@ -917,7 +970,7 @@ impl JobProcessor {
 
         // Create output generator
         let output_dir = self.config.output_dir(username);
-        let generator = OutputGenerator::new(output_dir);
+        let generator = OutputGenerator::with_host(output_dir, &self.config.generator_host);
 
         // Clean up old files
         generator.cleanup_old_files()?;
@@ -937,6 +990,7 @@ impl JobProcessor {
 
         // Create combined "all domains" list (deduplicated across categories).
         // Note: nsfw category is excluded from the combined list.
+        // Published allowlists are not category domains and are not merged here.
         // The per-category files are already written above, so consume the
         // sorted sets and move their domains rather than cloning the lot.
         let all_domains: HashSet<String> = sorted_by_category
