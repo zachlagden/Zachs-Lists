@@ -1,21 +1,23 @@
-import { useState } from 'react';
-import { userApi } from '../api/client';
-import LoadingSpinner from './LoadingSpinner';
-import type { IntendedUse } from '../types';
-import { INTENDED_USE_LABELS } from '../types';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useId, useRef, useState, type FormEvent } from 'react';
+import { accountKeys, submitLimitRequest } from '../api/account';
+import { describeApiError } from '../api/errors';
+import { formatInteger } from '../lib/format';
+import { INTENDED_USE_LABELS, type IntendedUse } from '../types';
+import { Alert } from './ui/Alert';
+import { Button } from './ui/Button';
+import { Dialog } from './ui/Dialog';
+import { Field, Select, Textarea } from './ui/Field';
 
-interface LimitRequestModalProps {
+const MIN_REASON_LENGTH = 10;
+const MAX_REASON_LENGTH = 1000;
+
+export interface LimitRequestModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentLimit: number;
   availableTiers: number[];
-  onSuccess: () => void;
-}
-
-function formatDomains(count: number): string {
-  if (count >= 1_000_000) return (count / 1_000_000).toFixed(0) + 'M';
-  if (count >= 1_000) return (count / 1_000).toFixed(0) + 'K';
-  return count.toLocaleString();
+  onSuccess?: () => void;
 }
 
 export default function LimitRequestModal({
@@ -25,147 +27,107 @@ export default function LimitRequestModal({
   availableTiers,
   onSuccess,
 }: LimitRequestModalProps) {
-  const [selectedTier, setSelectedTier] = useState<number>(availableTiers[0] || 0);
+  const formId = useId();
+  const client = useQueryClient();
+  const [requestedTier, setRequestedTier] = useState<number>(availableTiers[0] ?? 0);
   const [reason, setReason] = useState('');
   const [intendedUse, setIntendedUse] = useState<IntendedUse>('personal');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [reasonError, setReasonError] = useState<string | null>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const trimmedLength = reason.trim().length;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      await userApi.submitLimitRequest(selectedTier, reason, intendedUse);
-      onSuccess();
+  const submission = useMutation({
+    mutationFn: submitLimitRequest,
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: accountKeys.limitRequests() });
+      onSuccess?.();
       onClose();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Failed to submit request');
-    } finally {
-      setLoading(false);
+    },
+  });
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (trimmedLength < MIN_REASON_LENGTH) {
+      setReasonError(`Write at least ${MIN_REASON_LENGTH} characters about why you need it.`);
+      reasonRef.current?.focus();
+      return;
     }
+    setReasonError(null);
+    submission.mutate({ requestedTier, reason: reason.trim(), intendedUse });
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-pihole-card border border-pihole-border rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-pihole-text">Request Higher Limit</h2>
-            <button onClick={onClose} className="text-pihole-text-muted hover:text-pihole-text">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-
-          <p className="text-pihole-text-muted text-sm mb-6">
-            Your current limit is{' '}
-            <strong className="text-pihole-text">{formatDomains(currentLimit)}</strong> domains.
-            Submit a request to increase your limit.
-          </p>
-
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg mb-4">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Tier Selection */}
-            <div>
-              <label className="block text-sm font-medium text-pihole-text mb-2">
-                Requested Limit
-              </label>
-              <select
-                value={selectedTier}
-                onChange={(e) => setSelectedTier(Number(e.target.value))}
-                className="input w-full"
-                required
-              >
-                {availableTiers.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {formatDomains(tier)} domains
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Intended Use */}
-            <div>
-              <label className="block text-sm font-medium text-pihole-text mb-2">
-                Intended Use
-              </label>
-              <select
-                value={intendedUse}
-                onChange={(e) => setIntendedUse(e.target.value as IntendedUse)}
-                className="input w-full"
-                required
-              >
-                {Object.entries(INTENDED_USE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Reason */}
-            <div>
-              <label className="block text-sm font-medium text-pihole-text mb-2">
-                Reason for Request
-              </label>
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="input w-full h-24 resize-none"
-                placeholder="Please explain why you need a higher domain limit..."
-                required
-                minLength={10}
-                maxLength={1000}
-              />
-              <p className="text-xs text-pihole-text-muted mt-1">
-                {reason.length}/1000 characters (minimum 10)
-              </p>
-            </div>
-
-            {/* Submit */}
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-secondary flex-1"
-                disabled={loading}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary flex-1"
-                disabled={loading || reason.length < 10}
-              >
-                {loading ? (
-                  <>
-                    <LoadingSpinner size="sm" />
-                    <span className="ml-2">Submitting...</span>
-                  </>
-                ) : (
-                  'Submit Request'
-                )}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      title="Request a higher limit"
+      description={`Your limit is ${formatInteger(currentLimit)} domains. An admin reviews each request.`}
+      dismissible={!submission.isPending}
+      closeOnBackdropClick={reason.trim() === ''}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={submission.isPending}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={submission.isPending}>
+            Send request
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={handleSubmit} className="grid gap-4">
+        {submission.isError ? (
+          <Alert tone="fail">
+            {describeApiError(submission.error, 'The request could not be sent. Try again.')}
+          </Alert>
+        ) : null}
+        <Field label="Requested limit">
+          <Select
+            name="requested_tier"
+            autoComplete="off"
+            value={requestedTier}
+            onChange={(event) => setRequestedTier(Number(event.target.value))}
+            required
+          >
+            {availableTiers.map((tier) => (
+              <option key={tier} value={tier}>
+                {formatInteger(tier)} domains
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Who the list is for">
+          <Select
+            name="intended_use"
+            autoComplete="off"
+            value={intendedUse}
+            onChange={(event) => setIntendedUse(event.target.value as IntendedUse)}
+            required
+          >
+            {Object.entries(INTENDED_USE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label="Why you need it"
+          error={reasonError}
+          hint={`${formatInteger(trimmedLength)} of ${formatInteger(MAX_REASON_LENGTH)} characters, at least ${MIN_REASON_LENGTH}`}
+        >
+          <Textarea
+            ref={reasonRef}
+            name="reason"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            required
+            maxLength={MAX_REASON_LENGTH}
+            autoComplete="off"
+            placeholder="For example: I combine several large lists for a home network…"
+          />
+        </Field>
+      </form>
+    </Dialog>
   );
 }

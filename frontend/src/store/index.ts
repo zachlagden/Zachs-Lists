@@ -3,14 +3,15 @@ import type { User, Job, UserList, UserStats, UserLimits } from '../types';
 import type { ConnectionState } from '../realtime/backoff';
 import { isStale, mergeFetchedList, mergeJob } from '../realtime/jobMerge';
 
-// Auth store
 interface AuthState {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  sessionEnded: boolean;
 
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
+  markSessionEnded: () => void;
   logout: () => void;
 }
 
@@ -18,13 +19,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
   isAuthenticated: false,
+  sessionEnded: false,
 
   setUser: (user) =>
-    set({
+    set((state) => ({
       user,
       isAuthenticated: !!user,
       isLoading: false,
-    }),
+      sessionEnded: user ? false : state.sessionEnded,
+    })),
+
+  markSessionEnded: () => set({ sessionEnded: true }),
 
   setLoading: (loading) => set({ isLoading: loading }),
 
@@ -35,7 +40,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     }),
 }));
 
-// User data store
 interface UserDataState {
   config: string;
   whitelist: string;
@@ -78,7 +82,6 @@ export const useUserDataStore = create<UserDataState>((set) => ({
     }),
 }));
 
-// Jobs store
 interface JobsState {
   jobs: Job[];
   hasUnreadFailures: boolean;

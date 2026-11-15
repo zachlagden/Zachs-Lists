@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Copy, Check, ExternalLink, Star } from 'lucide-react';
 import { api, listsApi } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
-import PublicNav from '../components/PublicNav';
 import { Footer } from '../components/home';
 import { getDefaultListUrl, getUserListUrl } from '../config/site';
 
@@ -70,10 +69,7 @@ export default function BrowsePage() {
       {/* Background */}
       <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
 
-      {/* Navigation */}
-      <PublicNav />
-
-      <main className="container mx-auto px-6 py-8 flex-1 relative z-10">
+      <div className="container mx-auto px-6 py-8 flex-1 relative z-10">
         {/* Header */}
         <div className="mb-8">
           <h1 className="font-display text-display-sm text-chrome-light mb-2">BROWSE LISTS</h1>
@@ -271,7 +267,7 @@ export default function BrowsePage() {
             </div>
           </div>
         </div>
-      </main>
+      </div>
 
       {/* Footer */}
       <Footer />

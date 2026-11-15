@@ -551,7 +551,8 @@ export default function AdminPage() {
         domain_count: 0,
       });
       setMessage({ type: 'success', text: 'Library entry added' });
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string } } };
       console.error('Failed to add library entry:', error);
       const errorMsg = error.response?.data?.error || 'Failed to add library entry';
       setMessage({ type: 'error', text: errorMsg });
@@ -574,7 +575,8 @@ export default function AdminPage() {
       setLibraryEntries(libraryEntries.map((e) => (e.id === editingEntry.id ? result.entry : e)));
       setEditingEntry(null);
       setMessage({ type: 'success', text: 'Library entry updated' });
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string } } };
       console.error('Failed to update library entry:', error);
       const errorMsg = error.response?.data?.error || 'Failed to update library entry';
       setMessage({ type: 'error', text: errorMsg });
@@ -608,7 +610,8 @@ export default function AdminPage() {
       setAnnouncements([result.announcement, ...announcements]);
       setNewAnnouncement({ title: '', message: '', type: 'info', expires_at: '' });
       setMessage({ type: 'success', text: 'Announcement created' });
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string } } };
       const errorMsg = error.response?.data?.error || 'Failed to create announcement';
       setMessage({ type: 'error', text: errorMsg });
     }
@@ -631,7 +634,8 @@ export default function AdminPage() {
       setEditingAnnouncement(null);
       setEditExpiresAt('');
       setMessage({ type: 'success', text: 'Announcement updated' });
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string } } };
       const errorMsg = error.response?.data?.error || 'Failed to update announcement';
       setMessage({ type: 'error', text: errorMsg });
     }
@@ -645,7 +649,7 @@ export default function AdminPage() {
         type: 'success',
         text: `Announcement ${isActive ? 'activated' : 'deactivated'}`,
       });
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Failed to update announcement' });
     }
   };
@@ -657,7 +661,7 @@ export default function AdminPage() {
       await adminApi.deleteAnnouncement(id);
       setAnnouncements(announcements.filter((a) => a.id !== id));
       setMessage({ type: 'success', text: 'Announcement deleted' });
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Failed to delete announcement' });
     }
   };

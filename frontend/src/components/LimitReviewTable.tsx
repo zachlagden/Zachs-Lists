@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, JSX } from 'react';
 import type { AdminLimitReview } from '../types';
 import { limitReviewMethodLabel } from '../utils/limitReview';
 

@@ -151,7 +151,8 @@ export default function ConfigPage() {
       setHasChanges(false);
       setValidationResult(null);
       setValidationToken(null);
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string; details?: string[] } } };
       console.error('Failed to save:', error);
       const errorMsg = error.response?.data?.error || 'Failed to save configuration';
       const details = error.response?.data?.details;
@@ -216,7 +217,8 @@ export default function ConfigPage() {
       const result = await userApi.triggerBuild();
       setRemainingUpdates(result.remaining_updates);
       setMessage({ type: 'success', text: 'Build triggered! Check the Jobs page for progress.' });
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as { response?: { data?: { error?: string; details?: string[] } } };
       console.error('Failed to trigger build:', error);
       const errorMsg = error.response?.data?.error || 'Failed to trigger build';
       setMessage({ type: 'error', text: errorMsg });
