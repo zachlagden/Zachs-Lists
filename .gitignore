@@ -4,6 +4,9 @@
 # Archives
 .archive/
 
+# Local backups (contain .env secrets and database dumps)
+backups/
+
 # Data files (large, user-specific)
 data/cache/*
 data/default/output/*
