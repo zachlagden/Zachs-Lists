@@ -1,10 +1,27 @@
 #!/bin/bash
 set -euo pipefail
+# Owner-only backup directory and archive (.env and a full database dump).
+umask 077
 
 # =============================================================================
 # Zach's Lists Backup Script
-# Creates a complete backup of .env, ./data, and MongoDB as a single tar.gz
+# Creates a complete backup of .env, ./data, and MongoDB as a single tar.gz.
+# Set BACKUP_PASSPHRASE_FILE to a file containing a passphrase to encrypt the
+# archive (writes .tar.gz.gpg and removes the plaintext archive).
 # =============================================================================
+
+# Fail before writing secrets when encryption was requested but cannot run.
+if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "❌ BACKUP_PASSPHRASE_FILE is set, but gpg was not found on PATH."
+    echo "   Install GnuPG, or unset BACKUP_PASSPHRASE_FILE for an unencrypted archive."
+    exit 1
+  fi
+  if [ ! -f "${BACKUP_PASSPHRASE_FILE}" ] || [ ! -r "${BACKUP_PASSPHRASE_FILE}" ]; then
+    echo "❌ BACKUP_PASSPHRASE_FILE is not a readable file: ${BACKUP_PASSPHRASE_FILE}"
+    exit 1
+  fi
+fi
 
 BACKUP_ROOT="./backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -62,11 +79,30 @@ tar -czf "${ARCHIVE_FILE}" -C "${BACKUP_ROOT}" "${BACKUP_NAME}"
 # Clean up the intermediate folder
 rm -rf "${BACKUP_DIR}"
 
+chmod 600 "${ARCHIVE_FILE}"
+
+if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
+  echo "→ Encrypting archive"
+  if ! gpg --batch --yes --pinentry-mode loopback --passphrase-file "${BACKUP_PASSPHRASE_FILE}" -c "${ARCHIVE_FILE}"; then
+    echo "❌ Encryption failed. Plaintext archive kept at ${ARCHIVE_FILE}"
+    exit 1
+  fi
+  rm -f "${ARCHIVE_FILE}"
+  ARCHIVE_FILE="${ARCHIVE_FILE}.gpg"
+  chmod 600 "${ARCHIVE_FILE}"
+fi
+
 echo ""
 echo "✅ Backup complete!"
 echo "   Archive: ${ARCHIVE_FILE}"
 echo ""
 ls -lh "${ARCHIVE_FILE}"
 echo ""
-echo "Transfer this single file to the new machine, then run:"
-echo "  ./restore-zachs-lists.sh ${ARCHIVE_FILE}"
+if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
+  echo "Decrypt and extract with:"
+  echo "  gpg -d ${ARCHIVE_FILE} | tar xz"
+  echo "Then pass the extracted directory to ./restore-zachs-lists.sh"
+else
+  echo "Transfer this single file to the new machine, then run:"
+  echo "  ./restore-zachs-lists.sh ${ARCHIVE_FILE}"
+fi

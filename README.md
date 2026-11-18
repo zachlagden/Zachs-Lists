@@ -234,6 +234,26 @@ Generated list headers name this instance. The hostname comes from `FRONTEND_URL
 
 ---
 
+## Backups
+
+`backup-zachs-lists.sh` writes one archive under `./backups/`. That archive contains `.env` and a full MongoDB dump of the `blocklist` database, plus `./data` when that directory is present. `.env` holds application secrets, including `SECRET_KEY` and the GitHub OAuth client secret, and the dump is a full copy of the database. Treat the archive as sensitive. `./backups/` is gitignored, and the script creates the backup directory and archive owner-only (`umask 077`, archive mode `600`).
+
+Leave `BACKUP_PASSPHRASE_FILE` unset for an unencrypted `.tar.gz` with those permissions. To encrypt, set it to a file that contains the passphrase. The script writes `zachs-lists_<timestamp>.tar.gz.gpg` and deletes the plaintext archive. It exits with an error if `gpg` is missing or that file is not readable.
+
+```bash
+BACKUP_PASSPHRASE_FILE=/path/to/backup-passphrase ./backup-zachs-lists.sh
+```
+
+Decrypt and extract an encrypted archive with:
+
+```bash
+gpg -d file.tar.gz.gpg | tar xz
+```
+
+Pass the extracted directory, or an unencrypted `.tar.gz`, to `./restore-zachs-lists.sh`.
+
+---
+
 ## Support
 
 If Zach's Lists helps keep your network clean, consider supporting development:
